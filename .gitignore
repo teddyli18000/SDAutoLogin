@@ -1,0 +1,9 @@
+# build output
+/SDAutoLogin
+/SDAutoLogin.exe
+/dist/
+/dist-*
+
+# runtime data
+/config.json
+/logs/
