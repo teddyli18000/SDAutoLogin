@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -70,6 +71,8 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		return cfg, err
 	}
+	// Several Windows editors prepend a UTF-8 BOM, which json rejects.
+	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
 	// Unmarshal onto the defaults so fields added later keep sane values.
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
