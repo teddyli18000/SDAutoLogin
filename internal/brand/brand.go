@@ -24,25 +24,33 @@ var (
 // Icon renders the mark: a rounded badge holding a padlock, tinted by session
 // state. It is drawn from primitives at 4x and then box filtered down, which
 // gives clean edges without pulling in a font or a rasteriser dependency.
+//
+// The proportions are chosen for the 16 px tray icon: the shackle stays two
+// pixels thick and the body keeps half a pixel of margin on each side, so the
+// shape still reads as a padlock at the smallest size.
 func Icon(size int, accent color.RGBA) *image.RGBA {
 	const ss = 4
 	n := size * ss
 	canvas := image.NewRGBA(image.Rect(0, 0, n, n))
 
-	fillRoundRect(canvas, 0, 0, n-1, n-1, int(float64(n)*0.22), accent)
-	fillRoundRect(canvas, 0, 0, n-1, int(float64(n)*0.5), int(float64(n)*0.22), lighten(accent, 0.10))
+	fillRoundRect(canvas, 0, 0, n-1, n-1, px(float64(n)*0.24), accent)
+	fillRoundRect(canvas, 0, 0, n-1, px(float64(n)*0.5), px(float64(n)*0.24), lighten(accent, 0.10))
 
 	white := color.RGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
-	// Shackle: the upper half of a ring.
-	fillArc(canvas, n/2, int(float64(n)*0.45), int(float64(n)*0.20), int(float64(n)*0.12), 180, 360, white)
+	// Shackle: the upper half of a ring, ending where the body starts.
+	fillArc(canvas, n/2, px(float64(n)*0.46), px(float64(n)*0.24), px(float64(n)*0.12), 180, 360, white)
 	// Body.
-	fillRoundRect(canvas, int(float64(n)*0.29), int(float64(n)*0.47),
-		int(float64(n)*0.71), int(float64(n)*0.79), int(float64(n)*0.07), white)
+	fillRoundRect(canvas, px(float64(n)*0.28), px(float64(n)*0.46),
+		px(float64(n)*0.72), px(float64(n)*0.82), px(float64(n)*0.08), white)
 	// Keyhole punched back through in the accent color.
-	fillCircle(canvas, n/2, int(float64(n)*0.62), int(float64(n)*0.055), accent)
+	fillCircle(canvas, n/2, px(float64(n)*0.63), px(float64(n)*0.065), accent)
 
 	return downscale(canvas, size)
 }
+
+// px rounds a coordinate, so the shape is not skewed to one side by truncation
+// towards zero for positive and negative values.
+func px(v float64) int { return int(math.Round(v)) }
 
 // PNG returns the mark encoded as PNG, which is what the Linux and macOS tray
 // backends want.
@@ -144,8 +152,8 @@ func fillArc(img *image.RGBA, cx, cy, rOuter, rInner int, fromDeg, toDeg float64
 	for deg := fromDeg; deg <= toDeg; deg += 0.5 {
 		rad := deg * math.Pi / 180
 		for r := rInner; r <= rOuter; r++ {
-			x := cx + int(math.Cos(rad)*float64(r))
-			y := cy + int(math.Sin(rad)*float64(r))
+			x := cx + px(math.Cos(rad)*float64(r))
+			y := cy + px(math.Sin(rad)*float64(r))
 			img.SetRGBA(x, y, c)
 		}
 	}
