@@ -110,6 +110,7 @@ func (c *Client) QueryStatus() Status {
 		st.ClientIP = firstMatch(reV46, page)
 	}
 	st.ClientIPv6 = firstMatch(reV6, page)
+	Log.Debug("portal page parsed: clientIp=%q ipv6=%q", st.ClientIP, st.ClientIPv6)
 
 	query := c.cfg.EportalURL + "?c=Portal&a=online_list" +
 		"&user_account=drcom&user_password=123" +
@@ -120,6 +121,7 @@ func (c *Client) QueryStatus() Status {
 	_, body, err := c.get(c.plain, query)
 	if err != nil {
 		st.Message = "online_list failed: " + err.Error()
+		Log.Warn("online_list request failed for client ip %q: %v", st.ClientIP, err)
 		return st
 	}
 
@@ -134,10 +136,13 @@ func (c *Client) QueryStatus() Status {
 	st.Account = firstMatch(reUserAccount, body)
 	st.MAC = firstMatch(reOnlineMAC, body)
 	st.OnlineSince = firstMatch(reOnlineTime, body)
+	Log.Debug("online_list parsed: result=%q online=%v account=%q mac=%q since=%q ipv6=%q",
+		result, st.Online, st.Account, st.MAC, st.OnlineSince, st.ClientIPv6)
 	if st.Online {
 		st.Message = "online"
 	} else {
 		st.Message = "not logged in"
+		Log.Debug("online_list raw body: %s", truncate(body))
 	}
 	return st
 }
@@ -167,9 +172,13 @@ func (c *Client) Login(st Status) LoginResult {
 	q.Set("jsVersion", c.cfg.JsVersion)
 	q.Set("v", strconv.Itoa(500+rand.Intn(9500)))
 
+	Log.Debug("login params: login_method=1 user_account=%q wlan_user_ip=%q wlan_user_ipv6=%q wlan_user_mac=%q jsVersion=%q",
+		c.cfg.Account(), st.ClientIP, st.ClientIPv6, mac, c.cfg.JsVersion)
+
 	code, body, err := c.get(c.plain, c.cfg.EportalURL+"?"+q.Encode())
 	if err != nil {
 		result.Message = "request failed: " + err.Error()
+		Log.Warn("login request failed: %v", err)
 		return result
 	}
 	result.Raw = body
@@ -187,6 +196,8 @@ func (c *Client) Login(st Status) LoginResult {
 			result.Message = fmt.Sprintf("result=%q, HTTP %d", res, code)
 		}
 	}
+	Log.Debug("login parsed: result=%q ret_code=%q success=%v message=%q body=%s",
+		res, result.RetCode, result.Success, result.Message, truncate(body))
 	return result
 }
 
@@ -202,31 +213,53 @@ func (c *Client) ProbeInternet() bool {
 			return true
 		}
 	}
+	Log.Debug("internet probe: no probe host answered without interception")
 	return false
 }
 
 func (c *Client) probeOnce(u string) bool {
 	code, body, err := c.get(c.plain, u)
 	if err != nil {
+		Log.Debug("internet probe %s: unreachable (%v)", u, err)
 		return false
 	}
-	if code == http.StatusNoContent {
-		return true
-	}
-	if code != http.StatusOK {
-		return false
-	}
-	lower := strings.ToLower(u)
+
+	ok := false
+	reason := ""
 	switch {
-	case strings.Contains(lower, "generate_204"):
-		return false // a 200 on a 204 endpoint means something answered for it
-	case strings.Contains(lower, "connecttest.txt"):
-		return strings.Contains(body, "Connect Test")
-	case strings.Contains(lower, "baidu.com"):
-		return strings.Contains(strings.ToLower(body), "baidu")
+	case code == http.StatusNoContent:
+		ok, reason = true, "expected status"
+	case code != http.StatusOK:
+		reason = fmt.Sprintf("unexpected status %d", code)
 	default:
-		return !looksLikePortal(body)
+		lower := strings.ToLower(u)
+		switch {
+		case strings.Contains(lower, "generate_204"):
+			reason = "expected 204 but got 200, intercepted"
+		case strings.Contains(lower, "connecttest.txt"):
+			ok = strings.Contains(body, "Connect Test")
+			reason = markerReason(ok)
+		case strings.Contains(lower, "baidu.com"):
+			ok = strings.Contains(strings.ToLower(body), "baidu")
+			reason = markerReason(ok)
+		default:
+			ok = !looksLikePortal(body)
+			if ok {
+				reason = "no portal markers"
+			} else {
+				reason = "portal markers present"
+			}
+		}
 	}
+	Log.Debug("internet probe %s: http %d (%s) -> reachable=%v", u, code, reason, ok)
+	return ok
+}
+
+func markerReason(ok bool) string {
+	if ok {
+		return "marker found"
+	}
+	return "marker missing, intercepted"
 }
 
 func looksLikePortal(body string) bool {
@@ -237,22 +270,42 @@ func looksLikePortal(body string) bool {
 func (c *Client) get(client *http.Client, rawURL string) (int, string, error) {
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
+		Log.Debug("http get %s: bad request: %v", c.safeURL(rawURL), err)
 		return 0, "", err
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
 
+	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
+		Log.Debug("http get %s failed after %d ms: %v", c.safeURL(rawURL), elapsedMS(start), err)
 		return 0, "", err
 	}
 	defer resp.Body.Close()
+
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
+		Log.Debug("http get %s: http %d but reading body failed: %v", c.safeURL(rawURL), resp.StatusCode, err)
 		return resp.StatusCode, "", err
 	}
+	Log.Debug("http get %s -> http %d, %d bytes in %d ms",
+		c.safeURL(rawURL), resp.StatusCode, len(data), elapsedMS(start))
 	return resp.StatusCode, string(data), nil
+}
+
+// safeURL removes the password from a request URL before it is logged.
+func (c *Client) safeURL(rawURL string) string {
+	if c.cfg.Password == "" {
+		return rawURL
+	}
+	out := strings.ReplaceAll(rawURL, url.QueryEscape(c.cfg.Password), "***")
+	return strings.ReplaceAll(out, c.cfg.Password, "***")
+}
+
+func elapsedMS(start time.Time) int64 {
+	return time.Since(start).Milliseconds()
 }
 
 func firstMatch(re *regexp.Regexp, s string) string {

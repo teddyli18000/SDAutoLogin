@@ -54,6 +54,11 @@ type Service struct {
 	running   bool
 	stopCh    chan struct{}
 	triggerCh chan struct{}
+
+	checks       int64
+	attempts     int64
+	failStreak   int64
+	lastOnlineAt time.Time
 }
 
 func NewService(cfg *Config) *Service {
@@ -91,7 +96,7 @@ func (s *Service) Start() {
 	s.mu.Unlock()
 
 	go s.loop(stop, interval)
-	Log.Info("service started, polling every %ds", s.cfg.CheckIntervalSeconds)
+	Log.Info("service started: %s", s.cfg.Summary())
 }
 
 func (s *Service) Stop() {
@@ -103,6 +108,14 @@ func (s *Service) Stop() {
 	s.running = false
 	close(s.stopCh)
 	s.mu.Unlock()
+	checks, attempts := s.stats()
+	Log.Debug("service stopped (checks=%d, login attempts=%d)", checks, attempts)
+}
+
+func (s *Service) stats() (checks, attempts int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.checks, s.attempts
 }
 
 // Restart applies a new configuration without recreating the Service.
@@ -135,6 +148,7 @@ func (s *Service) loop(stop <-chan struct{}, interval time.Duration) {
 			s.tick()
 			timer.Reset(interval)
 		case <-s.triggerCh:
+			Log.Debug("check requested out of schedule")
 			s.tick()
 			timer.Reset(interval)
 		}
@@ -142,8 +156,21 @@ func (s *Service) loop(stop <-chan struct{}, interval time.Duration) {
 }
 
 func (s *Service) tick() {
+	start := time.Now()
 	cfg := s.cfg
+
+	s.mu.Lock()
+	s.checks++
+	checks := s.checks
+	prev := s.snap
+	lastOnline := s.lastOnlineAt
+	s.mu.Unlock()
+
+	Log.Debug("check #%d: querying portal, previous state %s", checks, prev.State)
+
 	st := s.client.QueryStatus()
+	Log.Debug("check #%d: reachable=%v online=%v clientIp=%q detail=%q",
+		checks, st.Reachable, st.Online, st.ClientIP, st.Message)
 
 	snap := Snapshot{ClientIP: st.ClientIP, Account: st.Account, OnlineSince: st.OnlineSince}
 	s.mu.Lock()
@@ -155,7 +182,11 @@ func (s *Service) tick() {
 		snap.State = StateError
 		snap.Message = st.Message
 		snap.LastError = st.Message
-		s.logChange(snap, "portal unreachable: %s", st.Message)
+		if prev.State != StateError || prev.Message != st.Message {
+			Log.Warn("portal unreachable: %s", st.Message)
+		} else {
+			Log.Debug("portal still unreachable: %s", st.Message)
+		}
 
 	case st.Online:
 		if cfg.CheckInternet {
@@ -168,33 +199,70 @@ func (s *Service) tick() {
 		if snap.InternetChecked && !snap.InternetOK {
 			snap.Message = "portal online, Internet unreachable"
 		}
-		s.logChange(snap, "session is up (account %s, client ip %s)", st.Account, st.ClientIP)
+
+		if prev.State != StateOnline {
+			if !lastOnline.IsZero() {
+				Log.Info("session is back online after %s offline (account %s, client ip %s)",
+					shortDuration(time.Since(lastOnline)), st.Account, st.ClientIP)
+			} else {
+				Log.Info("session is online (account %s, client ip %s)", st.Account, st.ClientIP)
+			}
+		}
+		if snap.InternetChecked && !snap.InternetOK {
+			Log.Warn("portal reports online but no probe host answered without interception")
+		}
+
+		s.mu.Lock()
+		s.lastOnlineAt = time.Now()
+		s.failStreak = 0
+		s.mu.Unlock()
 
 	case !cfg.AutoLogin:
 		snap.State = StateOffline
 		snap.Message = "auto login is disabled"
+		if prev.State != StateOffline {
+			Log.Warn("session is down but auto login is disabled, staying offline")
+		}
 
 	case !cfg.Configured():
 		snap.State = StateError
 		snap.Message = "no account configured, open the settings window"
 		snap.LastError = snap.Message
-		s.logChange(snap, "%s", snap.Message)
+		if prev.State != StateError {
+			Log.Warn("%s", snap.Message)
+		}
 
 	default:
 		snap.State = StateLoggingIn
 		snap.Message = "disconnected, signing in..."
 		s.publish(snap)
-		if st.ClientIP == "" {
-			Log.Warn("no client ip parsed from the portal page, login may fail")
-		}
-		Log.Info("session is down, submitting login (client ip %q)", st.ClientIP)
 
+		if st.ClientIP == "" {
+			Log.Warn("no client ip parsed from the portal page, the login request will send an empty wlan_user_ip")
+		}
+
+		s.mu.Lock()
+		s.attempts++
+		attempt := s.attempts
+		s.mu.Unlock()
+		Log.Info("session is down, reconnect attempt #%d for account %q (client ip %q)",
+			attempt, cfg.Username, st.ClientIP)
+
+		attemptStart := time.Now()
 		res := s.client.Login(st)
 		if !res.Success {
+			s.mu.Lock()
+			s.failStreak++
+			streak := s.failStreak
+			s.mu.Unlock()
+
 			snap.State = StateError
 			snap.LastError = res.Message
 			snap.Message = "login failed: " + res.Message
-			Log.Warn("login rejected: %s (ret_code=%s, raw %s)", res.Message, res.RetCode, truncate(res.Raw))
+			Log.Warn("reconnect attempt #%d rejected after %d ms: %s (ret_code=%s, raw %s)",
+				attempt, elapsedMS(attemptStart), res.Message, res.RetCode, truncate(res.Raw))
+			Log.Warn("reconnect attempt #%d failed, %d consecutive failure(s), next try in %ds",
+				attempt, streak, cfg.CheckIntervalSeconds)
 			break
 		}
 
@@ -205,33 +273,35 @@ func (s *Service) tick() {
 			last := time.Now().Format("01-02 15:04:05")
 			s.mu.Lock()
 			s.lastLogin = last
+			s.failStreak = 0
+			s.lastOnlineAt = time.Now()
 			s.mu.Unlock()
+
 			snap.State = StateOnline
 			snap.LastLoginAt = last
 			snap.Account = verify.Account
 			snap.ClientIP = verify.ClientIP
 			snap.OnlineSince = verify.OnlineSince
 			snap.Message = "signed in at " + last
-			Log.Info("login succeeded, account %s, client ip %s", cfg.Username, verify.ClientIP)
+			Log.Info("reconnect attempt #%d succeeded in %d ms, account %s, client ip %s, session since %s",
+				attempt, elapsedMS(attemptStart), verify.Account, verify.ClientIP, verify.OnlineSince)
 		} else {
+			s.mu.Lock()
+			s.failStreak++
+			streak := s.failStreak
+			s.mu.Unlock()
+
 			snap.State = StateError
 			snap.Message = "portal accepted the login but still reports offline"
 			snap.LastError = snap.Message
-			Log.Warn("%s (raw %s)", snap.Message, truncate(res.Raw))
+			Log.Warn("reconnect attempt #%d: %s (raw %s)", attempt, snap.Message, truncate(res.Raw))
+			Log.Warn("reconnect attempt #%d failed, %d consecutive failure(s), next try in %ds",
+				attempt, streak, cfg.CheckIntervalSeconds)
 		}
 	}
 
+	Log.Debug("check #%d finished in %d ms: %s", checks, elapsedMS(start), describeSnapshot(snap))
 	s.publish(snap)
-}
-
-// logChange logs only when the rendered status actually changes.
-func (s *Service) logChange(next Snapshot, format string, args ...any) {
-	s.mu.Lock()
-	changed := s.snap.State != next.State || s.snap.Message != next.Message
-	s.mu.Unlock()
-	if changed {
-		Log.Info(format, args...)
-	}
 }
 
 func (s *Service) publish(snap Snapshot) {
@@ -240,6 +310,7 @@ func (s *Service) publish(snap Snapshot) {
 	f := s.listener
 	s.mu.Unlock()
 	if f != nil {
+		Log.Debug("publishing status to ui: %s", describeSnapshot(snap))
 		f(snap)
 	}
 }
@@ -256,4 +327,11 @@ func describeSnapshot(s Snapshot) string {
 		out += " (account " + s.Account + ")"
 	}
 	return out
+}
+
+func shortDuration(d time.Duration) string {
+	if d < time.Second {
+		return d.Round(time.Millisecond).String()
+	}
+	return d.Round(time.Second).String()
 }
