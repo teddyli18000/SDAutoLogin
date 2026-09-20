@@ -17,6 +17,7 @@ var webText = map[string]text{
 	"field.isp":              {"服务类型", "Service"},
 	"field.rememberPassword": {"记住密码（写入配置文件）", "Remember password (write to config file)"},
 	"field.autoLogin":        {"掉线后自动登录", "Sign in automatically after a disconnection"},
+	"field.autostart":        {"开机自动运行", "Run at startup"},
 	"field.interval":         {"检测间隔（秒）", "Check interval (seconds)"},
 	"field.interval.hint":    {"最小 5 秒", "Minimum 5 seconds"},
 	"field.checkInternet":    {"同时探测外网可达性（仅用于状态提示）", "Also probe Internet reachability (status only)"},

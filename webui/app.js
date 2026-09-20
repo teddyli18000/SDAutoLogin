@@ -46,6 +46,11 @@ function applyLang(code) {
   document.documentElement.lang = code === "zh" ? "zh-CN" : "en";
 }
 
+/* The autostart entry lives outside config.json, it is toggled on its own. */
+function applyAutostart(on) {
+  if (typeof on === "boolean") $("f-autostart").checked = on;
+}
+
 function applyConfig(cfg) {
   state.config = cfg;
   $("f-username").value = cfg.username || "";
@@ -191,7 +196,9 @@ async function submit() {
 
 async function refreshStatus() {
   const res = await api("/api/status");
-  if (res.ok && res.data.status) renderStatus(res.data.status);
+  if (!res.ok) return;
+  if (res.data.status) renderStatus(res.data.status);
+  applyAutostart(res.data.autostart);
 }
 
 /* ---------- language ---------- */
@@ -201,6 +208,8 @@ async function switchLanguage(lang) {
   if (!res.ok) return;
   state.i18n = res.data.i18n || state.i18n;
   applyI18n();
+  applyLang(res.data.lang);
+  applyAutostart(res.data.autostart);
   renderProbes(readProbes());
   renderStatus(res.data.status || state.status);
   $("f-language").value = lang;
@@ -260,6 +269,20 @@ function wire() {
   $("f-isp").addEventListener("change", () => {
     $("f-suffix").value = $("f-isp").value;
     markDirty();
+  });
+  $("f-autostart").addEventListener("change", async () => {
+    const box = $("f-autostart");
+    const res = await api("/api/action", {
+      method: "POST",
+      body: JSON.stringify({ action: "autostart", value: box.checked }),
+    });
+    if (!res.ok || !res.data.ok) {
+      box.checked = !box.checked;
+      toast(t("dlg.autostartFailed"), true);
+      return;
+    }
+    applyAutostart(res.data.autostart);
+    toast(t("msg.saved"));
   });
   $("f-language").addEventListener("change", () => switchLanguage($("f-language").value));
 
@@ -362,6 +385,7 @@ async function boot() {
 
   applyI18n();
   applyLang(data.lang);
+  applyAutostart(data.autostart);
   fillSelects(data.operators || []);
   applyConfig(data.config || {});
   renderStatus(data.status || {});

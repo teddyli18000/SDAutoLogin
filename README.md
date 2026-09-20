@@ -130,7 +130,7 @@ Tray menu:
 | Open log | open `logs/app.log` |
 | Exit | quit the program; the campus session stays online |
 
-A double click on the icon opens the settings page.
+A click on the icon opens the settings page, a right click opens the menu.
 
 ## Settings
 
@@ -148,6 +148,7 @@ the page is opened.
   China Telecom (`@ctc`).
 - Interface language.
 - Sign in automatically after a disconnection.
+- Run at startup.
 - Check interval, and the reachability probes.
 
 **Advanced**

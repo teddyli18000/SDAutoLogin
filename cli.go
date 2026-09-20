@@ -79,6 +79,10 @@ func cmdRun(appDir string) int {
 	if !ok {
 		return 1
 	}
+	if !acquireSingleInstance(false) {
+		fmt.Fprintln(os.Stderr, "another instance is already running")
+		return 1
+	}
 	runHeadless(newAppState(cfg), appDir)
 	return 0
 }

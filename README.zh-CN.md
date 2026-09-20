@@ -104,6 +104,9 @@ go-winres make --in winres/winres.json --out rsrc --arch amd64
 双击 `SDAutoLogin.exe`（或运行 `./SDAutoLogin`）。程序会在通知区域放置图标并
 在后台持续检测。首次运行还没有保存账号时，设置页会自动打开。
 
+程序已在运行时再次启动，不会多出一个托盘图标，而是让正在运行的实例打开
+设置页。
+
 托盘菜单：
 
 | 菜单项 | 作用 |
@@ -118,7 +121,7 @@ go-winres make --in winres/winres.json --out rsrc --arch amd64
 | 打开日志 | 打开 `logs/app.log` |
 | 退出 | 退出程序，校园网会话保持在线 |
 
-双击图标同样会打开设置页。
+单击图标即可打开设置页，右键打开菜单。
 
 ## 设置
 
@@ -134,6 +137,7 @@ go-winres make --in winres/winres.json --out rsrc --arch amd64
   中国电信（`@ctc`）。
 - 界面语言。
 - 掉线后自动登录。
+- 开机自动运行。
 - 检测间隔，以及连通性检测地址。
 
 **高级**

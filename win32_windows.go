@@ -45,9 +45,8 @@ const (
 	wmDestroy = 0x0002
 	wmApp     = 0x8000
 
-	wmRButtonUp     = 0x0205
-	wmLButtonUp     = 0x0202
-	wmLButtonDblClk = 0x0203
+	wmRButtonUp = 0x0205
+	wmLButtonUp = 0x0202
 
 	nimAdd    = 0x00000000
 	nimModify = 0x00000001

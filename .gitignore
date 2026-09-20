@@ -1,6 +1,8 @@
 # build output
 /SDAutoLogin
 /SDAutoLogin.exe
+# temp file left behind when a build could not replace a running executable
+/SDAutoLogin.exe~
 /dist/
 /dist-*
 

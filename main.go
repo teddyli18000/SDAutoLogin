@@ -42,6 +42,11 @@ func main() {
 // runGUI is the default mode: a tray icon plus the settings page served on
 // loopback for the browser.
 func runGUI(appDir string) {
+	// Starting the program a second time is a request to see the settings, not
+	// a reason to add another tray icon.
+	if !acquireSingleInstance(true) {
+		return
+	}
 	cfg, err := LoadConfig(filepath.Join(appDir, "config.json"))
 	if err != nil {
 		Log.Error("loading config: %v", err)

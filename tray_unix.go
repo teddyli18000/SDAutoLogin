@@ -53,6 +53,12 @@ func trayReady(state *appState, appDir string) {
 
 	systray.SetIcon(t.iconOffline)
 	systray.SetTooltip(L("app.name") + " - " + localizedState(StateUnknown))
+	// A primary tap opens the settings page; the secondary tap keeps showing
+	// the menu below, so no handler is registered for it.
+	systray.SetOnTapped(func() {
+		Log.Debug("tray: tapped, opening the settings page")
+		t.openSettings()
+	})
 
 	t.mStatus = systray.AddMenuItem(Lf("tray.status", localizedState(StateUnknown)), "")
 	t.mStatus.Disable()

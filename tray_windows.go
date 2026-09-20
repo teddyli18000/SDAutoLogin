@@ -42,6 +42,9 @@ type trayApp struct {
 
 	hwnd syscall.Handle
 	nid  notifyIconData
+	// showSettingsMsg is the id a second copy posts to ask for the settings
+	// page, zero when the system could not allocate one.
+	showSettingsMsg uint32
 
 	mu   sync.Mutex
 	snap Snapshot
@@ -60,6 +63,12 @@ var trayInstance *trayApp
 var trayWndProc = syscall.NewCallback(trayProc)
 
 func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
+	if trayInstance != nil && trayInstance.showSettingsMsg != 0 &&
+		uint32(umsg) == trayInstance.showSettingsMsg {
+		Log.Debug("tray: a second copy asked for the settings page")
+		trayInstance.openSettings()
+		return 0
+	}
 	switch uint32(umsg) {
 	case wmTrayIcon:
 		if trayInstance == nil {
@@ -67,10 +76,14 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 		}
 		mouse := uint32(lparam) & 0xffff
 		switch mouse {
-		case wmLButtonDblClk:
-			Log.Debug("tray: double click, opening the settings page")
+		case wmLButtonUp:
+			// A primary click opens the settings page, the way the instant
+			// messengers this program mimics behave. The double click that
+			// follows a click is deliberately ignored, otherwise the page
+			// would be opened twice.
+			Log.Debug("tray: click, opening the settings page")
 			trayInstance.openSettings()
-		case wmRButtonUp, wmLButtonUp:
+		case wmRButtonUp:
 			Log.Debug("tray: menu requested (mouse message %#x)", mouse)
 			trayInstance.showMenu()
 		}
@@ -100,6 +113,7 @@ func runUI(state *appState, appDir string) {
 
 	app := &trayApp{state: state, appDir: appDir}
 	trayInstance = app
+	app.showSettingsMsg = showSettingsMessage()
 	app.settings = newSettingsServer(state, appDir, func() {
 		// DestroyWindow has to run on the thread that created the window.
 		procPostMessageW.Call(uintptr(app.hwnd), wmQuitRequested, 0, 0)
