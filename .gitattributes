@@ -1,0 +1,5 @@
+# keep line endings stable across the platforms this tool builds on
+* text=auto
+*.go text
+*.sh text eol=lf
+*.cmd text eol=crlf
