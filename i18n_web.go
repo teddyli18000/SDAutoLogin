@@ -70,6 +70,8 @@ var webText = map[string]text{
 		"The settings page listens on loopback only and is guarded by a one time token, so other programs cannot read or change the configuration."},
 
 	"msg.saved":        {"已保存，并立即重新检测了一次。", "Saved, and one check was run immediately."},
+	"msg.autostart":    {"开机自启设置已更新。", "The startup setting has been updated."},
+	"msg.stale":        {"设置页已失效，请从托盘重新打开。", "This page is no longer connected, open it again from the tray."},
 	"msg.saving":       {"正在保存…", "Saving..."},
 	"msg.testRunning":  {"正在测试…", "Testing..."},
 	"msg.testAccepted": {"登录成功。", "Login accepted."},

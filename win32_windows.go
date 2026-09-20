@@ -193,6 +193,11 @@ func setAutostartWindows(on bool) bool {
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Run(); err != nil {
+		// reg fails when the value is already absent, or was already there, so
+		// the resulting state is what decides, not the exit code.
+		if autostartEnabledWindows() == on {
+			return true
+		}
 		Log.Warn("updating autostart entry: %v", err)
 		return false
 	}

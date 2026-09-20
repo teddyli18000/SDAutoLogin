@@ -53,14 +53,8 @@ var uiText = map[string]text{
 	"balloon.reconnectFailed": {"自动登录失败，请检查设置", "Auto login failed, check the settings"},
 
 	"dlg.title":            {"校园网自动登录", "Campus Auto Login"},
-	"dlg.saveFailed":       {"配置保存失败，请查看日志。", "Could not save the config, see the log."},
 	"dlg.autostartFailed":  {"设置开机自启失败，请查看日志。", "Could not update the startup entry, see the log."},
-	"dlg.emptyAccount":     {"请填写账号。", "Account must not be empty."},
-	"dlg.invalidInterval":  {"检测间隔至少为 5 秒。", "The check interval must be at least 5 seconds."},
-	"dlg.invalidURL":       {"地址必须以 http:// 或 https:// 开头。", "The address must start with http:// or https://."},
-	"dlg.browserFailed":    {"无法打开浏览器，设置页地址已写入日志。", "Could not open a browser, the settings URL is in the log."},
 	"dlg.settingsFailOpen": {"无法启动设置服务，请查看日志。", "Could not start the settings service, see the log."},
-	"dlg.startedTitle":     {"设置页已在浏览器中打开", "Settings opened in your browser"},
 	"dlg.startedBody":      {"如果浏览器没有自动打开，请访问：{0}", "If the browser did not open, visit: {0}"},
 }
 

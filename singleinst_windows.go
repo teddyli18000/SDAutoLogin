@@ -25,11 +25,19 @@ var (
 // keeps the name taken. The system releases it when the process ends.
 var instanceMutex syscall.Handle
 
+// instanceTaken remembers that this process already owns the name. Asking a
+// second time would report the name as taken by somebody else, because the
+// mutex we hold counts as an existing object.
+var instanceTaken bool
+
 // acquireSingleInstance reports whether this is the only running copy. When
 // another copy owns the name and requestSettings is set, that copy is asked to
 // open its settings page, so starting the program twice brings up the existing
 // window instead of adding a second tray icon.
 func acquireSingleInstance(requestSettings bool) bool {
+	if instanceTaken {
+		return true
+	}
 	h, _, lastErr := procCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(u16ptr(instanceMutexName))))
 	if h == 0 {
 		Log.Warn("could not create the instance mutex: %v", lastErr)
@@ -43,6 +51,7 @@ func acquireSingleInstance(requestSettings bool) bool {
 		return false
 	}
 	instanceMutex = syscall.Handle(h)
+	instanceTaken = true
 	return true
 }
 
@@ -59,6 +68,8 @@ func askForSettingsPage() {
 	if id == 0 {
 		return
 	}
-	Log.Debug("asking the running instance to open its settings page")
+	// Logged at INFO because it explains a page that the user did not open from
+	// the tray: the program was started a second time.
+	Log.Info("asking the running instance to open its settings page")
 	procPostMessageW.Call(hwndBroadcast, uintptr(id), 0, 0)
 }

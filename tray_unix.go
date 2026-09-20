@@ -4,6 +4,7 @@ package main
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"fyne.io/systray"
 
@@ -15,8 +16,20 @@ import (
 // D-Bus StatusNotifierItem backend, on macOS it needs cgo and therefore the
 // Xcode command line tools at build time.
 func runUI(state *appState, appDir string) {
+	// The tap handler is registered before the event loop starts on purpose.
+	// The Linux backend reads it while it exports the status notifier item, so a
+	// handler set from the ready callback can arrive too late: the item would be
+	// marked as menu only and the desktop would never report a click.
+	var tray atomic.Pointer[unixTray]
+	systray.SetOnTapped(func() {
+		if t := tray.Load(); t != nil {
+			Log.Debug("tray: tapped, opening the settings page")
+			t.openSettings()
+		}
+	})
+
 	systray.Run(func() {
-		trayReady(state, appDir)
+		tray.Store(trayReady(state, appDir))
 	}, func() {
 		state.Stop()
 		Log.Info("tray stopped")
@@ -38,7 +51,7 @@ type unixTray struct {
 	lastState   State
 }
 
-func trayReady(state *appState, appDir string) {
+func trayReady(state *appState, appDir string) *unixTray {
 	t := &unixTray{
 		state:       state,
 		lastState:   StateUnknown,
@@ -53,12 +66,6 @@ func trayReady(state *appState, appDir string) {
 
 	systray.SetIcon(t.iconOffline)
 	systray.SetTooltip(L("app.name") + " - " + localizedState(StateUnknown))
-	// A primary tap opens the settings page; the secondary tap keeps showing
-	// the menu below, so no handler is registered for it.
-	systray.SetOnTapped(func() {
-		Log.Debug("tray: tapped, opening the settings page")
-		t.openSettings()
-	})
 
 	t.mStatus = systray.AddMenuItem(Lf("tray.status", localizedState(StateUnknown)), "")
 	t.mStatus.Disable()
@@ -146,6 +153,7 @@ func trayReady(state *appState, appDir string) {
 		t.openSettings()
 	}
 	Log.Debug("tray ready, menu items registered")
+	return t
 }
 
 func (t *unixTray) openSettings() {

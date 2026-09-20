@@ -364,10 +364,16 @@ func (a *trayApp) handleCommand(cmd uint32) {
 // openSettings serves the settings page and hands it to the default browser.
 func (a *trayApp) openSettings() {
 	url, err := a.settings.OpenURL()
-	if err != nil {
-		Log.Error("opening the settings page: %v", err)
-		messageBox(a.hwnd, L("dlg.title"), Lf("dlg.startedBody", url), mbIconWarning)
+	if err == nil {
+		return
 	}
+	Log.Error("opening the settings page: %v", err)
+	if url == "" {
+		// No address to fall back to, the service itself did not start.
+		messageBox(a.hwnd, L("dlg.title"), L("dlg.settingsFailOpen"), mbIconError)
+		return
+	}
+	messageBox(a.hwnd, L("dlg.title"), Lf("dlg.startedBody", url), mbIconWarning)
 }
 
 func (a *trayApp) reloadConfig() {

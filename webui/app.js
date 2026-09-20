@@ -25,7 +25,14 @@ async function api(path, options) {
     opts.headers["Content-Type"] = "application/json";
   }
   const sep = path.includes("?") ? "&" : "?";
-  const resp = await fetch(path + sep + "token=" + encodeURIComponent(token), opts);
+  let resp;
+  try {
+    resp = await fetch(path + sep + "token=" + encodeURIComponent(token), opts);
+  } catch (err) {
+    /* The program quit, or the idle service shut itself down. Callers must
+       still get an answer instead of an exception. */
+    return { ok: false, status: 0, data: {}, unreachable: true };
+  }
   const data = await resp.json().catch(() => ({}));
   return { ok: resp.ok, status: resp.status, data };
 }
@@ -179,6 +186,10 @@ async function submit() {
   btn.disabled = true;
   const res = await api("/api/config", { method: "POST", body: JSON.stringify(collect()) });
   btn.disabled = false;
+  if (res.unreachable) {
+    toast(t("msg.stale"), true);
+    return false;
+  }
   if (!res.ok || !res.data.ok) {
     renderErrors(res.data.errors || { _: "err.saveFailed" });
     return false;
@@ -194,9 +205,18 @@ async function submit() {
   return true;
 }
 
+let warnedStale = false;
+
 async function refreshStatus() {
   const res = await api("/api/status");
-  if (!res.ok) return;
+  if (res.unreachable) {
+    if (!warnedStale) {
+      warnedStale = true;
+      toast(t("msg.stale"), true);
+    }
+    return;
+  }
+  warnedStale = false;
   if (res.data.status) renderStatus(res.data.status);
   applyAutostart(res.data.autostart);
 }
@@ -282,7 +302,7 @@ function wire() {
       return;
     }
     applyAutostart(res.data.autostart);
-    toast(t("msg.saved"));
+    toast(t("msg.autostart"));
   });
   $("f-language").addEventListener("change", () => switchLanguage($("f-language").value));
 
@@ -307,11 +327,19 @@ function wire() {
   $("btnTest").addEventListener("click", async () => {
     toast(t("msg.testRunning"));
     const res = await api("/api/action", { method: "POST", body: JSON.stringify({ action: "testLogin" }) });
+    if (res.unreachable) {
+      toast(t("msg.stale"), true);
+      return;
+    }
     if (res.ok) renderTest(res.data);
   });
 
   $("btnReload").addEventListener("click", async () => {
     const res = await api("/api/action", { method: "POST", body: JSON.stringify({ action: "reload" }) });
+    if (res.unreachable) {
+      toast(t("msg.stale"), true);
+      return;
+    }
     if (res.ok && res.data.config) {
       applyConfig(res.data.config);
       toast(t("msg.saved"));
