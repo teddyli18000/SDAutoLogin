@@ -17,6 +17,7 @@ const (
 	wmTrayIcon      = wmApp + 1
 	wmTrayRefresh   = wmApp + 2
 	wmQuitRequested = wmApp + 3
+	wmShowSettings  = wmApp + 4
 )
 
 // Tray menu command ids.
@@ -42,9 +43,6 @@ type trayApp struct {
 
 	hwnd syscall.Handle
 	nid  notifyIconData
-	// showSettingsMsg is the id a second copy posts to ask for the settings
-	// page, zero when the system could not allocate one.
-	showSettingsMsg uint32
 
 	mu   sync.Mutex
 	snap Snapshot
@@ -63,12 +61,6 @@ var trayInstance *trayApp
 var trayWndProc = syscall.NewCallback(trayProc)
 
 func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
-	if trayInstance != nil && trayInstance.showSettingsMsg != 0 &&
-		uint32(umsg) == trayInstance.showSettingsMsg {
-		Log.Debug("tray: a second copy asked for the settings page")
-		trayInstance.openSettings()
-		return 0
-	}
 	switch uint32(umsg) {
 	case wmTrayIcon:
 		if trayInstance == nil {
@@ -86,6 +78,13 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 		case wmRButtonUp:
 			Log.Debug("tray: menu requested (mouse message %#x)", mouse)
 			trayInstance.showMenu()
+		}
+		return 0
+	case wmShowSettings:
+		// A second copy of the program asked for the settings page.
+		if trayInstance != nil {
+			Log.Debug("tray: a second copy asked for the settings page")
+			trayInstance.openSettings()
 		}
 		return 0
 	case wmTrayRefresh:
@@ -113,7 +112,6 @@ func runUI(state *appState, appDir string) {
 
 	app := &trayApp{state: state, appDir: appDir}
 	trayInstance = app
-	app.showSettingsMsg = showSettingsMessage()
 	app.settings = newSettingsServer(state, appDir, func() {
 		// DestroyWindow has to run on the thread that created the window.
 		procPostMessageW.Call(uintptr(app.hwnd), wmQuitRequested, 0, 0)
@@ -124,6 +122,14 @@ func runUI(state *appState, appDir string) {
 		runHeadless(state, appDir)
 		return
 	}
+
+	// Requests from a second copy arrive on an event, which is turned into a
+	// message here so the page opens on the UI thread like every other tray
+	// action. Started after the window exists; a request that arrived earlier
+	// is still waiting in the signalled event.
+	go waitForSettingsRequest(func() {
+		procPostMessageW.Call(uintptr(app.hwnd), wmShowSettings, 0, 0)
+	})
 
 	state.SetListener(app.onStatus)
 	state.Start()
