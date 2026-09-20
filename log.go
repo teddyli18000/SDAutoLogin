@@ -5,17 +5,21 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-const maxLogSize = 1 << 20
+// maxLogSize is the size at which app.log is rotated into app.log.1.
+const maxLogSize = 4 << 20
 
-// Logger appends timestamped lines to stdout and logs/app.log, rotating at 1 MiB.
+// Logger appends timestamped lines to stdout and logs/app.log. DEBUG lines are
+// only written when verbose mode is on, see SetVerbose.
 type Logger struct {
-	mu   sync.Mutex
-	dir  string
-	file *os.File
-	size int64
+	mu      sync.Mutex
+	dir     string
+	file    *os.File
+	size    int64
+	verbose atomic.Bool
 }
 
 var Log = &Logger{}
@@ -27,6 +31,12 @@ func (l *Logger) Init(dir string) {
 	_ = os.MkdirAll(dir, 0o755)
 	l.openLocked()
 }
+
+// SetVerbose enables or disables DEBUG output.
+func (l *Logger) SetVerbose(on bool) { l.verbose.Store(on) }
+
+// Verbose reports whether DEBUG output is currently enabled.
+func (l *Logger) Verbose() bool { return l.verbose.Load() }
 
 func (l *Logger) openLocked() {
 	f, err := os.OpenFile(filepath.Join(l.dir, "app.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -50,7 +60,7 @@ func (l *Logger) Path() string {
 }
 
 func (l *Logger) write(level, format string, args ...any) {
-	line := time.Now().Format("2006-01-02 15:04:05") + " [" + level + "] " + fmt.Sprintf(format, args...)
+	line := time.Now().Format("2006-01-02 15:04:05.000") + " [" + level + "] " + fmt.Sprintf(format, args...)
 	_, _ = os.Stdout.WriteString(line + "\n")
 
 	l.mu.Lock()
@@ -70,6 +80,13 @@ func (l *Logger) write(level, format string, args ...any) {
 		l.size = 0
 		l.openLocked()
 	}
+}
+
+func (l *Logger) Debug(format string, args ...any) {
+	if !l.verbose.Load() {
+		return
+	}
+	l.write("DEBUG", format, args...)
 }
 
 func (l *Logger) Info(format string, args ...any)  { l.write("INFO", format, args...) }

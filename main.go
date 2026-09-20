@@ -20,9 +20,13 @@ func main() {
 	if err != nil {
 		Log.Error("loading config: %v", err)
 	}
+	Log.SetVerbose(cfg.VerboseLog)
+	Log.Debug("config loaded from %s: %s", cfg.Path(), cfg.Summary())
 
 	for _, arg := range os.Args[1:] {
 		if arg == "-test-login" {
+			// The self test is a diagnostic, so always keep the detail.
+			Log.SetVerbose(true)
 			testLogin(cfg)
 			return
 		}
@@ -98,8 +102,14 @@ func runHeadless(svc *Service, cfg *Config, appDir string) {
 	if !cfg.Configured() {
 		runSetupWizard(cfg)
 	}
+	var last State
 	svc.SetListener(func(s Snapshot) {
-		Log.Info("status: %s", describeSnapshot(s))
+		if s.State != last {
+			last = s.State
+			Log.Info("status: %s", describeSnapshot(s))
+		} else {
+			Log.Debug("status: %s", describeSnapshot(s))
+		}
 	})
 	svc.Start()
 	Log.Info("running in background, config file %s, press Ctrl+C to quit", cfg.Path())

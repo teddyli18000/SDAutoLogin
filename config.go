@@ -31,8 +31,11 @@ type Config struct {
 	HTTPTimeoutSeconds   int      `json:"httpTimeoutSeconds"`
 	AutoLogin            bool     `json:"autoLogin"`
 	CheckInternet        bool     `json:"checkInternet"`
-	ProbeURLs            []string `json:"probeUrls"`
-	JsVersion            string   `json:"jsVersion"`
+	// VerboseLog writes per-check diagnostics, which is what makes a dropped
+	// session diagnosable after the fact.
+	VerboseLog bool     `json:"verboseLog"`
+	ProbeURLs  []string `json:"probeUrls"`
+	JsVersion  string   `json:"jsVersion"`
 
 	path string
 }
@@ -47,6 +50,7 @@ func defaultConfig() *Config {
 		AutoLogin:            true,
 		RememberPassword:     true,
 		CheckInternet:        true,
+		VerboseLog:           true,
 		ProbeURLs: []string{
 			"http://connect.rom.miui.com/generate_204",
 			"http://www.baidu.com",
@@ -150,4 +154,14 @@ func (c *Config) Configured() bool {
 // Account is the value submitted as user_account.
 func (c *Config) Account() string {
 	return c.AccountPrefix + c.Username + c.AccountSuffix
+}
+
+// Summary describes the active settings for the log. The password is never
+// included, so this is safe to print.
+func (c *Config) Summary() string {
+	return fmt.Sprintf(
+		"account=%q isp=%q prefix=%q suffix=%q interval=%ds timeout=%ds autoLogin=%v checkInternet=%v verboseLog=%v rememberPassword=%v portal=%s eportal=%s",
+		c.Username, c.OperatorName(), c.AccountPrefix, c.AccountSuffix,
+		c.CheckIntervalSeconds, c.HTTPTimeoutSeconds, c.AutoLogin, c.CheckInternet,
+		c.VerboseLog, c.RememberPassword, c.PortalBaseURL, c.EportalURL)
 }
