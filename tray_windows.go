@@ -8,12 +8,15 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"sdautologin/internal/brand"
 )
 
 // Message ids posted to the hidden tray window.
 const (
-	wmTrayIcon    = wmApp + 1
-	wmTrayRefresh = wmApp + 2
+	wmTrayIcon      = wmApp + 1
+	wmTrayRefresh   = wmApp + 2
+	wmQuitRequested = wmApp + 3
 )
 
 // Tray menu command ids.
@@ -33,9 +36,9 @@ const (
 )
 
 type trayApp struct {
-	svc    *Service
-	cfg    *Config
-	appDir string
+	state    *appState
+	appDir   string
+	settings *settingsServer
 
 	hwnd syscall.Handle
 	nid  notifyIconData
@@ -43,14 +46,12 @@ type trayApp struct {
 	mu   sync.Mutex
 	snap Snapshot
 
-	iconApp  syscall.Handle
-	iconInfo syscall.Handle
-	iconWarn syscall.Handle
-	iconErr  syscall.Handle
+	iconChecking syscall.Handle
+	iconOnline   syscall.Handle
+	iconBusy     syscall.Handle
+	iconError    syscall.Handle
 
-	settings *settingsWindow
-
-	// lastState is only touched by the UI thread, see refresh.
+	// lastState is only touched by the UI thread.
 	lastState State
 }
 
@@ -67,8 +68,8 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 		mouse := uint32(lparam) & 0xffff
 		switch mouse {
 		case wmLButtonDblClk:
-			Log.Debug("tray: double click, opening settings")
-			trayInstance.showSettings()
+			Log.Debug("tray: double click, opening the settings page")
+			trayInstance.openSettings()
 		case wmRButtonUp, wmLButtonUp:
 			Log.Debug("tray: menu requested (mouse message %#x)", mouse)
 			trayInstance.showMenu()
@@ -77,6 +78,11 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 	case wmTrayRefresh:
 		if trayInstance != nil {
 			trayInstance.refresh()
+		}
+		return 0
+	case wmQuitRequested:
+		if trayInstance != nil {
+			trayInstance.exit()
 		}
 		return 0
 	case wmDestroy:
@@ -88,30 +94,35 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 	return r
 }
 
-func runUI(svc *Service, cfg *Config, appDir string) {
+func runUI(state *appState, appDir string) {
 	// The tray window and its message loop must stay on one OS thread.
 	runtime.LockOSThread()
 
-	app := &trayApp{svc: svc, cfg: cfg, appDir: appDir}
+	app := &trayApp{state: state, appDir: appDir}
 	trayInstance = app
+	app.settings = newSettingsServer(state, appDir, func() {
+		// DestroyWindow has to run on the thread that created the window.
+		procPostMessageW.Call(uintptr(app.hwnd), wmQuitRequested, 0, 0)
+	})
 
 	if err := app.create(); err != nil {
-		Log.Error("creating tray icon: %v, falling back to background mode", err)
-		runHeadless(svc, cfg, appDir)
+		Log.Error("creating the tray icon: %v, falling back to background mode", err)
+		runHeadless(state, appDir)
 		return
 	}
 
-	svc.SetListener(app.onStatus)
-	svc.Start()
+	state.SetListener(app.onStatus)
+	state.Start()
 	app.refresh()
 
-	if !cfg.Configured() {
-		app.showSettings()
+	if !state.Config().Configured() {
+		app.openSettings()
 	}
 
 	Log.Debug("entering the tray message loop")
 	app.messageLoop()
-	svc.Stop()
+	state.Stop()
+	app.settings.Stop()
 	Log.Info("tray stopped")
 }
 
@@ -140,26 +151,28 @@ func (a *trayApp) create() error {
 	}
 	a.hwnd = syscall.Handle(hwnd)
 
-	a.iconApp = loadSystemIcon(idiApplication)
-	a.iconInfo = loadSystemIcon(idiInformation)
-	a.iconWarn = loadSystemIcon(idiWarning)
-	a.iconErr = loadSystemIcon(idiError)
+	size := trayIconSize()
+	a.iconChecking = makeIcon(brand.Icon(size, iconAccent(StateUnknown)))
+	a.iconOnline = makeIcon(brand.Icon(size, iconAccent(StateOnline)))
+	a.iconBusy = makeIcon(brand.Icon(size, iconAccent(StateLoggingIn)))
+	a.iconError = makeIcon(brand.Icon(size, iconAccent(StateError)))
+	if a.iconChecking == 0 || a.iconOnline == 0 || a.iconBusy == 0 || a.iconError == 0 {
+		return fmt.Errorf("could not build the tray icons")
+	}
 
 	a.nid = notifyIconData{
 		HWnd:             a.hwnd,
 		UID:              1,
 		UFlags:           nifMessage | nifIcon | nifTip,
 		UCallbackMessage: wmTrayIcon,
-		HIcon:            a.iconApp,
+		HIcon:            a.iconChecking,
 	}
 	a.nid.CbSize = uint32(unsafe.Sizeof(a.nid))
-	putUTF16(a.nid.SzTip[:], appTitle+" - checking")
+	putUTF16(a.nid.SzTip[:], L("app.name")+" - "+localizedState(StateUnknown))
 	if r, _, err := procShellNotifyIconW.Call(nimAdd, uintptr(unsafe.Pointer(&a.nid))); r == 0 {
 		return fmt.Errorf("Shell_NotifyIcon: %v", err)
 	}
-	Log.Info("tray icon created")
-	Log.Debug("tray window hwnd=%#x, notify icon id=%d, icons app=%#x info=%#x warn=%#x error=%#x",
-		uintptr(a.hwnd), a.nid.UID, uintptr(a.iconApp), uintptr(a.iconInfo), uintptr(a.iconWarn), uintptr(a.iconErr))
+	Log.Info("tray icon created (%d px)", size)
 	return nil
 }
 
@@ -175,8 +188,8 @@ func (a *trayApp) messageLoop() {
 	}
 }
 
-// onStatus is called from the worker goroutine. It only stores the snapshot and
-// wakes the UI thread.
+// onStatus is called from the worker goroutine. It only stores the snapshot
+// and wakes the UI thread.
 func (a *trayApp) onStatus(s Snapshot) {
 	a.mu.Lock()
 	a.snap = s
@@ -192,37 +205,65 @@ func (a *trayApp) Snapshot() Snapshot {
 
 func (a *trayApp) refresh() {
 	s := a.Snapshot()
-	if s.State != a.lastState {
-		a.lastState = s.State
-		Log.Debug("tray icon updated to %s (internet checked=%v ok=%v)",
-			s.State, s.InternetChecked, s.InternetOK)
-	}
+	previous := a.lastState
+	a.lastState = s.State
+
 	a.nid.HIcon = a.iconFor(s.State)
 	a.nid.UFlags = nifMessage | nifIcon | nifTip
 	putUTF16(a.nid.SzTip[:], a.tooltip(s))
 	procShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&a.nid)))
+
+	if s.State != previous {
+		Log.Debug("tray icon updated to %s (internet checked=%v ok=%v)",
+			s.State, s.InternetChecked, s.InternetOK)
+	}
+	// Tell the user about the two transitions that matter; staying quiet about
+	// the rest keeps balloon tips from becoming noise.
+	switch {
+	case previous == StateLoggingIn && s.State == StateOnline:
+		a.notify(L("app.name"), L("balloon.loggedIn"))
+	case s.State == StateError && previous != StateError:
+		a.notify(L("app.name"), L("balloon.reconnectFailed")+": "+s.Message)
+	}
+}
+
+// notify shows a balloon tip through the existing tray icon.
+func (a *trayApp) notify(title, body string) {
+	a.nid.UFlags = nifMessage | nifIcon | nifTip | nifInfo
+	a.nid.DwInfoFlags = niiInfo
+	putUTF16(a.nid.SzInfoTitle[:], title)
+	putUTF16(a.nid.SzInfo[:], body)
+	putUTF16(a.nid.SzTip[:], a.tooltip(a.Snapshot()))
+	procShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&a.nid)))
+	a.nid.UFlags = nifMessage | nifIcon | nifTip
 }
 
 func (a *trayApp) iconFor(st State) syscall.Handle {
 	switch st {
 	case StateOnline:
-		return a.iconInfo
+		return a.iconOnline
 	case StateLoggingIn, StateOffline:
-		return a.iconWarn
+		return a.iconBusy
 	case StateError:
-		return a.iconErr
+		return a.iconError
 	default:
-		return a.iconApp
+		return a.iconChecking
 	}
 }
 
 func (a *trayApp) tooltip(s Snapshot) string {
-	out := appTitle + "\nStatus: " + describeSnapshot(s)
+	out := L("app.name") + "\n" + Lf("tray.status", localizedState(s.State))
+	if s.Message != "" && s.State == StateError {
+		out += " (" + s.Message + ")"
+	}
+	if s.ClientIP != "" {
+		out += "\n" + Lf("tray.clientIP", s.ClientIP)
+	}
 	if s.InternetChecked {
 		if s.InternetOK {
-			out += "\nInternet: reachable"
+			out += "\n" + L("tray.internetOk")
 		} else {
-			out += "\nInternet: unreachable"
+			out += "\n" + L("tray.internetFail")
 		}
 	}
 	return out
@@ -230,31 +271,27 @@ func (a *trayApp) tooltip(s Snapshot) string {
 
 func (a *trayApp) showMenu() {
 	s := a.Snapshot()
-	Log.Debug("building tray menu for status %s", describeSnapshot(s))
+	Log.Debug("building the tray menu for state %s", s.State)
 	menu, _, _ := procCreatePopupMenu.Call()
 
-	status := "Status: " + s.State.String()
-	if s.ClientIP != "" {
-		status += " " + s.ClientIP
-	}
-	appendMenu(menu, mfString|mfGrayed, 0, status)
+	appendMenu(menu, mfString|mfGrayed, 0, Lf("tray.status", localizedState(s.State)))
 	if s.LastLoginAt != "" {
-		appendMenu(menu, mfString|mfGrayed, 0, "Last login: "+s.LastLoginAt)
+		appendMenu(menu, mfString|mfGrayed, 0, Lf("tray.lastLogin", s.LastLoginAt))
 	}
 	appendMenu(menu, mfSeparator, 0, "")
-	appendMenu(menu, mfString, cmdCheckNow, "Check and log in now")
-	appendMenu(menu, mfString, cmdSettings, "Settings...")
+	appendMenu(menu, mfString, cmdCheckNow, L("tray.checkNow"))
+	appendMenu(menu, mfString, cmdSettings, L("tray.settings"))
 	appendMenu(menu, mfSeparator, 0, "")
 	if autostartEnabled() {
-		appendMenu(menu, mfString|mfChecked, cmdAutostart, "Run at startup")
+		appendMenu(menu, mfString|mfChecked, cmdAutostart, L("tray.autostart"))
 	} else {
-		appendMenu(menu, mfString, cmdAutostart, "Run at startup")
+		appendMenu(menu, mfString, cmdAutostart, L("tray.autostart"))
 	}
-	appendMenu(menu, mfString, cmdReload, "Reload config")
-	appendMenu(menu, mfString, cmdOpenCfg, "Open config file")
-	appendMenu(menu, mfString, cmdOpenLog, "Open log")
+	appendMenu(menu, mfString, cmdReload, L("tray.reload"))
+	appendMenu(menu, mfString, cmdOpenCfg, L("tray.openConfig"))
+	appendMenu(menu, mfString, cmdOpenLog, L("tray.openLog"))
 	appendMenu(menu, mfSeparator, 0, "")
-	appendMenu(menu, mfString, cmdExit, "Exit")
+	appendMenu(menu, mfString, cmdExit, L("tray.exit"))
 
 	var pt point
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
@@ -280,29 +317,29 @@ func appendMenu(menu uintptr, flags uintptr, id uintptr, text string) {
 }
 
 func (a *trayApp) handleCommand(cmd uint32) {
-	Log.Debug("tray command selected: id=%d (%s)", cmd, commandName(cmd))
+	Log.Debug("tray command selected: id=%d", cmd)
 	switch cmd {
 	case cmdCheckNow:
 		Log.Info("manual check requested from the tray menu")
-		a.svc.Trigger()
+		a.state.Trigger()
 	case cmdSettings:
-		a.showSettings()
+		a.openSettings()
 	case cmdReload:
 		a.reloadConfig()
 	case cmdOpenCfg:
-		Log.Info("opening config file %s", a.cfg.Path())
-		openWithShell(a.cfg.Path())
+		Log.Info("opening config file %s", a.state.Config().Path())
+		openExternal(a.state.Config().Path())
 	case cmdOpenLog:
 		if p := Log.Path(); p != "" {
 			Log.Info("opening log file %s", p)
-			openWithShell(p)
+			openExternal(p)
 		}
 	case cmdAutostart:
 		on := !autostartEnabled()
 		if setAutostart(on) {
 			Log.Info("autostart set to %v", on)
 		} else {
-			messageBox(a.hwnd, appTitle, "Could not update the startup entry, see the log.", mbIconWarning)
+			messageBox(a.hwnd, L("app.name"), L("dlg.autostartFailed"), mbIconWarning)
 		}
 	case cmdExit:
 		Log.Info("exit requested from the tray menu")
@@ -310,58 +347,31 @@ func (a *trayApp) handleCommand(cmd uint32) {
 	}
 }
 
-func commandName(cmd uint32) string {
-	switch cmd {
-	case cmdCheckNow:
-		return "check now"
-	case cmdSettings:
-		return "settings"
-	case cmdReload:
-		return "reload config"
-	case cmdOpenCfg:
-		return "open config file"
-	case cmdAutostart:
-		return "toggle autostart"
-	case cmdOpenLog:
-		return "open log"
-	case cmdExit:
-		return "exit"
-	default:
-		return "unknown"
+// openSettings serves the settings page and hands it to the default browser.
+func (a *trayApp) openSettings() {
+	url, err := a.settings.OpenURL()
+	if err != nil {
+		Log.Error("opening the settings page: %v", err)
+		messageBox(a.hwnd, L("dlg.title"), Lf("dlg.startedBody", url), mbIconWarning)
 	}
 }
 
 func (a *trayApp) reloadConfig() {
-	Log.Info("reloading config from %s", a.cfg.Path())
-	cfg, err := LoadConfig(a.cfg.Path())
+	Log.Info("reloading config from %s", a.state.Config().Path())
+	next, err := a.state.Reload()
 	if err != nil {
 		Log.Error("reloading config: %v", err)
-		messageBox(a.hwnd, appTitle, "Could not reload the config: "+err.Error(), mbIconError)
+		messageBox(a.hwnd, L("dlg.title"), L("err.loadFailed"), mbIconError)
 		return
 	}
-	Log.SetVerbose(cfg.VerboseLog)
-	a.cfg = cfg
-	a.svc.Restart(cfg)
-	a.svc.Trigger()
-	Log.Info("config reloaded: %s", cfg.Summary())
-}
-
-func (a *trayApp) showSettings() {
-	if a.settings == nil {
-		Log.Debug("creating the settings window")
-		w := newSettingsWindow(a)
-		if err := w.create(); err != nil {
-			Log.Error("creating settings window: %v", err)
-			messageBox(a.hwnd, appTitle, "Could not open the settings window: "+err.Error(), mbIconError)
-			return
-		}
-		a.settings = w
-	}
-	a.settings.show()
+	// The menu wording follows the newly selected language.
+	a.refresh()
+	Log.Info("config reloaded: %s", next.Summary())
 }
 
 func (a *trayApp) exit() {
 	Log.Debug("removing the tray icon and destroying the tray window")
+	a.settings.Stop()
 	procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&a.nid)))
 	procDestroyWindow.Call(uintptr(a.hwnd))
 }

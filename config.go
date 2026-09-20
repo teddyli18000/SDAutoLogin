@@ -27,15 +27,17 @@ type Config struct {
 	// AccountSuffix selects the ISP, see Operators.
 	AccountSuffix string `json:"accountSuffix"`
 
-	CheckIntervalSeconds int      `json:"checkIntervalSeconds"`
-	HTTPTimeoutSeconds   int      `json:"httpTimeoutSeconds"`
-	AutoLogin            bool     `json:"autoLogin"`
-	CheckInternet        bool     `json:"checkInternet"`
+	CheckIntervalSeconds int  `json:"checkIntervalSeconds"`
+	HTTPTimeoutSeconds   int  `json:"httpTimeoutSeconds"`
+	AutoLogin            bool `json:"autoLogin"`
+	CheckInternet        bool `json:"checkInternet"`
 	// VerboseLog writes per-check diagnostics, which is what makes a dropped
 	// session diagnosable after the fact.
 	VerboseLog bool     `json:"verboseLog"`
 	ProbeURLs  []string `json:"probeUrls"`
 	JsVersion  string   `json:"jsVersion"`
+	// Language selects the interface language: auto, zh or en.
+	Language string `json:"language"`
 
 	path string
 }
@@ -51,6 +53,7 @@ func defaultConfig() *Config {
 		RememberPassword:     true,
 		CheckInternet:        true,
 		VerboseLog:           true,
+		Language:             string(LangAuto),
 		ProbeURLs: []string{
 			"http://connect.rom.miui.com/generate_204",
 			"http://www.baidu.com",
@@ -102,6 +105,11 @@ func (c *Config) normalize() {
 	}
 	if strings.TrimSpace(c.JsVersion) == "" {
 		c.JsVersion = defaultConfig().JsVersion
+	}
+	switch Lang(c.Language) {
+	case LangZH, LangEN:
+	default:
+		c.Language = string(LangAuto)
 	}
 }
 
@@ -160,8 +168,8 @@ func (c *Config) Account() string {
 // included, so this is safe to print.
 func (c *Config) Summary() string {
 	return fmt.Sprintf(
-		"account=%q isp=%q prefix=%q suffix=%q interval=%ds timeout=%ds autoLogin=%v checkInternet=%v verboseLog=%v rememberPassword=%v portal=%s eportal=%s",
+		"account=%q isp=%q prefix=%q suffix=%q interval=%ds timeout=%ds autoLogin=%v checkInternet=%v verboseLog=%v rememberPassword=%v language=%q portal=%s eportal=%s",
 		c.Username, c.OperatorName(), c.AccountPrefix, c.AccountSuffix,
 		c.CheckIntervalSeconds, c.HTTPTimeoutSeconds, c.AutoLogin, c.CheckInternet,
-		c.VerboseLog, c.RememberPassword, c.PortalBaseURL, c.EportalURL)
+		c.VerboseLog, c.RememberPassword, c.Language, c.PortalBaseURL, c.EportalURL)
 }

@@ -3,34 +3,31 @@
 package main
 
 import (
-	"bytes"
-	"image"
-	"image/color"
-	"image/png"
-	"os"
-	"os/exec"
-	"runtime"
 	"sync"
 
 	"fyne.io/systray"
+
+	"sdautologin/internal/brand"
 )
 
 // runUI provides the Linux / macOS tray through fyne.io/systray, since the
 // standard library cannot create one. On Linux the library uses a pure Go
 // D-Bus StatusNotifierItem backend, on macOS it needs cgo and therefore the
 // Xcode command line tools at build time.
-func runUI(svc *Service, cfg *Config, appDir string) {
+func runUI(state *appState, appDir string) {
 	systray.Run(func() {
-		trayReady(svc, cfg, appDir)
+		trayReady(state, appDir)
 	}, func() {
-		svc.Stop()
+		state.Stop()
 		Log.Info("tray stopped")
 	})
 }
 
 type unixTray struct {
+	state    *appState
+	settings *settingsServer
+
 	mu      sync.Mutex
-	cfg     *Config
 	mStatus *systray.MenuItem
 	mSince  *systray.MenuItem
 
@@ -41,65 +38,82 @@ type unixTray struct {
 	lastState   State
 }
 
-func trayReady(svc *Service, cfg *Config, appDir string) {
+func trayReady(state *appState, appDir string) {
 	t := &unixTray{
-		cfg:         cfg,
+		state:       state,
 		lastState:   StateUnknown,
-		iconOnline:  statusIcon(color.RGBA{R: 0x2E, G: 0xA0, B: 0x43, A: 0xFF}),
-		iconOffline: statusIcon(color.RGBA{R: 0x88, G: 0x88, B: 0x88, A: 0xFF}),
-		iconBusy:    statusIcon(color.RGBA{R: 0xE8, G: 0x9B, B: 0x1E, A: 0xFF}),
-		iconError:   statusIcon(color.RGBA{R: 0xD1, G: 0x3A, B: 0x2E, A: 0xFF}),
+		iconOnline:  brand.PNG(22, iconAccent(StateOnline)),
+		iconOffline: brand.PNG(22, iconAccent(StateUnknown)),
+		iconBusy:    brand.PNG(22, iconAccent(StateLoggingIn)),
+		iconError:   brand.PNG(22, iconAccent(StateError)),
 	}
+	t.settings = newSettingsServer(state, appDir, func() {
+		systray.Quit()
+	})
 
 	systray.SetIcon(t.iconOffline)
-	systray.SetTooltip(appTitle + " - checking")
+	systray.SetTooltip(L("app.name") + " - " + localizedState(StateUnknown))
 
-	t.mStatus = systray.AddMenuItem("Status: checking", "")
+	t.mStatus = systray.AddMenuItem(Lf("tray.status", localizedState(StateUnknown)), "")
 	t.mStatus.Disable()
-	t.mSince = systray.AddMenuItem("Last login: -", "")
-	t.mSince.Disable()
+	t.mSince = systray.AddMenuItem("", "")
+	t.mSince.Hide()
 
 	systray.AddSeparator()
-	mNow := systray.AddMenuItem("Check and log in now", "Run one check immediately")
+	mNow := systray.AddMenuItem(L("tray.checkNow"), "")
+	mSettings := systray.AddMenuItem(L("tray.settings"), "")
 	systray.AddSeparator()
-	mReload := systray.AddMenuItem("Reload config", "Re-read account settings from config.json")
-	mOpenCfg := systray.AddMenuItem("Open config file", cfg.Path())
-	mAutostart := systray.AddMenuItemCheckbox("Run at startup", "Start automatically after login", autostartEnabled())
+	mAutostart := systray.AddMenuItemCheckbox(L("tray.autostart"), "", autostartEnabled())
+	mReload := systray.AddMenuItem(L("tray.reload"), "")
+	mOpenCfg := systray.AddMenuItem(L("tray.openConfig"), "")
+	mOpenLog := systray.AddMenuItem(L("tray.openLog"), "")
 	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Exit", "Quit the program, does not log the session out")
+	mQuit := systray.AddMenuItem(L("tray.exit"), "")
 
 	go func() {
 		for range mNow.ClickedCh {
-			Log.Debug("tray: check now clicked")
 			Log.Info("manual check requested from the tray menu")
-			svc.Trigger()
+			t.state.Trigger()
+		}
+	}()
+	go func() {
+		for range mSettings.ClickedCh {
+			Log.Debug("tray: settings clicked")
+			t.openSettings()
 		}
 	}()
 	go func() {
 		for range mReload.ClickedCh {
 			Log.Debug("tray: reload config clicked")
-			next, err := LoadConfig(cfg.Path())
-			if err != nil {
+			if next, err := t.state.Reload(); err != nil {
 				Log.Error("reloading config: %v", err)
-				continue
+			} else {
+				Log.Info("config reloaded: %s", next.Summary())
 			}
-			Log.SetVerbose(next.VerboseLog)
-			t.cfg = next
-			svc.Restart(next)
-			svc.Trigger()
-			Log.Info("config reloaded: %s", next.Summary())
 		}
 	}()
 	go func() {
 		for range mOpenCfg.ClickedCh {
 			Log.Debug("tray: open config file clicked")
-			openInEditor(t.cfg.Path())
+			if err := openExternal(t.state.Config().Path()); err != nil {
+				Log.Warn("opening the config file: %v", err)
+			}
+		}
+	}()
+	go func() {
+		for range mOpenLog.ClickedCh {
+			Log.Debug("tray: open log clicked")
+			if p := Log.Path(); p != "" {
+				if err := openExternal(p); err != nil {
+					Log.Warn("opening the log file: %v", err)
+				}
+			}
 		}
 	}()
 	go func() {
 		for range mAutostart.ClickedCh {
-			Log.Debug("tray: autostart toggle clicked, currently %v", mAutostart.Checked())
 			on := !mAutostart.Checked()
+			Log.Debug("tray: autostart toggle clicked, now %v", on)
 			if !setAutostart(on) {
 				Log.Warn("updating autostart entry failed")
 				continue
@@ -118,14 +132,22 @@ func trayReady(svc *Service, cfg *Config, appDir string) {
 		systray.Quit()
 	}()
 
-	svc.SetListener(t.onStatus)
-	svc.Start()
+	t.state.SetListener(t.onStatus)
+	t.state.Start()
 
-	if !cfg.Configured() {
-		Log.Warn("no account configured yet, opening %s", cfg.Path())
-		openInEditor(cfg.Path())
+	if !t.state.Config().Configured() {
+		Log.Warn("no account configured yet, opening the settings page")
+		t.openSettings()
 	}
 	Log.Debug("tray ready, menu items registered")
+}
+
+func (t *unixTray) openSettings() {
+	url, err := t.settings.OpenURL()
+	if err != nil {
+		Log.Error("opening the settings page: %v", err)
+	}
+	Log.Debug("settings page at %s", url)
 }
 
 func (t *unixTray) onStatus(s Snapshot) {
@@ -147,57 +169,27 @@ func (t *unixTray) onStatus(s Snapshot) {
 		}
 	}
 	systray.SetTooltip(t.tooltip(s))
-	t.mStatus.SetTitle("Status: " + describeSnapshot(s))
+	t.mStatus.SetTitle(Lf("tray.status", localizedState(s.State)))
 	if s.LastLoginAt != "" {
-		t.mSince.SetTitle("Last login: " + s.LastLoginAt)
+		t.mSince.SetTitle(Lf("tray.lastLogin", s.LastLoginAt))
+		t.mSince.Show()
 	}
 }
 
 func (t *unixTray) tooltip(s Snapshot) string {
-	out := appTitle + "\nStatus: " + describeSnapshot(s)
+	out := L("app.name") + "\n" + Lf("tray.status", localizedState(s.State))
+	if s.Message != "" && s.State == StateError {
+		out += " (" + s.Message + ")"
+	}
+	if s.ClientIP != "" {
+		out += "\n" + Lf("tray.clientIP", s.ClientIP)
+	}
 	if s.InternetChecked {
 		if s.InternetOK {
-			out += "\nInternet: reachable"
+			out += "\n" + L("tray.internetOk")
 		} else {
-			out += "\nInternet: unreachable"
+			out += "\n" + L("tray.internetFail")
 		}
 	}
 	return out
-}
-
-// openInEditor opens the config file with the platform default handler.
-func openInEditor(path string) {
-	var cmd *exec.Cmd
-	switch {
-	case runtime.GOOS == "darwin":
-		cmd = exec.Command("open", "-t", path)
-	case os.Getenv("EDITOR") != "":
-		cmd = exec.Command(os.Getenv("EDITOR"), path)
-	default:
-		cmd = exec.Command("xdg-open", path)
-	}
-	if err := cmd.Start(); err != nil {
-		Log.Warn("opening config file: %v", err)
-	}
-}
-
-// statusIcon renders a 16x16 filled circle as PNG, avoiding an icon asset.
-func statusIcon(c color.RGBA) []byte {
-	const size = 16
-	const cx, cy, r = 7.5, 7.5, 6.5
-	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			dx := float64(x) - cx
-			dy := float64(y) - cy
-			if dx*dx+dy*dy <= r*r {
-				img.Set(x, y, c)
-			}
-		}
-	}
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil
-	}
-	return buf.Bytes()
 }

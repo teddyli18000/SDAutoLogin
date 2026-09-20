@@ -8,12 +8,23 @@ import (
 	"strings"
 )
 
-// runSetupWizard asks for the account details on stdin. It is used on
-// platforms without a settings window (Linux, macOS, plain terminals).
+// runSetupWizard asks for the account details on stdin. It backs the "config"
+// command and the first run on platforms without a settings page.
 func runSetupWizard(cfg *Config) {
 	in := bufio.NewReader(os.Stdin)
 	fmt.Println("=== campus network auto login: first run setup ===")
 	fmt.Println("(press Enter to keep the value in brackets)")
+
+	fmt.Println("interface language:")
+	for i, l := range languages {
+		fmt.Printf("  %d) %s\n", i+1, l.name)
+	}
+	if choice := prompt(in, "interface language", strconv.Itoa(currentLanguageChoice())); choice != "" {
+		if n, err := strconv.Atoi(choice); err == nil && n >= 1 && n <= len(languages) {
+			cfg.Language = languages[n-1].code
+		}
+	}
+	SetLang(Lang(cfg.Language))
 
 	cfg.Username = prompt(in, "account (student id / name / mail)", cfg.Username)
 	cfg.Password = prompt(in, "password", "")

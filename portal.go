@@ -32,10 +32,10 @@ type Status struct {
 }
 
 type LoginResult struct {
-	Success bool
-	Message string
-	Raw     string
-	RetCode string
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Raw     string `json:"raw"`
+	RetCode string `json:"retCode"`
 }
 
 // retCodeText maps the ret_code values documented in the login page script
