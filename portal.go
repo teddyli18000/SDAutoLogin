@@ -17,7 +17,11 @@ const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 
 // Status is a snapshot of what the portal thinks about this client.
 type Status struct {
-	Reachable   bool // portal answered, independent of being logged in
+	Reachable bool // the portal page answered, independent of being logged in
+	// Known is true only when the online_list reply was usable, so Online can
+	// be trusted. A transport error or an unexpected status leaves it false and
+	// the caller must not read Online as "the session was dropped".
+	Known       bool
 	Online      bool // portal considers this client authenticated
 	ClientIP    string
 	ClientIPv6  string
@@ -99,12 +103,16 @@ func NewClient(cfg *Config) *Client {
 func (c *Client) QueryStatus() Status {
 	var st Status
 
-	_, page, err := c.get(c.follow, c.cfg.PortalBaseURL)
+	code, page, err := c.get(c.follow, c.cfg.PortalBaseURL)
 	if err != nil {
 		st.Message = fmt.Sprintf("portal unreachable at %s: %v", c.cfg.PortalBaseURL, err)
 		return st
 	}
 	st.Reachable = true
+	if code != http.StatusOK && code != http.StatusNoContent {
+		Log.Warn("portal page %s returned http %d, that reply is probably not a real portal page (body %s)",
+			c.cfg.PortalBaseURL, code, truncate(page))
+	}
 	st.ClientIP = firstMatch(reV4, page)
 	if st.ClientIP == "" {
 		st.ClientIP = firstMatch(reV46, page)
@@ -118,14 +126,27 @@ func (c *Client) QueryStatus() Status {
 		"&wlan_user_ip=" + url.QueryEscape(st.ClientIP) +
 		"&curr_user_ip=" + url.QueryEscape(st.ClientIP) +
 		"&jsVersion=" + url.QueryEscape(c.cfg.JsVersion)
-	_, body, err := c.get(c.plain, query)
+	code, body, err := c.get(c.plain, query)
 	if err != nil {
-		st.Message = "online_list failed: " + err.Error()
+		st.Message = "online_list request failed: " + err.Error()
 		Log.Warn("online_list request failed for client ip %q: %v", st.ClientIP, err)
+		return st
+	}
+	if code != http.StatusOK && code != http.StatusNoContent {
+		st.Message = fmt.Sprintf("online_list returned http %d", code)
+		Log.Warn("online_list for client ip %q returned http %d, leaving the session state unknown (body %s)",
+			st.ClientIP, code, truncate(body))
 		return st
 	}
 
 	result := firstMatch(reResult, body)
+	if result == "" {
+		st.Message = "online_list reply had no result field"
+		Log.Warn("online_list for client ip %q had no result field, leaving the session state unknown (body %s)",
+			st.ClientIP, truncate(body))
+		return st
+	}
+	st.Known = true
 	st.Online = result == "1" || strings.EqualFold(result, "ok")
 	if ip := firstMatch(reOnlineIP, body); ip != "" {
 		st.ClientIP = ip

@@ -188,6 +188,19 @@ func (s *Service) tick() {
 			Log.Debug("portal still unreachable: %s", st.Message)
 		}
 
+	case !st.Known:
+		// The portal answered but the session state could not be read. Reading
+		// that as a dropped session would fire a pointless login on every
+		// transient failure, so skip the reconnect for this round.
+		snap.State = StateError
+		snap.Message = "session state unknown: " + st.Message
+		snap.LastError = snap.Message
+		if prev.State != StateError || prev.Message != snap.Message {
+			Log.Warn("cannot read the session state: %s, skipping the reconnect this round", st.Message)
+		} else {
+			Log.Debug("session state still unknown: %s", st.Message)
+		}
+
 	case st.Online:
 		if cfg.CheckInternet {
 			snap.InternetChecked = true
@@ -236,10 +249,6 @@ func (s *Service) tick() {
 		snap.State = StateLoggingIn
 		snap.Message = "disconnected, signing in..."
 		s.publish(snap)
-
-		if st.ClientIP == "" {
-			Log.Warn("no client ip parsed from the portal page, the login request will send an empty wlan_user_ip")
-		}
 
 		s.mu.Lock()
 		s.attempts++

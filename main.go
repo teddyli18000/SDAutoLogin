@@ -48,6 +48,7 @@ func testLogin(cfg *Config) {
 	st := client.QueryStatus()
 
 	fmt.Println("portal reachable :", st.Reachable)
+	fmt.Println("state known      :", st.Known)
 	fmt.Println("portal online    :", st.Online)
 	fmt.Println("client ip        :", st.ClientIP)
 	fmt.Println("current account  :", st.Account)
