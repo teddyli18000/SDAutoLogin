@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# 构建单文件可执行程序（无运行时依赖）
+# Build the executable for the current platform. The result is a single file
+# with no runtime dependency.
+#
+# Cross compiling:
+#   GOOS=windows GOARCH=amd64 ./build.sh     Linux with mingw is not required
+#   GOOS=linux   GOARCH=arm64 ./build.sh
+# macOS builds need cgo and therefore the Xcode command line tools, so they
+# cannot be cross compiled from another OS.
 set -e
 cd "$(dirname "$0")"
 
@@ -10,5 +17,4 @@ echo "[2/2] go build ..."
 go build -trimpath -ldflags "-s -w" -o SDAutoLogin .
 
 echo
-echo "构建完成: $(pwd)/SDAutoLogin"
-echo "macOS 编译需要已安装 Xcode Command Line Tools（xcode-select --install）"
+echo "Built: $(pwd)/SDAutoLogin"

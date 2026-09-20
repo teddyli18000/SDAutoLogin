@@ -1,3 +1,4 @@
 @echo off
-rem 启动程序（无控制台窗口，常驻通知区域）
+rem Start the program without a console window; it stays in the notification
+rem area.
 start "" "%~dp0SDAutoLogin.exe"
