@@ -70,30 +70,35 @@ func trayReady(svc *Service, cfg *Config, appDir string) {
 
 	go func() {
 		for range mNow.ClickedCh {
-			Log.Info("manual check requested")
+			Log.Debug("tray: check now clicked")
+			Log.Info("manual check requested from the tray menu")
 			svc.Trigger()
 		}
 	}()
 	go func() {
 		for range mReload.ClickedCh {
+			Log.Debug("tray: reload config clicked")
 			next, err := LoadConfig(cfg.Path())
 			if err != nil {
 				Log.Error("reloading config: %v", err)
 				continue
 			}
+			Log.SetVerbose(next.VerboseLog)
 			t.cfg = next
 			svc.Restart(next)
 			svc.Trigger()
-			Log.Info("config reloaded")
+			Log.Info("config reloaded: %s", next.Summary())
 		}
 	}()
 	go func() {
 		for range mOpenCfg.ClickedCh {
+			Log.Debug("tray: open config file clicked")
 			openInEditor(t.cfg.Path())
 		}
 	}()
 	go func() {
 		for range mAutostart.ClickedCh {
+			Log.Debug("tray: autostart toggle clicked, currently %v", mAutostart.Checked())
 			on := !mAutostart.Checked()
 			if !setAutostart(on) {
 				Log.Warn("updating autostart entry failed")
@@ -109,6 +114,7 @@ func trayReady(svc *Service, cfg *Config, appDir string) {
 	}()
 	go func() {
 		<-mQuit.ClickedCh
+		Log.Info("exit requested from the tray menu")
 		systray.Quit()
 	}()
 
@@ -119,6 +125,7 @@ func trayReady(svc *Service, cfg *Config, appDir string) {
 		Log.Warn("no account configured yet, opening %s", cfg.Path())
 		openInEditor(cfg.Path())
 	}
+	Log.Debug("tray ready, menu items registered")
 }
 
 func (t *unixTray) onStatus(s Snapshot) {
@@ -127,6 +134,7 @@ func (t *unixTray) onStatus(s Snapshot) {
 
 	if s.State != t.lastState {
 		t.lastState = s.State
+		Log.Debug("tray icon updated to %s (internet checked=%v ok=%v)", s.State, s.InternetChecked, s.InternetOK)
 		switch s.State {
 		case StateOnline:
 			systray.SetIcon(t.iconOnline)

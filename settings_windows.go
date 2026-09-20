@@ -24,6 +24,7 @@ const (
 	idSuffix       = 2010
 	idStatus       = 2011
 	idCheckInternt = 2012
+	idVerbose      = 2013
 	idSave         = 2020
 	idCancel       = 2021
 )
@@ -40,7 +41,7 @@ const (
 
 const (
 	clientW = 470
-	clientH = 415
+	clientH = 440
 )
 
 type settingsWindow struct {
@@ -55,12 +56,15 @@ type settingsWindow struct {
 	hRemember     syscall.Handle
 	hAutoLogin    syscall.Handle
 	hCheckInternt syscall.Handle
+	hVerbose      syscall.Handle
 	hInterval     syscall.Handle
 	hPortal       syscall.Handle
 	hEportal      syscall.Handle
 	hPrefix       syscall.Handle
 	hSuffix       syscall.Handle
 	hStatus       syscall.Handle
+
+	visible bool
 }
 
 var settingsInstance *settingsWindow
@@ -78,6 +82,7 @@ func settingsProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 			case id == idSave && code == bnClicked:
 				sw.onSave()
 			case id == idCancel && code == bnClicked:
+				Log.Debug("settings: cancel clicked, discarding the form")
 				sw.hide()
 			case id == idOperator && code == cbnSelChange:
 				sw.onOperatorChanged()
@@ -87,6 +92,7 @@ func settingsProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 	case wmClose:
 		// Hiding instead of destroying keeps the window reusable.
 		if sw != nil {
+			Log.Debug("settings: close requested, hiding the window")
 			sw.hide()
 		}
 		return 0
@@ -174,25 +180,29 @@ func (w *settingsWindow) buildControls() {
 	w.hRemember = check("Remember password (write to config file)", ix, 114, iw, 22, idRemember)
 	w.hAutoLogin = check("Auto login after disconnection", ix, 138, iw, 22, idAutoLogin)
 	w.hCheckInternt = check("Probe Internet reachability (status only)", ix, 162, iw, 22, idCheckInternt)
+	w.hVerbose = check("Verbose logging (per-check diagnostics)", ix, 186, iw, 22, idVerbose)
 
-	label("Interval (s)", lx, 193, lw, 22)
-	w.hInterval = edit("15", ix, 190, 80, 24, idInterval, 0)
+	label("Interval (s)", lx, 217, lw, 22)
+	w.hInterval = edit("15", ix, 214, 80, 24, idInterval, 0)
 
-	label("Portal home", lx, 225, lw, 22)
-	w.hPortal = edit("", ix, 222, iw, 24, idPortal, 0)
+	label("Portal home", lx, 249, lw, 22)
+	w.hPortal = edit("", ix, 246, iw, 24, idPortal, 0)
 
-	label("API endpoint", lx, 257, lw, 22)
-	w.hEportal = edit("", ix, 254, iw, 24, idEportal, 0)
+	label("API endpoint", lx, 281, lw, 22)
+	w.hEportal = edit("", ix, 278, iw, 24, idEportal, 0)
 
-	label("Prefix/suffix", lx, 289, lw, 22)
-	w.hPrefix = edit("", ix, 286, 90, 24, idPrefix, 0)
-	label("suffix", 222, 289, 45, 22)
-	w.hSuffix = edit("", 270, 286, 180, 24, idSuffix, 0)
+	label("Prefix/suffix", lx, 313, lw, 22)
+	w.hPrefix = edit("", ix, 310, 90, 24, idPrefix, 0)
+	label("suffix", 222, 313, 45, 22)
+	w.hSuffix = edit("", 270, 310, 180, 24, idSuffix, 0)
 
-	w.hStatus = mk("STATIC", "", wsChild|wsVisible, lx, 318, clientW-40, 50, idStatus)
+	w.hStatus = mk("STATIC", "", wsChild|wsVisible, lx, 342, clientW-40, 50, idStatus)
 
-	mk("BUTTON", "Save", wsChild|wsVisible|wsTabStop, 280, 376, 80, 28, idSave)
-	mk("BUTTON", "Cancel", wsChild|wsVisible|wsTabStop, 370, 376, 80, 28, idCancel)
+	mk("BUTTON", "Save", wsChild|wsVisible|wsTabStop, 280, 400, 80, 28, idSave)
+	mk("BUTTON", "Cancel", wsChild|wsVisible|wsTabStop, 370, 400, 80, 28, idCancel)
+
+	Log.Debug("settings window created (hwnd=%#x): account, password, isp, 4 checkboxes, interval, portal, api, prefix, suffix, status",
+		uintptr(w.hwnd))
 }
 
 func (w *settingsWindow) show() {
@@ -205,10 +215,16 @@ func (w *settingsWindow) show() {
 	}
 	procSetForegroundWindow.Call(uintptr(w.hwnd))
 	procSetFocus.Call(uintptr(w.hUser))
+	w.visible = true
+	Log.Debug("settings window shown")
 }
 
 func (w *settingsWindow) hide() {
 	procShowWindow.Call(uintptr(w.hwnd), swHide)
+	if w.visible {
+		w.visible = false
+		Log.Debug("settings window hidden")
+	}
 }
 
 func (w *settingsWindow) loadFromConfig() {
@@ -228,6 +244,7 @@ func (w *settingsWindow) loadFromConfig() {
 	setChecked(w.hRemember, cfg.RememberPassword)
 	setChecked(w.hAutoLogin, cfg.AutoLogin)
 	setChecked(w.hCheckInternt, cfg.CheckInternet)
+	setChecked(w.hVerbose, cfg.VerboseLog)
 	setWindowText(w.hInterval, strconv.Itoa(cfg.CheckIntervalSeconds))
 	setWindowText(w.hPortal, cfg.PortalBaseURL)
 	setWindowText(w.hEportal, cfg.EportalURL)
@@ -240,6 +257,7 @@ func (w *settingsWindow) loadFromConfig() {
 func (w *settingsWindow) onOperatorChanged() {
 	idx := int(sendMessage(w.hOperator, cbGetCurSel, 0, 0))
 	if idx >= 0 && idx < len(Operators) {
+		Log.Debug("settings: isp changed to %q, suffix set to %q", Operators[idx].Name, Operators[idx].Suffix)
 		setWindowText(w.hSuffix, Operators[idx].Suffix)
 	}
 }
@@ -249,6 +267,7 @@ func (w *settingsWindow) onSave() {
 
 	username := strings.TrimSpace(getWindowText(w.hUser))
 	if username == "" {
+		Log.Warn("settings: refusing to save an empty account")
 		messageBox(w.hwnd, appTitle, "Account must not be empty.", mbIconWarning)
 		return
 	}
@@ -257,6 +276,7 @@ func (w *settingsWindow) onSave() {
 	next.RememberPassword = isChecked(w.hRemember)
 	next.AutoLogin = isChecked(w.hAutoLogin)
 	next.CheckInternet = isChecked(w.hCheckInternt)
+	next.VerboseLog = isChecked(w.hVerbose)
 
 	if interval, err := strconv.Atoi(strings.TrimSpace(getWindowText(w.hInterval))); err == nil && interval >= 5 {
 		next.CheckIntervalSeconds = interval
@@ -278,12 +298,13 @@ func (w *settingsWindow) onSave() {
 		return
 	}
 
+	// Verbose output may just have been switched on, so do this before logging.
+	Log.SetVerbose(next.VerboseLog)
 	w.app.cfg = &next
 	w.app.svc.Restart(&next)
 	w.app.svc.Trigger()
 	setWindowText(w.hStatus, w.statusText())
-	Log.Info("settings saved (account %s, isp %s, auto login %v, remember password %v)",
-		next.Username, next.OperatorName(), next.AutoLogin, next.RememberPassword)
+	Log.Info("settings saved, resubmitting one check: %s", next.Summary())
 	w.hide()
 }
 

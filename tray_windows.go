@@ -49,6 +49,9 @@ type trayApp struct {
 	iconErr  syscall.Handle
 
 	settings *settingsWindow
+
+	// lastState is only touched by the UI thread, see refresh.
+	lastState State
 }
 
 var trayInstance *trayApp
@@ -61,10 +64,13 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 		if trayInstance == nil {
 			break
 		}
-		switch uint32(lparam) & 0xffff {
+		mouse := uint32(lparam) & 0xffff
+		switch mouse {
 		case wmLButtonDblClk:
+			Log.Debug("tray: double click, opening settings")
 			trayInstance.showSettings()
 		case wmRButtonUp, wmLButtonUp:
+			Log.Debug("tray: menu requested (mouse message %#x)", mouse)
 			trayInstance.showMenu()
 		}
 		return 0
@@ -74,6 +80,7 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 	case wmDestroy:
+		Log.Debug("tray window destroyed")
 		procPostQuitMessage.Call(0)
 		return 0
 	}
@@ -102,6 +109,7 @@ func runUI(svc *Service, cfg *Config, appDir string) {
 		app.showSettings()
 	}
 
+	Log.Debug("entering the tray message loop")
 	app.messageLoop()
 	svc.Stop()
 	Log.Info("tray stopped")
@@ -150,6 +158,8 @@ func (a *trayApp) create() error {
 		return fmt.Errorf("Shell_NotifyIcon: %v", err)
 	}
 	Log.Info("tray icon created")
+	Log.Debug("tray window hwnd=%#x, notify icon id=%d, icons app=%#x info=%#x warn=%#x error=%#x",
+		uintptr(a.hwnd), a.nid.UID, uintptr(a.iconApp), uintptr(a.iconInfo), uintptr(a.iconWarn), uintptr(a.iconErr))
 	return nil
 }
 
@@ -182,6 +192,11 @@ func (a *trayApp) Snapshot() Snapshot {
 
 func (a *trayApp) refresh() {
 	s := a.Snapshot()
+	if s.State != a.lastState {
+		a.lastState = s.State
+		Log.Debug("tray icon updated to %s (internet checked=%v ok=%v)",
+			s.State, s.InternetChecked, s.InternetOK)
+	}
 	a.nid.HIcon = a.iconFor(s.State)
 	a.nid.UFlags = nifMessage | nifIcon | nifTip
 	putUTF16(a.nid.SzTip[:], a.tooltip(s))
@@ -215,6 +230,7 @@ func (a *trayApp) tooltip(s Snapshot) string {
 
 func (a *trayApp) showMenu() {
 	s := a.Snapshot()
+	Log.Debug("building tray menu for status %s", describeSnapshot(s))
 	menu, _, _ := procCreatePopupMenu.Call()
 
 	status := "Status: " + s.State.String()
@@ -264,18 +280,21 @@ func appendMenu(menu uintptr, flags uintptr, id uintptr, text string) {
 }
 
 func (a *trayApp) handleCommand(cmd uint32) {
+	Log.Debug("tray command selected: id=%d (%s)", cmd, commandName(cmd))
 	switch cmd {
 	case cmdCheckNow:
-		Log.Info("manual check requested")
+		Log.Info("manual check requested from the tray menu")
 		a.svc.Trigger()
 	case cmdSettings:
 		a.showSettings()
 	case cmdReload:
 		a.reloadConfig()
 	case cmdOpenCfg:
+		Log.Info("opening config file %s", a.cfg.Path())
 		openWithShell(a.cfg.Path())
 	case cmdOpenLog:
 		if p := Log.Path(); p != "" {
+			Log.Info("opening log file %s", p)
 			openWithShell(p)
 		}
 	case cmdAutostart:
@@ -286,25 +305,50 @@ func (a *trayApp) handleCommand(cmd uint32) {
 			messageBox(a.hwnd, appTitle, "Could not update the startup entry, see the log.", mbIconWarning)
 		}
 	case cmdExit:
+		Log.Info("exit requested from the tray menu")
 		a.exit()
 	}
 }
 
+func commandName(cmd uint32) string {
+	switch cmd {
+	case cmdCheckNow:
+		return "check now"
+	case cmdSettings:
+		return "settings"
+	case cmdReload:
+		return "reload config"
+	case cmdOpenCfg:
+		return "open config file"
+	case cmdAutostart:
+		return "toggle autostart"
+	case cmdOpenLog:
+		return "open log"
+	case cmdExit:
+		return "exit"
+	default:
+		return "unknown"
+	}
+}
+
 func (a *trayApp) reloadConfig() {
+	Log.Info("reloading config from %s", a.cfg.Path())
 	cfg, err := LoadConfig(a.cfg.Path())
 	if err != nil {
 		Log.Error("reloading config: %v", err)
 		messageBox(a.hwnd, appTitle, "Could not reload the config: "+err.Error(), mbIconError)
 		return
 	}
+	Log.SetVerbose(cfg.VerboseLog)
 	a.cfg = cfg
 	a.svc.Restart(cfg)
 	a.svc.Trigger()
-	Log.Info("config reloaded")
+	Log.Info("config reloaded: %s", cfg.Summary())
 }
 
 func (a *trayApp) showSettings() {
 	if a.settings == nil {
+		Log.Debug("creating the settings window")
 		w := newSettingsWindow(a)
 		if err := w.create(); err != nil {
 			Log.Error("creating settings window: %v", err)
@@ -317,6 +361,7 @@ func (a *trayApp) showSettings() {
 }
 
 func (a *trayApp) exit() {
+	Log.Debug("removing the tray icon and destroying the tray window")
 	procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&a.nid)))
 	procDestroyWindow.Call(uintptr(a.hwnd))
 }
