@@ -67,54 +67,63 @@ portal itself.
 ## Build
 
 Requires Go 1.26 or newer. All dependencies are vendored, so the build works
-offline.
+offline. Everything is written to `dist/`.
 
-Windows:
+One command, no extra tooling:
 
 ```bat
 build.cmd
 ```
 
-Linux and macOS:
-
 ```sh
 ./build.sh
 ```
 
-Or directly:
+The same tasks are available directly, which is what the other targets need:
 
 ```sh
-# Windows, no console window
-go build -trimpath -ldflags "-s -w -H=windowsgui" -o SDAutoLogin.exe .
-
-# Linux / macOS
-go build -trimpath -ldflags "-s -w" -o SDAutoLogin .
+go run ./tools/build            # list the tasks
+go run ./tools/build build      # this platform
+go run ./tools/build console    # console build, for scripts and services
+go run ./tools/build all        # Windows and Linux, amd64 and arm64
+go run ./tools/build test       # go vet and go test
+go run ./tools/build icon       # redraw the icon from the drawing code
+go run ./tools/build resources  # regenerate the Windows resource file
+go run ./tools/build clean
 ```
 
-Cross compiling works for Windows and Linux, for example:
+CMake drives the same tasks, if you prefer that:
 
 ```sh
-GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o SDAutoLogin .
+cmake -S . -B build -G Ninja
+cmake --build build                      # builds the program
+cmake --build build --target check       # go vet and go test
+cmake --build build --target SDAutoLogin-console
+cmake --build build --target all-platforms
+cmake --install build --prefix /usr/local
 ```
 
-macOS is the exception: the tray needs cgo, so it has to be built on macOS
-with the Xcode command line tools installed (`xcode-select --install`).
+CMake compiles nothing itself: the Go toolchain is the compiler, and the task
+runner owns the flags, so the three ways in cannot drift apart. The project
+declares no languages, which means no C compiler is needed; on Windows the
+generator must therefore not depend on a C toolchain either, and Ninja is a good
+choice for that (a single executable, no installer).
+
+Cross compiling covers Windows and Linux. macOS is the exception: its tray needs
+cgo, so that build has to be made on macOS with the Xcode command line tools
+installed (`xcode-select --install`).
 
 The Windows executable carries an icon, version information and a DPI aware
-application manifest. Those resources live in `rsrc_windows_amd64.syso`, which
-is generated from `winres/winres.json` and the icon in `winres/icon.ico`. Both
-can be regenerated:
-
-```sh
-go run tools/icogen/main.go winres/icon.ico   # redraw the icon
-go-winres make --in winres/winres.json --out rsrc --arch amd64
-```
+application manifest, embedded from `rsrc_windows_amd64.syso`. The icon and that
+file are both generated, from the drawing code and from `winres/winres.json`;
+the `icon` and `resources` tasks above regenerate them. Both are reproducible,
+so rerunning them does not change the files unless the artwork changed.
 
 ## Usage
 
-Double click `SDAutoLogin.exe` (or run `./SDAutoLogin`). The program adds a
-tray icon and keeps checking in the background. On the first run, when no
-account is stored yet, the settings page opens automatically.
+Double click `dist\SDAutoLogin.exe`, or run `dist/SDAutoLogin` elsewhere. The
+program adds a tray icon and keeps checking in the background. On the first run,
+when no account is stored yet, the settings page opens automatically.
 
 Tray menu:
 
@@ -235,6 +244,10 @@ Both live next to the executable:
 - `config.json` - settings
 - `logs/app.log` - log, rotated to `app.log.1` when it exceeds 4 MiB
 
+The program finds them next to its own executable, so a build in `dist/` keeps
+its settings and log there. When the executable moves, `config.json` has to move
+with it.
+
 ## Interface language
 
 `auto` follows the system language, `zh` and `en` force one. The setting
@@ -272,6 +285,8 @@ log is readable by anyone.
 | `win32_windows.go`, `icon_windows.go`, `openurl_*.go`, `autostart_*.go` | platform glue |
 | `winres/`, `rsrc_windows_amd64.syso` | Windows icon, version, manifest |
 | `tools/icogen/` | icon generator |
+| `tools/build/` | task runner, used by the scripts and the CMake targets |
+| `CMakeLists.txt` | CMake front end for the task runner |
 | `vendor/` | vendored dependencies |
 
 ## Troubleshooting

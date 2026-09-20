@@ -57,52 +57,60 @@
 
 ## 编译
 
-需要 Go 1.26 或更新版本。依赖已经 vendor 到仓库里，离线也能编译。
+需要 Go 1.26 或更新版本。依赖已经 vendor 到仓库里，离线也能编译。产物统一放在
+`dist/`。
 
-Windows：
+最省事的方式，一条命令、不需要额外工具：
 
 ```bat
 build.cmd
 ```
 
-Linux 和 macOS：
-
 ```sh
 ./build.sh
 ```
 
-也可以直接敲命令：
+同样的任务也可以直接调用，交叉编译等场合用它更方便：
 
 ```sh
-# Windows，不带控制台窗口
-go build -trimpath -ldflags "-s -w -H=windowsgui" -o SDAutoLogin.exe .
-
-# Linux / macOS
-go build -trimpath -ldflags "-s -w" -o SDAutoLogin .
+go run ./tools/build            # 列出所有任务
+go run ./tools/build build      # 当前平台
+go run ./tools/build console    # 控制台版本，供脚本/服务使用
+go run ./tools/build all        # Windows 与 Linux，amd64 与 arm64
+go run ./tools/build test       # go vet 与 go test
+go run ./tools/build icon       # 按绘图代码重绘图标
+go run ./tools/build resources  # 重新生成 Windows 资源文件
+go run ./tools/build clean
 ```
 
-Windows 和 Linux 都可以交叉编译，例如：
+如果你习惯 CMake，它也驱动同一批任务：
 
 ```sh
-GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o SDAutoLogin .
+cmake -S . -B build -G Ninja
+cmake --build build                      # 编译主程序
+cmake --build build --target check       # go vet 与 go test
+cmake --build build --target SDAutoLogin-console
+cmake --build build --target all-platforms
+cmake --install build --prefix /usr/local
 ```
 
-macOS 是例外：托盘依赖 cgo，必须在本机安装 Xcode 命令行工具
-（`xcode-select --install`）后编译。
+CMake 自身不编译任何东西：编译器是 Go 工具链，编译参数由任务运行器统一持有，
+所以三种入口不会各自漂移。工程未声明任何语言，因此不需要 C 编译器；Windows 上
+也就要求生成器本身不依赖 C 工具链，Ninja 是合适的选择（单个可执行文件，无需
+安装程序）。
 
-Windows 可执行文件内含图标、版本信息和 DPI 感知清单，这些资源位于
-`rsrc_windows_amd64.syso`，由 `winres/winres.json` 和 `winres/icon.ico`
-生成，两者都可以重新生成：
+交叉编译覆盖 Windows 和 Linux。macOS 是例外：托盘依赖 cgo，必须在本机安装
+Xcode 命令行工具（`xcode-select --install`）后编译。
 
-```sh
-go run tools/icogen/main.go winres/icon.ico   # 重绘图标
-go-winres make --in winres/winres.json --out rsrc --arch amd64
-```
+Windows 可执行文件内含图标、版本信息和 DPI 感知清单，由
+`rsrc_windows_amd64.syso` 嵌入；图标和该文件都是生成的（源码里的绘图代码与
+`winres/winres.json`），用上面的 `icon`、`resources` 任务重新生成即可。两者
+都是可复现的，没有改动图案时重新生成不会产生任何差异。
 
 ## 使用
 
-双击 `SDAutoLogin.exe`（或运行 `./SDAutoLogin`）。程序会在通知区域放置图标并
-在后台持续检测。首次运行还没有保存账号时，设置页会自动打开。
+双击 `dist\SDAutoLogin.exe`（或在其它平台运行 `./dist/SDAutoLogin`）。程序会在
+通知区域放置图标并在后台持续检测。首次运行还没有保存账号时，设置页会自动打开。
 
 程序已在运行时再次启动，不会多出一个托盘图标，而是让正在运行的实例打开
 设置页。
@@ -219,6 +227,9 @@ go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe .
 - `config.json` - 设置
 - `logs/app.log` - 日志，超过 4 MiB 时轮转为 `app.log.1`
 
+程序是「按可执行文件所在目录」找这两个文件的，所以在 `dist/` 里编译出来的程序，
+它的配置和日志也在 `dist/` 里；移动可执行文件时记得把 `config.json` 一起移动。
+
 ## 界面语言
 
 `auto` 跟随系统语言，`zh` 和 `en` 为强制指定。该设置影响托盘菜单、气泡提示和
@@ -251,6 +262,8 @@ go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe .
 | `win32_windows.go`、`icon_windows.go`、`openurl_*.go`、`autostart_*.go` | 平台相关代码 |
 | `winres/`、`rsrc_windows_amd64.syso` | Windows 图标、版本、清单 |
 | `tools/icogen/` | 图标生成器 |
+| `tools/build/` | 任务运行器，脚本与 CMake 目标都由它执行 |
+| `CMakeLists.txt` | 任务运行器的 CMake 前端 |
 | `vendor/` | 依赖库 |
 
 ## 常见问题

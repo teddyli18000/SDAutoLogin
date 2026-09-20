@@ -1,20 +1,13 @@
 #!/usr/bin/env bash
-# Build the executable for the current platform. The result is a single file
-# with no runtime dependency.
+# Build the executable for this platform through the task runner, so the flags
+# live in one place. See "go run ./tools/build" for every task.
 #
-# Cross compiling:
-#   GOOS=windows GOARCH=amd64 ./build.sh     Linux with mingw is not required
-#   GOOS=linux   GOARCH=arm64 ./build.sh
-# macOS builds need cgo and therefore the Xcode command line tools, so they
-# cannot be cross compiled from another OS.
+# macOS builds need cgo and the Xcode command line tools, they cannot be cross
+# compiled from another system.
 set -e
 cd "$(dirname "$0")"
 
-echo "[1/2] go vet ..."
-go vet ./...
-
-echo "[2/2] go build ..."
-go build -trimpath -ldflags "-s -w" -o SDAutoLogin .
+go run ./tools/build build
 
 echo
-echo "Built: $(pwd)/SDAutoLogin"
+echo "Built: $(pwd)/dist/SDAutoLogin"

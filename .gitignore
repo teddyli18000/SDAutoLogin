@@ -5,6 +5,9 @@
 /SDAutoLogin.exe~
 /dist/
 /dist-*
+# CMake build directory
+/build/
+/build-*/
 
 # runtime data
 /config.json
