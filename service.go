@@ -177,6 +177,8 @@ func (s *Service) tick() {
 	snap.LastLoginAt = s.lastLogin
 	s.mu.Unlock()
 
+	offline := offlineSuffix(lastOnline)
+
 	switch {
 	case !st.Reachable:
 		snap.State = StateError
@@ -196,7 +198,8 @@ func (s *Service) tick() {
 		snap.Message = "session state unknown: " + st.Message
 		snap.LastError = snap.Message
 		if prev.State != StateError || prev.Message != snap.Message {
-			Log.Warn("cannot read the session state: %s, skipping the reconnect this round", st.Message)
+			Log.Warn("cannot read the session state: %s, skipping the reconnect this round%s",
+				st.Message, offline)
 		} else {
 			Log.Debug("session state still unknown: %s", st.Message)
 		}
@@ -209,7 +212,8 @@ func (s *Service) tick() {
 			snap.InternetOK = true
 		}
 		snap.State = StateOnline
-		if snap.InternetChecked && !snap.InternetOK {
+		internetFailed := snap.InternetChecked && !snap.InternetOK
+		if internetFailed {
 			snap.Message = "portal online, Internet unreachable"
 		}
 
@@ -221,8 +225,14 @@ func (s *Service) tick() {
 				Log.Info("session is online (account %s, client ip %s)", st.Account, st.ClientIP)
 			}
 		}
-		if snap.InternetChecked && !snap.InternetOK {
-			Log.Warn("portal reports online but no probe host answered without interception")
+		if internetFailed {
+			// Only on the transition, otherwise an unreachable probe host would
+			// warn once per check.
+			if prev.State != StateOnline || prev.InternetOK {
+				Log.Warn("portal reports online but no probe host answered without interception")
+			} else {
+				Log.Debug("probe hosts still unreachable while the portal reports online")
+			}
 		}
 
 		s.mu.Lock()
@@ -234,15 +244,17 @@ func (s *Service) tick() {
 		snap.State = StateOffline
 		snap.Message = "auto login is disabled"
 		if prev.State != StateOffline {
-			Log.Warn("session is down but auto login is disabled, staying offline")
+			Log.Warn("session is down but auto login is disabled, staying offline%s", offline)
 		}
 
 	case !cfg.Configured():
 		snap.State = StateError
 		snap.Message = "no account configured, open the settings window"
 		snap.LastError = snap.Message
-		if prev.State != StateError {
-			Log.Warn("%s", snap.Message)
+		// Compared by message as well: the previous round may already have been
+		// an Error for a different reason, which would hide this one.
+		if prev.State != StateError || prev.Message != snap.Message {
+			Log.Warn("%s%s", snap.Message, offline)
 		}
 
 	default:
@@ -254,8 +266,8 @@ func (s *Service) tick() {
 		s.attempts++
 		attempt := s.attempts
 		s.mu.Unlock()
-		Log.Info("session is down, reconnect attempt #%d for account %q (client ip %q)",
-			attempt, cfg.Username, st.ClientIP)
+		Log.Info("session is down, reconnect attempt #%d for account %q (client ip %q)%s",
+			attempt, cfg.Username, st.ClientIP, offline)
 
 		attemptStart := time.Now()
 		res := s.client.Login(st)
@@ -268,10 +280,9 @@ func (s *Service) tick() {
 			snap.State = StateError
 			snap.LastError = res.Message
 			snap.Message = "login failed: " + res.Message
-			Log.Warn("reconnect attempt #%d rejected after %d ms: %s (ret_code=%s, raw %s)",
-				attempt, elapsedMS(attemptStart), res.Message, res.RetCode, truncate(res.Raw))
-			Log.Warn("reconnect attempt #%d failed, %d consecutive failure(s), next try in %ds",
-				attempt, streak, cfg.CheckIntervalSeconds)
+			Log.Warn("reconnect attempt #%d rejected after %d ms: %s (ret_code=%s, raw %s)%s",
+				attempt, elapsedMS(attemptStart), res.Message, res.RetCode, truncate(res.Raw), offline)
+			logReconnectFailure(attempt, streak, cfg.CheckIntervalSeconds, offline)
 			break
 		}
 
@@ -303,9 +314,9 @@ func (s *Service) tick() {
 			snap.State = StateError
 			snap.Message = "portal accepted the login but still reports offline"
 			snap.LastError = snap.Message
-			Log.Warn("reconnect attempt #%d: %s (raw %s)", attempt, snap.Message, truncate(res.Raw))
-			Log.Warn("reconnect attempt #%d failed, %d consecutive failure(s), next try in %ds",
-				attempt, streak, cfg.CheckIntervalSeconds)
+			Log.Warn("reconnect attempt #%d: the login was accepted but the follow-up query says offline (portal reachable=%v, detail %q), raw login reply %s",
+				attempt, verify.Reachable, verify.Message, truncate(res.Raw))
+			logReconnectFailure(attempt, streak, cfg.CheckIntervalSeconds, offline)
 		}
 	}
 
@@ -343,4 +354,28 @@ func shortDuration(d time.Duration) string {
 		return d.Round(time.Millisecond).String()
 	}
 	return d.Round(time.Second).String()
+}
+
+// failStreakErrorLevel is the number of consecutive rejections after which the
+// summary line is raised to ERROR, so a sustained outage stands out from a
+// single transient failure.
+const failStreakErrorLevel = 3
+
+// offlineSuffix renders ", offline for 4m10s" once a previous online moment is
+// known, which keeps the outage duration visible during a long failure run.
+func offlineSuffix(lastOnline time.Time) string {
+	if lastOnline.IsZero() {
+		return ""
+	}
+	return ", offline for " + shortDuration(time.Since(lastOnline))
+}
+
+func logReconnectFailure(attempt, streak int64, retrySeconds int, offline string) {
+	if streak >= failStreakErrorLevel {
+		Log.Error("reconnect attempt #%d failed, %d consecutive failures%s, next try in %ds",
+			attempt, streak, offline, retrySeconds)
+		return
+	}
+	Log.Warn("reconnect attempt #%d failed, %d consecutive failure(s)%s, next try in %ds",
+		attempt, streak, offline, retrySeconds)
 }

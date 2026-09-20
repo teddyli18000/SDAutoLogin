@@ -118,7 +118,12 @@ func (c *Client) QueryStatus() Status {
 		st.ClientIP = firstMatch(reV46, page)
 	}
 	st.ClientIPv6 = firstMatch(reV6, page)
-	Log.Debug("portal page parsed: clientIp=%q ipv6=%q", st.ClientIP, st.ClientIPv6)
+	if st.ClientIP == "" {
+		// Without it the login request cannot tell the portal which client to
+		// authenticate, so a reconnect would be rejected.
+		Log.Warn("no v4ip found on the portal page, a login request would send an empty wlan_user_ip")
+	}
+	Log.Debug("portal page parsed: http %d, clientIp=%q ipv6=%q", code, st.ClientIP, st.ClientIPv6)
 
 	query := c.cfg.EportalURL + "?c=Portal&a=online_list" +
 		"&user_account=drcom&user_password=123" +
