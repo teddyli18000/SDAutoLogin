@@ -3,6 +3,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"syscall"
 	"unicode/utf16"
@@ -39,6 +40,8 @@ var (
 	procShellExecuteW    = modShell32.NewProc("ShellExecuteW")
 
 	procGetModuleHandleW = modKernel32.NewProc("GetModuleHandleW")
+	procAttachConsole    = modKernel32.NewProc("AttachConsole")
+	procGetStdHandle     = modKernel32.NewProc("GetStdHandle")
 )
 
 const (
@@ -71,6 +74,11 @@ const (
 	swShowNormal = 1
 
 	idcArrow = 32512
+
+	// Standard handles and the pseudo process id AttachConsole understands.
+	stdOutputHandle     = 0xfffffff5
+	stdErrorHandle      = 0xfffffff4
+	attachParentProcess = 0xffffffff
 
 	// GetSystemMetrics index of the small icon size, see icon_windows.go.
 	smCxSmIcon = 49
@@ -170,6 +178,33 @@ func messageBox(owner syscall.Handle, title, text string, flags uint32) {
 func loadSystemCursor() syscall.Handle {
 	h, _, _ := procLoadCursorW.Call(0, idcArrow)
 	return syscall.Handle(h)
+}
+
+// attachConsole gives the output of a command somewhere to appear. The
+// executable is linked as a GUI program so a double click does not flash a
+// console window, which also means it has no console of its own and anything it
+// prints is discarded. Started from a terminal it attaches to that terminal
+// here. A process that was handed handles, for a pipe or a redirected file, is
+// left alone so its output keeps going where the caller put it.
+func attachConsole() {
+	if validStdHandle(stdOutputHandle) || validStdHandle(stdErrorHandle) {
+		return
+	}
+	if r, _, _ := procAttachConsole.Call(attachParentProcess); r == 0 {
+		return
+	}
+	f, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0)
+	if err != nil {
+		Log.Warn("could not open the console for output: %v", err)
+		return
+	}
+	os.Stdout = f
+	os.Stderr = f
+}
+
+func validStdHandle(which uintptr) bool {
+	h, _, _ := procGetStdHandle.Call(which)
+	return h != 0 && h != ^uintptr(0)
 }
 
 const (

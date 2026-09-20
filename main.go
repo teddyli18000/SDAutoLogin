@@ -13,10 +13,15 @@ const appTitle = "Campus Auto Login"
 
 func main() {
 	appDir := resolveAppDir()
+	args := os.Args[1:]
+	if len(args) > 0 {
+		// Arguments mean a command was asked for, so a terminal is waiting for
+		// the answer. See attachConsole.
+		attachConsole()
+	}
 	Log.Init(filepath.Join(appDir, "logs"))
 	Log.Info("SDAutoLogin %s starting on %s, app dir %s", appVersion, platformName(), appDir)
 
-	args := os.Args[1:]
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		os.Exit(runCommand(args, appDir))
 	}

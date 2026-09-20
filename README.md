@@ -178,8 +178,19 @@ version        print the version
 help           print the usage text
 ```
 
-Without a command the tray starts. `-cli` is short for `run`, `-test-login`
-is short for `login`.
+The same executable serves both modes: started without a command it puts the
+tray icon up and keeps running, started with one it does that one thing and
+exits. `-cli` is short for `run`, `-test-login` is short for `login`.
+
+On Windows the file is linked as a GUI program, so a double click does not open
+a console window. Started from a terminal it attaches to that terminal, so the
+output is visible there. Where the output has to be piped or the exit code read
+by a script, build the console variant instead, which is the same source
+without `-H=windowsgui`:
+
+```sh
+go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe .
+```
 
 `status` exit codes: `0` online, `1` state unknown or failure, `3` the portal
 says the client is not logged in. That makes it usable in a monitoring script.
