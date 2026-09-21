@@ -202,7 +202,7 @@ by a script, build the console variant instead, which is the same source
 without `-H=windowsgui`:
 
 ```sh
-go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe .
+go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe ./cmd/SDAutoLogin
 ```
 
 `status` exit codes: `0` online, `1` state unknown or failure, `3` the portal
@@ -271,22 +271,23 @@ log is readable by anyone.
 
 ## Project layout
 
+The code follows the usual Go layout: `cmd/` holds the executable, `internal/`
+holds the packages it is built from. Nothing outside the module can import them,
+which is what keeps the public surface at the command line and the settings page.
+
 | Path | Content |
 | --- | --- |
-| `main.go` | entry point, mode selection, headless runner |
-| `portal.go` | Dr.COM eportal client |
-| `service.go` | check and reconnect loop |
-| `config.go` | configuration |
-| `appstate.go` | configuration and service shared by tray, page and CLI |
-| `websettings.go` | local settings service and its JSON API |
-| `webui/` | settings page, served from the executable |
-| `i18n.go`, `i18n_web.go` | interface strings |
-| `locale_windows.go`, `locale_other.go` | system language detection |
+| `cmd/SDAutoLogin/` | entry point: mode selection, the tray and headless runners, the command line, console attachment |
+| `internal/portal/` | Dr.COM eportal client |
+| `internal/service/` | check and reconnect loop, session state |
+| `internal/config/` | configuration file, operator list, validation |
+| `internal/app/` | configuration and service shared by the tray, the page and the command line, plus the local settings service |
+| `internal/webui/` | settings page and the assets embedded from it |
+| `internal/i18n/` | interface strings and system language detection |
+| `internal/logging/` | logger with rotation |
+| `internal/tray/` | tray per platform, with the Win32 primitives and the icon conversion |
+| `internal/platform/` | operating system glue: open a file or URL, autostart entry, single instance |
 | `internal/brand/` | icon drawing |
-| `tray_windows.go`, `tray_unix.go`, `tray_other.go` | tray per platform |
-| `cli.go`, `setup.go` | command line |
-| `log.go` | logger with rotation |
-| `win32_windows.go`, `icon_windows.go`, `openurl_*.go`, `autostart_*.go` | platform glue |
 | `winres/` | Windows icon, version and manifest, and the generated resource file compiled from them |
 | `tools/icogen/` | icon generator |
 | `tools/build/` | task runner, used by the scripts and the CMake targets |

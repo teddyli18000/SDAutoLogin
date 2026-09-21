@@ -184,7 +184,7 @@ Windows 上该文件按 GUI 程序链接，双击不会弹出控制台窗口；�
 退出码，请改编译成控制台版本（同一份源码，去掉 `-H=windowsgui` 即可）：
 
 ```sh
-go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe .
+go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe ./cmd/SDAutoLogin
 ```
 
 `status` 的退出码：`0` 在线，`1` 状态未知或失败，`3` 门户回答未登录。可以直接
@@ -246,22 +246,22 @@ go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe .
 
 ## 项目结构
 
+代码采用 Go 的常规布局：`cmd/` 放可执行程序，`internal/` 放构成它的各个包。
+模块之外无法引用这些包，对外的接口就只有命令行和设置页。
+
 | 路径 | 内容 |
 | --- | --- |
-| `main.go` | 入口、模式选择、后台运行 |
-| `portal.go` | Dr.COM 门户客户端 |
-| `service.go` | 检测与重连循环 |
-| `config.go` | 配置 |
-| `appstate.go` | 托盘、设置页和命令行共享的状态 |
-| `websettings.go` | 本地设置服务及其 JSON 接口 |
-| `webui/` | 设置页，编译进可执行文件 |
-| `i18n.go`、`i18n_web.go` | 界面文案 |
-| `locale_windows.go`、`locale_other.go` | 系统语言判定 |
+| `cmd/SDAutoLogin/` | 入口：模式选择、托盘与后台运行、命令行、控制台附着 |
+| `internal/portal/` | Dr.COM 门户客户端 |
+| `internal/service/` | 检测与重连循环、会话状态 |
+| `internal/config/` | 配置文件、运营商列表、校验 |
+| `internal/app/` | 托盘、设置页和命令行共享的配置与服务，以及本地设置服务 |
+| `internal/webui/` | 设置页，以及由它编译进来的静态资源 |
+| `internal/i18n/` | 界面文案与系统语言判定 |
+| `internal/logging/` | 带轮转的日志 |
+| `internal/tray/` | 各平台托盘，含 Win32 原语与图标转换 |
+| `internal/platform/` | 操作系统相关：打开文件或网址、自启项、单实例 |
 | `internal/brand/` | 图标绘制 |
-| `tray_windows.go`、`tray_unix.go`、`tray_other.go` | 各平台托盘 |
-| `cli.go`、`setup.go` | 命令行 |
-| `log.go` | 带轮转的日志 |
-| `win32_windows.go`、`icon_windows.go`、`openurl_*.go`、`autostart_*.go` | 平台相关代码 |
 | `winres/` | Windows 图标、版本与清单，以及由它们编译出的资源文件 |
 | `tools/icogen/` | 图标生成器 |
 | `tools/build/` | 任务运行器，脚本与 CMake 目标都由它执行 |
