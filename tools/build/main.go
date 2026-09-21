@@ -135,35 +135,72 @@ func taskConsole(root string) error {
 	return buildFor(root, runtime.GOOS, runtime.GOARCH, appName(runtime.GOOS, "-console"), false, nil)
 }
 
-// taskAll builds the binaries worth publishing: the Windows one to double click
-// and the Linux one for a server, which also serves the command line. The 64 bit
-// builds come first in each group, the 32 bit and small machine ones last.
-func taskAll(root string) error {
-	// goarm, where it is set, is the instruction set a 32 bit ARM build is for.
-	// GOARCH only says arm, and which of the versions a board needs is the
-	// difference between a program that runs there and one that does not, so it
-	// is passed in the environment and it is part of the file name, since a
-	// downloader has to be able to tell those files apart as well.
-	targets := []struct {
-		goos, goarch, goarm string
-	}{
-		{"windows", "amd64", ""},
-		{"windows", "arm64", ""},
-		{"windows", "386", ""},
-		{"linux", "amd64", ""},
-		{"linux", "arm64", ""},
-		{"linux", "386", ""},
-		{"linux", "arm", "7"},
+// target is one of the builds worth publishing.
+type target struct {
+	goos, goarch string
+	// variant is how the file name spells the architecture, for the targets
+	// where GOARCH is not precise enough to be read on its own.
+	variant string
+	// env is what goes into the environment on top of GOOS and GOARCH, for the
+	// same reason: arm does not say which instruction set it is for, and mips
+	// does not say whether the board has a floating point unit.
+	env []string
+	// tags are the build tags to build with, empty for none.
+	tags string
+}
+
+// archName is the architecture as the file name spells it.
+func (t target) archName() string {
+	if t.variant != "" {
+		return t.variant
 	}
+	return t.goarch
+}
+
+// taskAll builds the binaries worth publishing: the Windows one to double click,
+// the Linux one for a server, which also serves the command line, and the small
+// ones that a router or an embedded board has room for. Every Linux build is
+// made twice: the second one leaves the tray out, for the machines that have no
+// desktop session to put an icon in. A router never had a use for one, and the
+// tray is by far the largest thing the binary can do without.
+//
+// The 64 bit builds come first in each group, the small machine ones last.
+func taskAll(root string) error {
+	targets := []target{
+		{goos: "windows", goarch: "amd64"},
+		{goos: "windows", goarch: "arm64"},
+		{goos: "windows", goarch: "386"},
+		{goos: "linux", goarch: "amd64"},
+		{goos: "linux", goarch: "arm64"},
+		{goos: "linux", goarch: "386"},
+		{goos: "linux", goarch: "arm", variant: "armv7", env: []string{"GOARM=7"}},
+		// Most routers have no floating point unit, which is what softfloat is
+		// for, and both byte orders are here because the boards are: the
+		// Atheros targets (ath79, ar71xx) are big endian, the MediaTek ones
+		// (ramips, mt76x8) are little endian.
+		{goos: "linux", goarch: "mips", variant: "mips-softfloat", env: []string{"GOMIPS=softfloat"}},
+		{goos: "linux", goarch: "mipsle", variant: "mipsle-softfloat", env: []string{"GOMIPS=softfloat"}},
+	}
+
+	withoutTray := make([]target, 0, len(targets))
 	for _, t := range targets {
-		env := []string{"GOOS=" + t.goos, "GOARCH=" + t.goarch, "CGO_ENABLED=0"}
-		arch := t.goarch
-		if t.goarm != "" {
-			env = append(env, "GOARM="+t.goarm)
-			arch += "v" + t.goarm
+		if t.goos != "linux" {
+			continue
 		}
-		name := appName(t.goos, "-"+t.goos+"-"+arch)
-		if err := buildFor(root, t.goos, t.goarch, name, true, env); err != nil {
+		t.variant = t.archName() + "-notray"
+		t.tags = "notray"
+		withoutTray = append(withoutTray, t)
+	}
+	targets = append(targets, withoutTray...)
+
+	for _, t := range targets {
+		env := append([]string{"GOOS=" + t.goos, "GOARCH=" + t.goarch, "CGO_ENABLED=0"}, t.env...)
+		name := appName(t.goos, "-"+t.goos+"-"+t.archName())
+		var args []string
+		if t.tags != "" {
+			args = append(args, "-tags", t.tags)
+		}
+		if err := buildFor(root, t.goos, t.goarch, name, true, env, args...); err != nil {
 			return err
 		}
 	}
@@ -175,7 +212,9 @@ func taskAll(root string) error {
 	return nil
 }
 
-func buildFor(root, goos, goarch, name string, gui bool, env []string) error {
+// buildFor builds one target into dist/. moreArgs are extra arguments for go
+// build, such as a build tag.
+func buildFor(root, goos, goarch, name string, gui bool, env []string, moreArgs ...string) error {
 	flags := "-s -w"
 	if gui && goos == "windows" {
 		flags += " -H=windowsgui"
@@ -184,7 +223,9 @@ func buildFor(root, goos, goarch, name string, gui bool, env []string) error {
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return err
 	}
-	if err := runGo(root, env, "build", "-trimpath", "-ldflags", flags, "-o", out, mainPkg); err != nil {
+	args := append([]string{"build", "-trimpath", "-ldflags", flags}, moreArgs...)
+	args = append(args, "-o", out, mainPkg)
+	if err := runGo(root, env, args...); err != nil {
 		return err
 	}
 	fmt.Printf("  -> %s\n", describe(root, out))

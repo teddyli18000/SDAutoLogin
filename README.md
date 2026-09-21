@@ -88,7 +88,7 @@ The same tasks are available directly, which is what the other targets need:
 go run ./tools/build            # list the tasks
 go run ./tools/build build      # this platform
 go run ./tools/build console    # console build, for scripts and services
-go run ./tools/build all        # Windows and Linux, amd64, arm64, 386 and armv7
+go run ./tools/build all        # Windows and Linux, every target below
 go run ./tools/build test       # go vet and go test
 go run ./tools/build icon       # redraw the icon from the drawing code
 go run ./tools/build resources  # regenerate the Windows resource file
@@ -112,11 +112,26 @@ declares no languages, which means no C compiler is needed; on Windows the
 generator must therefore not depend on a C toolchain either, and Ninja is a good
 choice for that (a single executable, no installer).
 
-Cross compiling covers Windows and Linux, for `amd64`, `arm64`, `386` and `armv7`.
-The last one is the 32 bit ARM build, and its file name carries the instruction set
-version, because `arm` on its own would not say which boards it runs on. macOS is
-the exception: its tray needs cgo, so that build has to be made on macOS with the
-Xcode command line tools installed (`xcode-select --install`).
+Cross compiling covers Windows and Linux, for `amd64`, `arm64`, `386`, `armv7`,
+`mips` and `mipsle`. The last three put in the file name what `GOARCH` alone does
+not say: `armv7` is the instruction set of the 32 bit ARM build, and
+`mips-softfloat` and `mipsle-softfloat` are for the routers, which have no floating
+point unit. Both byte orders of MIPS are there because the boards are: the Atheros
+targets (ath79, ar71xx) are big endian, the MediaTek ones (ramips, mt76x8) are
+little endian. On a router, or on any machine with no desktop, use `run`: the tray
+needs a desktop session, and the settings page is reached over the network with
+`--settings`.
+
+Every Linux target is built twice. The second file has `-notray` in its name: it
+leaves the tray out, and with it the D-Bus client and everything else only a tray
+needs, which makes it about a fifth smaller (10.0 MiB to 7.7 MiB for `mipsle`).
+That is the one for a router, where there is no desktop session to put an icon in.
+A start with `--app` is refused there rather than ignored, since the tray is what
+opens a window of its own. The build that keeps the tray is the default one, for a
+desktop.
+
+macOS is the exception to all of this: its tray needs cgo, so that build has to be
+made on macOS with the Xcode command line tools installed (`xcode-select --install`).
 
 The Windows executable carries an icon, version information and a DPI aware
 application manifest, embedded from `winres/rsrc_windows_<arch>.syso`, one file per

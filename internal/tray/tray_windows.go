@@ -122,6 +122,11 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 	return r
 }
 
+// HasTray reports whether this build puts up a tray icon at all. Windows always
+// has one; the builds that say no are the Linux ones made for machines with no
+// desktop session.
+const HasTray = true
+
 // Run puts the tray icon up and blocks on the message loop. fallback is used
 // when the tray cannot be created, so the program keeps checking in the
 // background instead of quitting.

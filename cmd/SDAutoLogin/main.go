@@ -66,6 +66,15 @@ func main() {
 		}
 	}
 
+	// Only the tray mode has a window to open, and a build without a tray says so
+	// rather than starting in silence.
+	if err := checkTray(opts, tray.HasTray); err != nil {
+		logging.Log.Error("%v", err)
+		fmt.Fprintf(os.Stderr, "%v\n\n", err)
+		printUsage(os.Stderr)
+		os.Exit(2)
+	}
+
 	runGUI(appDir, opts)
 	logging.Log.Info("SDAutoLogin stopped")
 }

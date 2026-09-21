@@ -246,6 +246,17 @@ func (o options) check(command string) error {
 	return nil
 }
 
+// checkTray reports an option that needs a tray icon in a build that has none.
+// The tray is what opens a window of its own, so a build made for the machines
+// with no desktop session cannot honour --app, and saying so is better than
+// starting up and quietly ignoring it.
+func checkTray(o options, hasTray bool) error {
+	if o.app != nil && !hasTray {
+		return fmt.Errorf("--app needs the tray, which this build does not have")
+	}
+	return nil
+}
+
 // runCommand runs the command named by args[0]. The options have already been
 // taken out of args, since --home has to be known before the directory holding
 // config.json and logs/ can be resolved.

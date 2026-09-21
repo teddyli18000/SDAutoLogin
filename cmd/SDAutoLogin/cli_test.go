@@ -307,6 +307,24 @@ func TestCheckOnlyAcceptsAnOptionInTheModeItBelongsTo(t *testing.T) {
 	}
 }
 
+func TestCheckTrayOnlyAllowsAppWhereThereIsATray(t *testing.T) {
+	addr := "127.0.0.1:8088"
+
+	// The tray is what opens a window of its own, so a build that has none has
+	// to refuse the option instead of starting up and ignoring it.
+	if err := checkTray(options{app: &addr}, false); err == nil {
+		t.Error("--app was accepted in a build without a tray")
+	}
+
+	if err := checkTray(options{app: &addr}, true); err != nil {
+		t.Errorf("checkTray in a build with a tray = %v, want it accepted", err)
+	}
+
+	if err := checkTray(options{}, false); err != nil {
+		t.Errorf("checkTray without --app = %v, want it accepted", err)
+	}
+}
+
 func TestStatusNamesWhatTheCheckFound(t *testing.T) {
 	cases := []struct {
 		what  string

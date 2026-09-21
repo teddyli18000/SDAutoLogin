@@ -1,4 +1,4 @@
-//go:build linux || darwin
+//go:build (linux || darwin) && !notray
 
 package tray
 
@@ -15,6 +15,10 @@ import (
 	"sdautologin/internal/platform"
 	"sdautologin/internal/service"
 )
+
+// HasTray reports whether this build puts up a tray icon at all. A build that
+// says no is made for the machines that have no desktop session to put one in.
+const HasTray = true
 
 // Run provides the Linux / macOS tray through fyne.io/systray, since the
 // standard library cannot create one, and blocks until the tray quits. On Linux

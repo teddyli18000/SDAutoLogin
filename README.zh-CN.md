@@ -78,7 +78,7 @@ build.cmd
 go run ./tools/build            # 列出所有任务
 go run ./tools/build build      # 当前平台
 go run ./tools/build console    # 控制台版本，供脚本/服务使用
-go run ./tools/build all        # Windows 与 Linux，amd64、arm64、386 与 armv7
+go run ./tools/build all        # Windows 与 Linux，下面列出的所有目标
 go run ./tools/build test       # go vet 与 go test
 go run ./tools/build icon       # 按绘图代码重绘图标
 go run ./tools/build resources  # 重新生成 Windows 资源文件
@@ -101,9 +101,20 @@ CMake 自身不编译任何东西：编译器是 Go 工具链，编译参数由�
 也就要求生成器本身不依赖 C 工具链，Ninja 是合适的选择（单个可执行文件，无需
 安装程序）。
 
-交叉编译覆盖 Windows 和 Linux 的 `amd64`、`arm64`、`386` 与 `armv7`。最后一个是
-32 位 ARM 构建，文件名里带上指令集版本，因为光写 `arm` 无法说明它能在哪些板子上
-跑。macOS 是例外：托盘依赖 cgo，必须在本机安装 Xcode 命令行工具
+交叉编译覆盖 Windows 和 Linux 的 `amd64`、`arm64`、`386`、`armv7`、`mips` 与
+`mipsle`。最后三个把 `GOARCH` 单独说不清的东西写进了文件名：`armv7` 是 32 位
+ARM 版的指令集，`mips-softfloat` 与 `mipsle-softfloat` 是给路由器的——那些机器
+没有浮点单元。MIPS 的两种字节序都在，是因为板子两种都有：Atheros 系（ath79、
+ar71xx）是大端，MediaTek 系（ramips、mt76x8）是小端。在路由器上、以及任何没有
+桌面的机器上，请用 `run`：托盘需要桌面会话，而设置页用 `--settings` 从网络上访问。
+
+每个 Linux 目标都会构建两份。第二份文件名里带 `-notray`：它去掉了托盘，连带
+D-Bus 客户端以及只有托盘才需要的那些东西，体积因此小约五分之一（`mipsle` 从
+10.0 MiB 降到 7.7 MiB）。这一份是给路由器的——那里没有桌面会话可以放图标。在这
+种构建里，`--app` 会直接报错而不是被忽略，因为独立窗口正是由托盘打开的。保留托盘
+的那一份是默认版本，供有桌面的机器使用。
+
+macOS 是例外：托盘依赖 cgo，必须在本机安装 Xcode 命令行工具
 （`xcode-select --install`）后编译。
 
 Windows 可执行文件内含图标、版本信息和 DPI 感知清单，由

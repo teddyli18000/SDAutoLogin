@@ -73,25 +73,32 @@ needs somebody to answer it, so the program had no way in on those machines.
 ### Building
 
 - `go run ./tools/build all` produces the 32 bit builds and the small machine ones
-  as well: `windows/386`, `linux/386` and `linux/armv7`. The last of those carries
-  the instruction set version in its file name, because `arm` on its own would not
-  say which boards it runs on.
+  as well: `windows/386`, `linux/386`, `linux/armv7`, `linux/mips-softfloat` and
+  `linux/mipsle-softfloat`, the last two for the routers, which have no floating
+  point unit. The instruction set of the ARM build and the floating point unit of
+  the MIPS ones are part of the file names, because neither `arm` nor `mips` on its
+  own would say which boards they run on. Both byte orders of MIPS are there
+  because the boards are.
 - The Windows resource file is generated per architecture, for `amd64`, `arm64` and
   `386`, so every Windows build carries the icon and the version information rather
   than only the ones that happened to have a file.
+- Every Linux target is built twice: the second file carries `-notray` in its name
+  and leaves the tray, the D-Bus client behind it and everything else only a tray
+  needs out of the binary, which is about a fifth of it. A router has no desktop
+  session to put an icon in, and that build refuses `--app` instead of ignoring it.
 
 ### Tests
 
-77 cases, up from 52.
+78 cases, up from 52.
 
 - `internal/app` (4) — the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use, and
   knows what counts as loopback.
-- `cmd/SDAutoLogin` (18) — both forms of every option, the address that is
-  optional for `--app`, which mode refuses which option, help and version
-  answering regardless of what else is on the command line, the way each status
-  is named, the set of JSON fields, and an empty answer staying empty instead of
-  becoming the dash the text form prints.
+- `cmd/SDAutoLogin` (19) — both forms of every option, the address that is
+  optional for `--app`, which mode refuses which option, that `--app` is refused in
+  a build without a tray, help and version answering regardless of what else is on
+  the command line, the way each status is named, the set of JSON fields, and an
+  empty answer staying empty instead of becoming the dash the text form prints.
 - `internal/platform` (3) — the command each system is started with, the order
   the browsers are preferred in, and the places each system looks in.
 
