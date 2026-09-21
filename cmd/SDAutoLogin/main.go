@@ -24,12 +24,14 @@ import (
 func main() {
 	appDir := resolveAppDir()
 	args := os.Args[1:]
+	// The log is opened before the console is attached, so a console that
+	// cannot be attached is recorded instead of being lost.
+	logging.Log.Init(filepath.Join(appDir, "logs"))
 	if len(args) > 0 {
 		// Arguments mean a command was asked for, so a terminal is waiting for
 		// the answer. See attachConsole.
 		attachConsole()
 	}
-	logging.Log.Init(filepath.Join(appDir, "logs"))
 	logging.Log.Info("SDAutoLogin %s starting on %s, app dir %s", app.Version, app.PlatformName(), appDir)
 
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {

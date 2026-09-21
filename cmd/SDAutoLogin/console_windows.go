@@ -5,6 +5,8 @@ package main
 import (
 	"os"
 	"syscall"
+
+	"sdautologin/internal/logging"
 )
 
 var (
@@ -25,6 +27,9 @@ const (
 // prints is discarded. Started from a terminal it attaches to that terminal
 // here. A process that was handed handles, for a pipe or a redirected file, is
 // left alone so its output keeps going where the caller put it.
+//
+// The caller opens the log first, so the warning below reaches the log file even
+// though the console is exactly what is missing.
 func attachConsole() {
 	if validStdHandle(stdOutputHandle) || validStdHandle(stdErrorHandle) {
 		return
@@ -34,7 +39,7 @@ func attachConsole() {
 	}
 	f, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0)
 	if err != nil {
-		// Replaced by the log line the caller writes once the logger is up.
+		logging.Log.Warn("could not open the console for output: %v", err)
 		return
 	}
 	os.Stdout = f
