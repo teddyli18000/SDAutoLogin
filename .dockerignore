@@ -1,0 +1,13 @@
+# The build context carries sources only. The build writes dist/ itself, and the
+# settings, the log and the repository metadata have no business in an image.
+.git
+.gitignore
+.gitattributes
+dist/
+build/
+build-*/
+logs/
+config.json
+*.exe
+Dockerfile
+.dockerignore

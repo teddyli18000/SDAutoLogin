@@ -1,0 +1,64 @@
+# SDAutoLogin as a system service, for a server or a machine with no display.
+#
+# Install:
+#   install -m 0755 dist/SDAutoLogin-linux-amd64 /usr/local/bin/SDAutoLogin
+#   useradd --system --create-home --home-dir /var/lib/sdautologin \
+#           --shell /usr/sbin/nologin sdautologin
+#   install -m 0644 packaging/systemd/system/sdautologin.service \
+#           /etc/systemd/system/sdautologin.service
+#
+# The account has to be written down once before the service can run, since a
+# service has nobody to answer the setup wizard. Either pass it on the command
+# line, which is what a provisioning script does:
+#
+#   sudo -u sdautologin /usr/local/bin/SDAutoLogin --home=/var/lib/sdautologin \
+#        --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+#
+# or add --settings=127.0.0.1:8088 to ExecStart below and reach the page
+# through an SSH tunnel: ssh -L 8088:127.0.0.1:8088 the-server, then open
+# http://127.0.0.1:8088/ . Bind to 0.0.0.0 only on a network you trust, the
+# page holds the account in clear text.
+#
+# Then:
+#   systemctl daemon-reload
+#   systemctl enable --now sdautologin
+#   journalctl -u sdautologin -f
+
+[Unit]
+Description=SDAutoLogin campus network auto login
+Documentation=https://git.zqlhub.com/zqlan/SDAutoLogin
+After=network-online.target
+Wants=network-online.target
+# Give up instead of restarting forever when the account is wrong.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=sdautologin
+Group=sdautologin
+# config.json and logs/ live here, not next to the binary, so the binary can
+# stay on a read-only /usr.
+StateDirectory=sdautologin
+ExecStart=/usr/local/bin/SDAutoLogin run --home=/var/lib/sdautologin
+Restart=on-failure
+RestartSec=15
+
+# The program needs nothing but a network connection, so the rest is cut off.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

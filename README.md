@@ -20,6 +20,7 @@ dependency, so it can be copied to another machine and started by double click.
 - [Command line](#command-line)
 - [Configuration file](#configuration-file)
 - [Files](#files)
+- [Deployment](#deployment)
 - [Interface language](#interface-language)
 - [Security notes](#security-notes)
 - [Project layout](#project-layout)
@@ -153,6 +154,12 @@ read or change the configuration. After 15 minutes without a request the
 service shuts itself down and releases the port; it starts again the next time
 the page is opened.
 
+On a machine with no tray, `run --settings=ADDR` serves the same page on an
+address you choose. That endpoint starts at once and stays up until the program
+stops, and when ADDR is not a loopback address the page is reachable from the
+network with the token in its address as the only protection, so keep it on a
+trusted network or behind a tunnel.
+
 **General**
 
 - Account: student id, user name or full mail address.
@@ -180,16 +187,35 @@ right away.
 Useful on a server, over SSH or in a script. The command line stays English.
 
 ```text
-SDAutoLogin [command]
+SDAutoLogin [command] [options]
 
-run            run in the background, no tray and no settings page
+run            run in the background, no tray
 status         print the current session state once and exit
 login          submit one login and print the portal reply
 config         interactive setup, writes config.json
 config --show  print the effective configuration, password never included
 version        print the version
 help           print the usage text
+
+--home=DIR         keep config.json and logs/ in DIR instead of next to the
+                   executable, for a service or a container
+--username=NAME    use this account instead of the configured one
+--password=SECRET  use this password instead of the configured one
+--isp=SUFFIX       service suffix such as @zgyd, empty for the campus network
+--save             write what was given here into config.json as well
+--settings=ADDR    run: also serve the settings page on ADDR, for a machine
+                   with no tray and no display, for example 127.0.0.1:8088
+--json             status: print one line of JSON instead of the report
 ```
+
+An option can also be written as `--name value`, but the form above is the one to
+use when the value holds a character the shell would act on, such as the `@` of a
+service suffix.
+
+The options are read on every run and applied to that run only, so a container or
+a service without a terminal can be provisioned without the setup wizard; add
+`--save` to write them to `config.json` as well. `run` reports a missing account
+and exits rather than asking for it, since a service has nobody to ask.
 
 The same executable serves both modes: started without a command it puts the
 tray icon up and keeps running, started with one it does that one thing and
@@ -207,6 +233,22 @@ go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe ./cmd/SDAutoLogin
 
 `status` exit codes: `0` online, `1` state unknown or failure, `3` the portal
 says the client is not logged in. That makes it usable in a monitoring script.
+
+`status --json` prints the same check as one line of JSON. The log goes to
+stderr, so only the JSON reaches stdout and a script can read it without
+filtering anything out:
+
+```sh
+SDAutoLogin status --json | jq -r .state
+```
+
+```json
+{"portal":"http://10.9.1.3/","state":"online","reachable":true,"known":true,"online":true,"clientIp":"203.0.113.7","account":"s1234567","onlineSince":"2026-01-01 00:00:00","detail":"online"}
+```
+
+`state` is one of `online`, `offline`, `unknown` (the portal answered, but said
+nothing usable) or `unreachable` (it did not answer at all). The last two are
+both exit code `1`, so the state tells them apart.
 
 ## Configuration file
 
@@ -243,14 +285,71 @@ Autostart entries: the registry key
 
 ## Files
 
-Both live next to the executable:
-
 - `config.json` - settings
 - `logs/app.log` - log, rotated to `app.log.1` when it exceeds 4 MiB
 
-The program finds them next to its own executable, so a build in `dist/` keeps
-its settings and log there. When the executable moves, `config.json` has to move
-with it.
+Both live next to the executable by default, so a build in `dist/` keeps its
+settings and log there, and moving the executable means moving `config.json` with
+it. `--home=DIR` puts them in DIR instead, which is what a service and the
+container below use so that the executable can stay on a read-only `/usr`.
+
+## Deployment
+
+`run` is the mode to use: it keeps checking with no tray and no display, logs to
+the standard error, and exits on `SIGTERM`. It refuses to start without an
+account, so the account is written down once first, either by passing it on the
+command line with `--save`, or from the settings page when the service is started
+with `--settings`.
+
+### systemd
+
+Two ready made units are in [packaging/systemd](packaging/systemd), one for a
+system service and one for `systemctl --user`. Each file starts with the
+installation commands, the provisioning step and the commands to follow the log.
+The short version, for a server:
+
+```sh
+install -m 0755 dist/SDAutoLogin-linux-amd64 /usr/local/bin/SDAutoLogin
+useradd --system --create-home --home-dir /var/lib/sdautologin \
+        --shell /usr/sbin/nologin sdautologin
+install -m 0644 packaging/systemd/system/sdautologin.service \
+        /etc/systemd/system/sdautologin.service
+sudo -u sdautologin /usr/local/bin/SDAutoLogin --home=/var/lib/sdautologin \
+     --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+systemctl daemon-reload
+systemctl enable --now sdautologin
+journalctl -u sdautologin -f
+```
+
+The unit keeps the settings and the log in `/var/lib/sdautologin` and confines
+the process to the network it needs. To configure that machine from a browser,
+add `--settings=127.0.0.1:8088` to `ExecStart` and forward the port over SSH:
+`ssh -L 8088:127.0.0.1:8088 the-server`, then open `http://127.0.0.1:8088/`.
+
+### Container
+
+The [Dockerfile](Dockerfile) builds the same static binary and puts it in a small
+image that runs as an unprivileged user, with `/data` for the settings and the
+log:
+
+```sh
+docker build -t sdautologin .
+docker run -d --name sdautologin --restart unless-stopped \
+    -e TZ=Asia/Shanghai -v sdautologin:/data sdautologin
+docker exec sdautologin SDAutoLogin --home=/data status --json
+```
+
+The account is written down the same way, with a one-off run:
+
+```sh
+docker run --rm -v sdautologin:/data sdautologin \
+    --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+```
+
+`--home=/data` is part of the entry point, so a one-off command such as `status`
+reads the same settings as the service. The container is marked unhealthy when
+`status` reports the session is not up, which is the one thing worth noticing
+about it.
 
 ## Interface language
 
@@ -291,6 +390,8 @@ which is what keeps the public surface at the command line and the settings page
 | `winres/` | Windows icon, version and manifest, and the generated resource file compiled from them |
 | `tools/icogen/` | icon generator |
 | `tools/build/` | task runner, used by the scripts and the CMake targets |
+| `packaging/systemd/` | systemd units, for a system service and for `systemctl --user` |
+| `Dockerfile` | container image, built from the vendored sources |
 | `CMakeLists.txt` | CMake front end for the task runner |
 | `dist/` | build results, plus the settings and log of a build started from there |
 | `build/` | CMake build tree, when CMake is used |

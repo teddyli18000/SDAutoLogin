@@ -19,6 +19,7 @@
 - [命令行](#命令行)
 - [配置文件](#配置文件)
 - [文件位置](#文件位置)
+- [部署](#部署)
 - [界面语言](#界面语言)
 - [安全说明](#安全说明)
 - [项目结构](#项目结构)
@@ -139,6 +140,10 @@ Windows 可执行文件内含图标、版本信息和 DPI 感知清单，由
 其他本机程序无法读取或修改配置。15 分钟没有请求后服务自动关闭并释放端口，
 下次打开设置页时会再次启动。
 
+没有托盘的机器上，可以用 `run --settings=ADDR` 让同一份设置页监听你指定的地址。
+该端点立即启动，并一直保留到程序退出；当 ADDR 不是回环地址时，网页可从网络访问，
+此时地址里的一次性令牌是唯一保护，请只放在可信网络内或置于隧道之后。
+
 **常规**
 
 - 账号：学号、用户名或完整邮箱都可以。
@@ -165,16 +170,33 @@ Windows 可执行文件内含图标、版本信息和 DPI 感知清单，由
 适合服务器、SSH 或脚本环境。命令行输出保持英文。
 
 ```text
-SDAutoLogin [command]
+SDAutoLogin [command] [options]
 
-run            后台运行，无托盘、无设置页
+run            后台运行，无托盘
 status         打印一次当前会话状态后退出
 login          用配置的账号登录一次并打印门户应答
 config         交互式配置，写入 config.json
 config --show  打印生效的配置，不含密码
 version        打印版本
 help           打印用法
+
+--home=DIR         把 config.json 和 logs/ 放在 DIR 而不是可执行文件旁边，
+                   供服务与容器使用
+--username=NAME    用该账号替代配置中的账号
+--password=SECRET  用该密码替代配置中的密码
+--isp=SUFFIX       运营商后缀，例如 @zgyd；留空表示校园网本身
+--save             同时把命令行给出的值写入 config.json
+--settings=ADDR    run：额外在 ADDR 上提供设置页，供没有托盘、没有显示器的
+                   机器使用，例如 127.0.0.1:8088
+--json             status：以单行 JSON 输出，替代文本报告
 ```
+
+选项也可以写成 `--name value`，但当值里含有会被 shell 处理的字符（例如运营商后缀
+的 `@`）时，请使用上面 `=` 的写法。
+
+这些选项每次运行都会读取，且只对本次运行生效，因此没有终端的环境（容器、服务）
+无需经过交互式向导即可完成配置；加上 `--save` 会一并写入 `config.json`。`run` 在
+缺少账号时会明确报错退出，而不是向用户提问——服务场景没有人能回答向导。
 
 GUI 与命令行是**同一个可执行文件**，只是参数不同：不带子命令时启动托盘并常驻，
 带子命令时执行一次后退出。`-cli` 等同于 `run`，`-test-login` 等同于 `login`。
@@ -189,6 +211,20 @@ go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe ./cmd/SDAutoLogin
 
 `status` 的退出码：`0` 在线，`1` 状态未知或失败，`3` 门户回答未登录。可以直接
 用于监控脚本。
+
+`status --json` 把同一次检测以单行 JSON 输出。日志走 stderr，因此 stdout 上只有
+JSON，脚本无需过滤任何东西：
+
+```sh
+SDAutoLogin status --json | jq -r .state
+```
+
+```json
+{"portal":"http://10.9.1.3/","state":"online","reachable":true,"known":true,"online":true,"clientIp":"203.0.113.7","account":"s1234567","onlineSince":"2026-01-01 00:00:00","detail":"online"}
+```
+
+`state` 取 `online`、`offline`、`unknown`（门户有应答但没有可用信息）或
+`unreachable`（门户完全没有应答）。后两种的退出码都是 `1`，靠 `state` 区分。
 
 ## 配置文件
 
@@ -224,13 +260,66 @@ go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe ./cmd/SDAutoLogin
 
 ## 文件位置
 
-以下两个都在可执行文件旁边：
-
 - `config.json` - 设置
 - `logs/app.log` - 日志，超过 4 MiB 时轮转为 `app.log.1`
 
-程序是「按可执行文件所在目录」找这两个文件的，所以在 `dist/` 里编译出来的程序，
-它的配置和日志也在 `dist/` 里；移动可执行文件时记得把 `config.json` 一起移动。
+默认情况下两者都在可执行文件旁边，所以在 `dist/` 里编译出来的程序，它的配置和
+日志也在 `dist/` 里；移动可执行文件时记得把 `config.json` 一起移动。
+`--home=DIR` 可以把它们改放到 DIR，下面 service 和容器就是这么做的，这样可执行
+文件本身可以留在只读的 `/usr` 上。
+
+## 部署
+
+服务场景用 `run`：无托盘、无显示器地持续检测，日志走 stderr，收到 `SIGTERM` 后
+退出。它在没有账号时会拒绝启动，因此账号要先写一次——可以在命令行上用 `--save`
+一次性写入，也可以在启动时加上 `--settings`，再从设置页里填写。
+
+### systemd
+
+[packaging/systemd](packaging/systemd) 里有两份现成的 unit，一份是系统服务，一份
+供 `systemctl --user` 使用。每个文件开头就是安装命令、写账号的步骤和查看日志的
+命令。以服务器为例，简版如下：
+
+```sh
+install -m 0755 dist/SDAutoLogin-linux-amd64 /usr/local/bin/SDAutoLogin
+useradd --system --create-home --home-dir /var/lib/sdautologin \
+        --shell /usr/sbin/nologin sdautologin
+install -m 0644 packaging/systemd/system/sdautologin.service \
+        /etc/systemd/system/sdautologin.service
+sudo -u sdautologin /usr/local/bin/SDAutoLogin --home=/var/lib/sdautologin \
+     --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+systemctl daemon-reload
+systemctl enable --now sdautologin
+journalctl -u sdautologin -f
+```
+
+该 unit 把设置和日志放在 `/var/lib/sdautologin`，并把进程限制在它需要的网络权限
+内。如果想用浏览器配置这台机器，在 `ExecStart` 里加上 `--settings=127.0.0.1:8088`，
+再用 SSH 端口转发：`ssh -L 8088:127.0.0.1:8088 the-server`，然后打开
+`http://127.0.0.1:8088/`。
+
+### 容器
+
+[Dockerfile](Dockerfile) 编译出同一个静态二进制，装进一个小镜像里，以非 root
+用户运行，用 `/data` 存放设置和日志：
+
+```sh
+docker build -t sdautologin .
+docker run -d --name sdautologin --restart unless-stopped \
+    -e TZ=Asia/Shanghai -v sdautologin:/data sdautologin
+docker exec sdautologin SDAutoLogin --home=/data status --json
+```
+
+账号同样先写一次，用一次性运行：
+
+```sh
+docker run --rm -v sdautologin:/data sdautologin \
+    --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+```
+
+`--home=/data` 写在入口点里，因此 `status` 之类的一次性命令读取的是同一份设置。
+当 `status` 报告会话不在线时，容器会被标记为 unhealthy——这正是这个程序唯一值得
+关注的事情。
 
 ## 界面语言
 
@@ -265,6 +354,8 @@ go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe ./cmd/SDAutoLogin
 | `winres/` | Windows 图标、版本与清单，以及由它们编译出的资源文件 |
 | `tools/icogen/` | 图标生成器 |
 | `tools/build/` | 任务运行器，脚本与 CMake 目标都由它执行 |
+| `packaging/systemd/` | systemd unit，一份系统服务、一份 `systemctl --user` |
+| `Dockerfile` | 容器镜像，用 vendor 目录里的源码编译 |
 | `CMakeLists.txt` | 任务运行器的 CMake 前端 |
 | `dist/` | 编译结果，以及在 `dist/` 中运行时的设置与日志 |
 | `build/` | 使用 CMake 时的构建目录 |

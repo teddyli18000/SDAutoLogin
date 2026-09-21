@@ -1,0 +1,49 @@
+# SDAutoLogin as a user service: no root, no tray, starts with the login.
+#
+# Install:
+#   install -m 0755 dist/SDAutoLogin-linux-amd64 ~/.local/bin/SDAutoLogin
+#   install -D -m 0644 packaging/systemd/user/sdautologin.service \
+#           ~/.config/systemd/user/sdautologin.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now sdautologin
+#
+# The account is written down once, either on the command line:
+#
+#   SDAutoLogin --home=~/.local/share/sdautologin \
+#       --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+#
+# or from the settings page, by adding --settings=127.0.0.1:8088 to ExecStart
+# below and opening http://127.0.0.1:8088/ .
+#
+# A user service stops when the last session ends unless lingering is on; for a
+# machine that has to keep the session up while nobody is logged in, run
+# "loginctl enable-linger $USER" or use the system service instead.
+
+[Unit]
+Description=SDAutoLogin campus network auto login
+Documentation=https://git.zqlhub.com/zqlan/SDAutoLogin
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# config.json and logs/ are made on the first run, in the data directory rather
+# than next to the binary.
+ExecStart=%h/.local/bin/SDAutoLogin run --home=%h/.local/share/sdautologin
+Restart=on-failure
+RestartSec=15
+
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+# The mount namespace options of the system unit (PrivateTmp, ProtectSystem and
+# the rest) are left out here on purpose: a user manager needs unprivileged user
+# namespaces for them, which some kernels turn off, and a unit that refuses to
+# start over that is worse than one that is a little less confined.
+
+[Install]
+WantedBy=default.target
