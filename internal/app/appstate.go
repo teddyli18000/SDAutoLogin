@@ -1,0 +1,128 @@
+package app
+
+import (
+	"sync"
+
+	"sdautologin/internal/config"
+	"sdautologin/internal/i18n"
+	"sdautologin/internal/logging"
+	"sdautologin/internal/portal"
+	"sdautologin/internal/service"
+)
+
+// AppState owns the mutable configuration and the running service, so the
+// tray, the settings service and the command line all read and write the same
+// values instead of keeping private copies.
+type AppState struct {
+	mu      sync.Mutex
+	cfg     *config.Config
+	svc     *service.Service
+	started bool
+}
+
+// New returns the shared state around an already loaded configuration.
+func New(cfg *config.Config) *AppState {
+	return &AppState{cfg: cfg, svc: service.NewService(cfg)}
+}
+
+func (a *AppState) Config() *config.Config {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.cfg
+}
+
+// Snapshot returns the latest status shown to the user.
+func (a *AppState) Snapshot() service.Snapshot {
+	a.mu.Lock()
+	svc := a.svc
+	a.mu.Unlock()
+	return svc.Snapshot()
+}
+
+// Start begins the periodic check, once.
+func (a *AppState) Start() {
+	a.mu.Lock()
+	svc, first := a.svc, !a.started
+	a.started = true
+	a.mu.Unlock()
+	if first {
+		svc.Start()
+	}
+}
+
+func (a *AppState) Stop() {
+	a.mu.Lock()
+	svc := a.svc
+	a.mu.Unlock()
+	svc.Stop()
+}
+
+func (a *AppState) Trigger() {
+	a.mu.Lock()
+	svc := a.svc
+	a.mu.Unlock()
+	svc.Trigger()
+}
+
+func (a *AppState) SetListener(f func(service.Snapshot)) {
+	a.mu.Lock()
+	svc := a.svc
+	a.mu.Unlock()
+	svc.SetListener(f)
+}
+
+// Reload re-reads config.json, applies it and returns the new configuration.
+func (a *AppState) Reload() (*config.Config, error) {
+	next, err := config.LoadConfig(a.Config().Path())
+	if err != nil {
+		return nil, err
+	}
+	if err := a.Update(next); err != nil {
+		return nil, err
+	}
+	return next, nil
+}
+
+// Update persists next, switches the interface language and restarts the check
+// loop with the new settings, then runs one check immediately so the user sees
+// the effect without waiting for the next tick.
+func (a *AppState) Update(next *config.Config) error {
+	if err := next.Save(); err != nil {
+		return err
+	}
+	i18n.SetLang(i18n.Lang(next.Language))
+	logging.Log.SetVerbose(next.VerboseLog)
+
+	a.mu.Lock()
+	a.cfg = next
+	svc := a.svc
+	started := a.started
+	a.mu.Unlock()
+
+	if started {
+		svc.Restart(next)
+		svc.Trigger()
+	}
+	return nil
+}
+
+// LoginTest captures a one shot login attempt, which both the settings page
+// and the "login" command report to the user.
+type LoginTest struct {
+	Before portal.Status
+	Result portal.LoginResult
+	After  portal.Status
+}
+
+// TestLogin submits the configured credentials once. It reports what the
+// portal replied and never logs the session out.
+func (a *AppState) TestLogin() LoginTest {
+	cfg := a.Config()
+	client := portal.NewClient(cfg)
+	before := client.QueryStatus()
+	return LoginTest{
+		Before: before,
+		Result: client.Login(before),
+		After:  client.QueryStatus(),
+	}
+}

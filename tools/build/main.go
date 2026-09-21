@@ -19,6 +19,9 @@ import (
 )
 
 const (
+	// mainPkg is the entry point package. Everything else is a library under
+	// internal/, so the build has to name it explicitly.
+	mainPkg = "./cmd/SDAutoLogin"
 	// distDir holds everything the build produces, so the repository root stays
 	// free of executables and the results of every platform sit together.
 	distDir = "dist"
@@ -165,7 +168,7 @@ func buildFor(root, goos, goarch, name string, gui bool, env []string) error {
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return err
 	}
-	if err := runGo(root, env, "build", "-trimpath", "-ldflags", flags, "-o", out, "."); err != nil {
+	if err := runGo(root, env, "build", "-trimpath", "-ldflags", flags, "-o", out, mainPkg); err != nil {
 		return err
 	}
 	fmt.Printf("  -> %s\n", describe(root, out))
