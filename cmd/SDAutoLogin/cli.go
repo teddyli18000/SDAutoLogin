@@ -90,6 +90,12 @@ func cmdRun(appDir string) int {
 		fmt.Fprintln(os.Stderr, "another instance is already running")
 		return 1
 	}
+	// This mode has no settings page, but a second copy can still ask for one.
+	// The request is answered here so it is at least visible on the terminal
+	// and in the log, instead of going nowhere.
+	go platform.WaitForSettingsRequest(func() {
+		logging.Log.Warn("another copy asked for the settings page, which the background mode does not serve")
+	})
 	runHeadless(app.New(cfg), appDir)
 	return 0
 }

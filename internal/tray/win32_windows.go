@@ -36,6 +36,7 @@ var (
 	procGetSystemMetrics    = modUser32.NewProc("GetSystemMetrics")
 	procShellNotifyIconW    = modShell32.NewProc("Shell_NotifyIconW")
 	procGetModuleHandleW    = modKernel32.NewProc("GetModuleHandleW")
+	procGetDoubleClickTime  = modUser32.NewProc("GetDoubleClickTime")
 )
 
 const (

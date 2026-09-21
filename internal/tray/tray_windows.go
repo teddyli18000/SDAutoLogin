@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"sdautologin/internal/app"
@@ -52,6 +54,12 @@ type trayApp struct {
 	hwnd syscall.Handle
 	nid  notifyIconData
 
+	// uiUp is set while the message loop runs. It is what tells the settings
+	// request handler whether a click can be replayed as a message or whether
+	// the page has to be opened straight away, and it is the only field of this
+	// struct another goroutine reads.
+	uiUp atomic.Bool
+
 	mu   sync.Mutex
 	snap service.Snapshot
 
@@ -60,8 +68,9 @@ type trayApp struct {
 	iconBusy     syscall.Handle
 	iconError    syscall.Handle
 
-	// lastState is only touched by the UI thread.
+	// lastState and lastClick are only touched by the UI thread.
 	lastState service.State
+	lastClick time.Time
 }
 
 var trayInstance *trayApp
@@ -78,11 +87,9 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 		switch mouse {
 		case wmLButtonUp:
 			// A primary click opens the settings page, the way the instant
-			// messengers this program mimics behave. The double click that
-			// follows a click is deliberately ignored, otherwise the page
-			// would be opened twice.
+			// messengers this program mimics behave.
 			logging.Log.Debug("tray: click, opening the settings page")
-			trayInstance.openSettings()
+			trayInstance.openSettingsFromClick()
 		case wmRButtonUp:
 			logging.Log.Debug("tray: menu requested (mouse message %#x)", mouse)
 			trayInstance.showMenu()
@@ -125,36 +132,55 @@ func Run(state *app.AppState, fallback func()) {
 	trayInstance = a
 	a.settings = app.NewServer(state, func() {
 		// DestroyWindow has to run on the thread that created the window.
-		procPostMessageW.Call(uintptr(a.hwnd), wmQuitRequested, 0, 0)
+		if hwnd := a.hwnd; hwnd != 0 {
+			procPostMessageW.Call(uintptr(hwnd), wmQuitRequested, 0, 0)
+		}
 	})
+
+	// Started before the icon exists on purpose. A request arriving while the
+	// tray is still being built stays in the signalled event until the loop
+	// runs, and one arriving after a failed start is answered by opening the
+	// page directly, since the page does not depend on the tray.
+	go platform.WaitForSettingsRequest(a.answerSettingsRequest)
 
 	if err := a.create(); err != nil {
 		logging.Log.Error("creating the tray icon: %v, falling back to background mode", err)
+		// The half built window must not be offered as somewhere to post to.
+		trayInstance = nil
 		fallback()
 		return
 	}
-
-	// Requests from a second copy arrive on an event, which is turned into a
-	// message here so the page opens on the UI thread like every other tray
-	// action. Started after the window exists; a request that arrived earlier
-	// is still waiting in the signalled event.
-	go platform.WaitForSettingsRequest(func() {
-		procPostMessageW.Call(uintptr(a.hwnd), wmShowSettings, 0, 0)
-	})
 
 	state.SetListener(a.onStatus)
 	state.Start()
 	a.refresh()
 
+	// Set before the loop starts: a message posted from here on is queued and
+	// handled as soon as the loop runs.
+	a.uiUp.Store(true)
 	if !state.Config().Configured() {
 		a.openSettings()
 	}
 
 	logging.Log.Debug("entering the tray message loop")
 	a.messageLoop()
+	a.uiUp.Store(false)
+	trayInstance = nil
 	state.Stop()
 	a.settings.Stop()
 	logging.Log.Info("tray stopped")
+}
+
+// answerSettingsRequest serves a request from a second copy. It runs on the
+// waiter goroutine: with a message loop the click is replayed on the UI thread,
+// otherwise the page is opened here, which needs no tray.
+func (a *trayApp) answerSettingsRequest() {
+	if a.uiUp.Load() {
+		procPostMessageW.Call(uintptr(a.hwnd), wmShowSettings, 0, 0)
+		return
+	}
+	logging.Log.Info("no tray loop to replay the request through, opening the settings page")
+	a.openSettings()
 }
 
 func (a *trayApp) create() error {
@@ -376,6 +402,31 @@ func (a *trayApp) handleCommand(cmd uint32) {
 		logging.Log.Info("exit requested from the tray menu")
 		a.exit()
 	}
+}
+
+// openSettingsFromClick opens the settings page for a primary click. Windows
+// sends down, up, double click, up for a double click, so the second up would
+// open the page a second time; a repeat inside the double click interval is
+// therefore treated as the same click. Only the UI thread reaches this.
+func (a *trayApp) openSettingsFromClick() {
+	if time.Since(a.lastClick) < doubleClickWindow() {
+		logging.Log.Debug("tray: ignoring the second click of a double click")
+		return
+	}
+	a.lastClick = time.Now()
+	a.openSettings()
+}
+
+// doubleClickWindow is how long Windows itself waits for the second click of a
+// double click, which is exactly the interval in which a repeat is not a new
+// request. The first click compares against a zero timestamp, which time.Since
+// reports as far more than any interval, so it always gets through.
+func doubleClickWindow() time.Duration {
+	ms, _, _ := procGetDoubleClickTime.Call()
+	if ms == 0 {
+		return 500 * time.Millisecond
+	}
+	return time.Duration(ms) * time.Millisecond
 }
 
 // openSettings serves the settings page and hands it to the default browser.
