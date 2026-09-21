@@ -68,7 +68,7 @@ func trayReady(state *app.AppState) *unixTray {
 		iconBusy:    brand.PNG(22, iconAccent(service.StateLoggingIn)),
 		iconError:   brand.PNG(22, iconAccent(service.StateError)),
 	}
-	t.settings = app.NewServer(state, func() {
+	t.settings = app.NewServer(state, "", func() {
 		systray.Quit()
 	})
 

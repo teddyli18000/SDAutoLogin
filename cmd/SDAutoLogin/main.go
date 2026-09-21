@@ -9,8 +9,6 @@ import (
 	"syscall"
 
 	"sdautologin/internal/app"
-	"sdautologin/internal/config"
-	"sdautologin/internal/i18n"
 	"sdautologin/internal/logging"
 	"sdautologin/internal/platform"
 	"sdautologin/internal/service"
@@ -22,8 +20,12 @@ import (
 )
 
 func main() {
-	appDir := resolveAppDir()
 	args := os.Args[1:]
+	// The options are read first, before anything is opened or printed: --home
+	// decides where config.json and logs/ live, and a failure still has to be
+	// reported on a console that may not exist yet, see attachConsole.
+	opts, rest, err := parseOptions(args)
+	appDir := resolveAppDir(opts.home)
 	// The log is opened before the console is attached, so a console that
 	// cannot be attached is recorded instead of being lost.
 	logging.Log.Init(filepath.Join(appDir, "logs"))
@@ -34,10 +36,22 @@ func main() {
 	}
 	logging.Log.Info("SDAutoLogin %s starting on %s, app dir %s", app.Version, app.PlatformName(), appDir)
 
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		os.Exit(runCommand(args, appDir))
+	if err != nil {
+		// The reason also goes to the log: the Windows build is linked as a GUI
+		// program, so a start that fails on an argument leaves nothing on screen
+		// to look at, and app.log is then the only trace of it.
+		logging.Log.Error("%v", err)
+		fmt.Fprintf(os.Stderr, "%v\n\n", err)
+		printUsage(os.Stderr)
+		os.Exit(2)
 	}
-	for _, a := range args {
+
+	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+		os.Exit(runCommand(rest, appDir, opts))
+	}
+	// The shortcuts take the same account options the commands do, which is what
+	// lets a script configure a machine without a terminal.
+	for _, a := range rest {
 		switch a {
 		case "help", "-h", "--help", "-help":
 			printUsage(os.Stdout)
@@ -46,46 +60,50 @@ func main() {
 			fmt.Println(versionLine())
 			return
 		case "-test-login", "--test-login":
-			os.Exit(cmdLogin(appDir))
+			os.Exit(cmdLogin(appDir, opts))
 		case "-cli", "--cli", "-daemon", "--daemon", "-headless":
-			os.Exit(cmdRun(appDir))
+			os.Exit(cmdRun(appDir, opts))
 		}
 	}
 
-	runGUI(appDir)
+	runGUI(appDir, opts)
 	logging.Log.Info("SDAutoLogin stopped")
 }
 
 // runGUI is the default mode: a tray icon plus the settings page served on
 // loopback for the browser.
-func runGUI(appDir string) {
+func runGUI(appDir string, opts options) {
 	// Starting the program a second time is a request to see the settings, not
 	// a reason to add another tray icon.
 	if !platform.AcquireSingleInstance(true) {
 		return
 	}
-	cfg, err := config.LoadConfig(filepath.Join(appDir, "config.json"))
-	if err != nil {
-		logging.Log.Error("loading config: %v", err)
+	cfg, ok := loadForCLI(appDir, opts)
+	if !ok {
+		// The settings page is exactly how a broken configuration is fixed, so
+		// the program starts on the defaults instead of refusing to run.
+		logging.Log.Warn("starting on the defaults, the settings page can correct the configuration")
 	}
-	i18n.SetLang(i18n.Lang(cfg.Language))
-	logging.Log.SetVerbose(cfg.VerboseLog)
 	logging.Log.Debug("config loaded from %s: %s", cfg.Path(), cfg.Summary())
 
 	state := app.New(cfg)
 	if !cfg.Configured() {
 		logging.Log.Warn("no account configured yet, opening the settings page")
 	}
-	tray.Run(state, func() { runHeadless(state, appDir) })
+	tray.Run(state, func() { runHeadless(state, nil) })
 }
 
 func versionLine() string {
 	return fmt.Sprintf("SDAutoLogin %s (%s/%s)", app.Version, app.PlatformName(), app.Arch())
 }
 
-// resolveAppDir prefers the directory holding the executable so config.json
-// and logs/ stay next to it.
-func resolveAppDir() string {
+// resolveAppDir picks the directory that holds config.json and logs/. An
+// explicit --home wins, otherwise the directory holding the executable is
+// preferred so a portable copy keeps its settings next to itself.
+func resolveAppDir(home *string) string {
+	if home != nil && *home != "" {
+		return *home
+	}
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
 		if !strings.Contains(dir, "go-build") && !strings.Contains(dir, "Temp") {
@@ -98,9 +116,9 @@ func resolveAppDir() string {
 	return "."
 }
 
-// runHeadless keeps checking in the background with no tray and no settings
-// page. It is what the "run" command and the tray failure fallback use.
-func runHeadless(state *app.AppState, appDir string) {
+// runHeadless keeps checking in the background with no tray. stop, when not nil,
+// ends it early, which is how the settings page quits a background run.
+func runHeadless(state *app.AppState, stop <-chan struct{}) {
 	cfg := state.Config()
 	if !cfg.Configured() {
 		runSetupWizard(cfg)
@@ -119,7 +137,11 @@ func runHeadless(state *app.AppState, appDir string) {
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-	<-ch
+	select {
+	case <-ch:
+		logging.Log.Info("quit signal received")
+	case <-stop:
+		logging.Log.Info("quit requested from the settings page")
+	}
 	state.Stop()
-	logging.Log.Info("quit signal received")
 }

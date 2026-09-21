@@ -1,5 +1,5 @@
-// Package logging writes the program's log to stdout and to a rotating file.
-// It has no dependency on the rest of the program on purpose, so every other
+// Package logging writes the program's log to stderr and to a rotating file. It
+// has no dependency on the rest of the program on purpose, so every other
 // package can log without an import cycle.
 package logging
 
@@ -15,8 +15,12 @@ import (
 // maxLogSize is the size at which app.log is rotated into app.log.1.
 const maxLogSize = 4 << 20
 
-// Logger appends timestamped lines to stdout and logs/app.log. DEBUG lines are
+// Logger appends timestamped lines to stderr and logs/app.log. DEBUG lines are
 // only written when verbose mode is on, see SetVerbose.
+//
+// The console copy goes to stderr rather than stdout so that what a command
+// prints on stdout is only its result, which is what lets a script read the
+// JSON of the status command without filtering the log out of it first.
 type Logger struct {
 	mu      sync.Mutex
 	dir     string
@@ -64,7 +68,7 @@ func (l *Logger) Path() string {
 
 func (l *Logger) write(level, format string, args ...any) {
 	line := time.Now().Format("2006-01-02 15:04:05.000") + " [" + level + "] " + fmt.Sprintf(format, args...)
-	_, _ = os.Stdout.WriteString(line + "\n")
+	_, _ = os.Stderr.WriteString(line + "\n")
 
 	l.mu.Lock()
 	defer l.mu.Unlock()

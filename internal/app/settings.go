@@ -26,12 +26,14 @@ const (
 	logTailLines        = 200
 )
 
-// Server serves the settings page on loopback only. Every request carries a
-// token that is generated when the server starts, so another local process
-// cannot read or change the configuration by accident.
+// Server serves the settings page. Every request carries a token that is
+// generated when the server starts, so a program that has not been handed the
+// address cannot read or change the configuration by accident.
 type Server struct {
 	state  *AppState
 	onQuit func()
+	// addr is where to listen, empty for loopback on a port the system picks.
+	addr string
 
 	mu      sync.Mutex
 	srv     *http.Server
@@ -40,10 +42,13 @@ type Server struct {
 	lastHit atomic.Int64
 }
 
-// NewServer returns a settings server for state. onQuit, when set, is called
-// after the page asks the program to exit.
-func NewServer(state *AppState, onQuit func()) *Server {
-	return &Server{state: state, onQuit: onQuit}
+// NewServer returns a settings server for state. addr is the address to listen
+// on: an empty one means loopback on a port the system picks, started on first
+// use and shut down again once it has been idle. An address the caller names is
+// a management endpoint that was asked for, so it starts at once and stays up.
+// onQuit, when set, is called after the page asks the program to exit.
+func NewServer(state *AppState, addr string, onQuit func()) *Server {
+	return &Server{state: state, addr: addr, onQuit: onQuit}
 }
 
 // URL starts the server on first use and returns the tokenised address.
@@ -54,32 +59,92 @@ func (s *Server) URL() (string, error) {
 		return s.url, nil
 	}
 
+	addr := s.addr
+	onDemand := addr == ""
+	if onDemand {
+		addr = "127.0.0.1:0"
+	}
+
 	token, err := randomToken()
 	if err != nil {
 		return "", err
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		return "", fmt.Errorf("listen on loopback: %w", err)
+		return "", fmt.Errorf("listen on %s: %w", addr, err)
 	}
 
-	s.token = token
-	s.url = fmt.Sprintf("http://127.0.0.1:%d/?token=%s", listener.Addr().(*net.TCPAddr).Port, token)
-	s.srv = &http.Server{
+	srv := &http.Server{
 		Handler:           s.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	s.token = token
+	s.url = urlFor(listener.Addr(), token)
+	s.srv = srv
 	s.lastHit.Store(time.Now().UnixNano())
 
+	if onDemand {
+		// The tray opens the page when it is wanted, so the port is released
+		// again once nobody has looked at it for a while.
+		go s.reapWhenIdle()
+	} else {
+		if host, _, err := net.SplitHostPort(listener.Addr().String()); err == nil && !isLoopback(host) {
+			logging.Log.Warn("the settings page is reachable from the network on %s; the token in its address is the only protection, so keep it on a trusted network or behind a tunnel", listener.Addr())
+		}
+		logging.Log.Info("settings page for remote management at %s, staying up until the program stops", s.url)
+	}
+
+	// The local srv is what this goroutine serves on. Stop clears the field, so
+	// reading it from here would race with a shutdown that comes right after the
+	// start.
 	go func() {
-		if err := s.srv.Serve(listener); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			logging.Log.Error("settings service stopped: %v", err)
 		}
 	}()
-	go s.reapWhenIdle()
 
-	logging.Log.Info("settings page available at %s", s.url)
+	if onDemand {
+		logging.Log.Info("settings page available at %s", s.url)
+	}
 	return s.url, nil
+}
+
+// urlFor builds the address to hand to a browser out of the address the server
+// actually bound.
+func urlFor(addr net.Addr, token string) string {
+	host, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		host, port = addr.String(), ""
+	}
+	host = hostForURL(host)
+	if strings.Contains(host, ":") {
+		// An IPv6 literal needs brackets in a URL.
+		host = "[" + host + "]"
+	}
+	return fmt.Sprintf("http://%s:%s/?token=%s", host, port, token)
+}
+
+// hostForURL picks the host to put in that address. A listener on every
+// interface has no useful host of its own, so the loopback address is used; an
+// operator reaching the page from elsewhere replaces it with the address of this
+// machine, which is what the log line around it is for.
+func hostForURL(host string) string {
+	switch host {
+	case "", "0.0.0.0", "::":
+		return "127.0.0.1"
+	}
+	return host
+}
+
+// isLoopback reports whether host names this machine only.
+func isLoopback(host string) bool {
+	if host == "" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return strings.EqualFold(host, "localhost")
 }
 
 // OpenURL starts the server if needed and hands the address to the browser.

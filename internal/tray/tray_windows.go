@@ -130,7 +130,7 @@ func Run(state *app.AppState, fallback func()) {
 
 	a := &trayApp{state: state}
 	trayInstance = a
-	a.settings = app.NewServer(state, func() {
+	a.settings = app.NewServer(state, "", func() {
 		// DestroyWindow has to run on the thread that created the window.
 		if hwnd := a.hwnd; hwnd != 0 {
 			procPostMessageW.Call(uintptr(hwnd), wmQuitRequested, 0, 0)
