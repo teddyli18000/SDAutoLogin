@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	// The Windows icon, version information and application manifest live in
+	// that package as a linked object file, so it has to be part of the build.
+	_ "sdautologin/winres"
 )
 
 const appTitle = "Campus Auto Login"

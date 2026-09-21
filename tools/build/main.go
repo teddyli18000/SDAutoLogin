@@ -19,11 +19,14 @@ import (
 )
 
 const (
-	distDir  = "dist"
-	iconPath = "winres/icon.ico"
-	// go-winres appends the platform to the output prefix, so the prefix below
-	// produces rsrc_windows_amd64.syso, the file the linker picks up.
-	resPrefix = "rsrc"
+	// distDir holds everything the build produces, so the repository root stays
+	// free of executables and the results of every platform sit together.
+	distDir = "dist"
+	// The generated resources belong to the winres package, next to the files
+	// they are made from. The linker only picks up a .syso that lies in one of
+	// the packages being built, which is why these are not under distDir.
+	iconPath  = "winres/icon.ico"
+	resPrefix = "winres/rsrc"
 	resConfig = "winres/winres.json"
 	// winresVersion is pinned so regenerating the resources is reproducible.
 	winresVersion = "github.com/tc-hib/go-winres@v0.3.3"
@@ -45,7 +48,7 @@ var tasks = map[string]task{
 	"resources": {"regenerate the Windows resource file with go-winres", taskResources},
 	"test":      {"run go vet and go test", taskTest},
 	"run":       {"build and start the program", taskRun},
-	"clean":     {"remove the build output", taskClean},
+	"clean":     {"remove the built executables, keeping settings and logs", taskClean},
 }
 
 func main() {
@@ -203,12 +206,26 @@ func taskRun(root string) error {
 	return cmd.Run()
 }
 
+// taskClean removes the built executables. The settings and the log live in the
+// same directory, next to the executable, so they are left alone: cleaning a
+// build must not throw away an account.
 func taskClean(root string) error {
-	path := filepath.Join(root, distDir)
-	if err := os.RemoveAll(path); err != nil {
+	dir := filepath.Join(root, distDir)
+	matches, err := filepath.Glob(filepath.Join(dir, "SDAutoLogin*"))
+	if err != nil {
 		return err
 	}
-	fmt.Println("  removed " + path)
+	removed := 0
+	for _, m := range matches {
+		if info, err := os.Stat(m); err != nil || info.IsDir() {
+			continue
+		}
+		if err := os.Remove(m); err != nil {
+			return err
+		}
+		removed++
+	}
+	fmt.Printf("  removed %d executable(s) from %s\n", removed, describe(root, dir))
 	return nil
 }
 

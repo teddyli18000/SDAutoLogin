@@ -1,14 +1,12 @@
-# build output
-/SDAutoLogin
-/SDAutoLogin.exe
-# temp file left behind when a build could not replace a running executable
-/SDAutoLogin.exe~
+# Build results. The directory also holds the settings and the log of a build
+# started from here, because the program keeps both next to its executable.
 /dist/
-/dist-*
-# CMake build directory
+
+# CMake build tree
 /build/
 /build-*/
 
-# runtime data
+# Runtime data, when the program is started from the repository root: with no
+# executable of its own to sit next to, it falls back to the working directory.
 /config.json
 /logs/
