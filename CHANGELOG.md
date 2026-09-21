@@ -70,6 +70,16 @@ needs somebody to answer it, so the program had no way in on those machines.
 - The window is also opened when the tray icon could not be created, since the
   page does not depend on the tray.
 
+### Building
+
+- `go run ./tools/build all` produces the 32 bit builds and the small machine ones
+  as well: `windows/386`, `linux/386` and `linux/armv7`. The last of those carries
+  the instruction set version in its file name, because `arm` on its own would not
+  say which boards it runs on.
+- The Windows resource file is generated per architecture, for `amd64`, `arm64` and
+  `386`, so every Windows build carries the icon and the version information rather
+  than only the ones that happened to have a file.
+
 ### Tests
 
 77 cases, up from 52.

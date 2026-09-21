@@ -88,7 +88,7 @@ The same tasks are available directly, which is what the other targets need:
 go run ./tools/build            # list the tasks
 go run ./tools/build build      # this platform
 go run ./tools/build console    # console build, for scripts and services
-go run ./tools/build all        # Windows and Linux, amd64 and arm64
+go run ./tools/build all        # Windows and Linux, amd64, arm64, 386 and armv7
 go run ./tools/build test       # go vet and go test
 go run ./tools/build icon       # redraw the icon from the drawing code
 go run ./tools/build resources  # regenerate the Windows resource file
@@ -112,17 +112,21 @@ declares no languages, which means no C compiler is needed; on Windows the
 generator must therefore not depend on a C toolchain either, and Ninja is a good
 choice for that (a single executable, no installer).
 
-Cross compiling covers Windows and Linux. macOS is the exception: its tray needs
-cgo, so that build has to be made on macOS with the Xcode command line tools
-installed (`xcode-select --install`).
+Cross compiling covers Windows and Linux, for `amd64`, `arm64`, `386` and `armv7`.
+The last one is the 32 bit ARM build, and its file name carries the instruction set
+version, because `arm` on its own would not say which boards it runs on. macOS is
+the exception: its tray needs cgo, so that build has to be made on macOS with the
+Xcode command line tools installed (`xcode-select --install`).
 
 The Windows executable carries an icon, version information and a DPI aware
-application manifest, embedded from `winres/rsrc_windows_amd64.syso`. The icon
-and that file are both generated, from the drawing code and from
-`winres/winres.json`; the `icon` and `resources` tasks above regenerate them.
-Both are written inside `winres/`, next to the files they are made from, so the
-repository root holds sources only. Both are reproducible, so rerunning them
-does not change the files unless the artwork changed.
+application manifest, embedded from `winres/rsrc_windows_<arch>.syso`, one file per
+architecture (`amd64`, `arm64` and `386`). That file name is also how the toolchain
+knows which one belongs to which build. The icon and those files are all generated,
+from the drawing code and from `winres/winres.json`; the `icon` and `resources`
+tasks above regenerate them. All of them are written inside `winres/`, next to the
+files they are made from, so the repository root holds sources only. They are
+reproducible, so rerunning the tasks does not change the files unless the artwork
+changed.
 
 ## Usage
 

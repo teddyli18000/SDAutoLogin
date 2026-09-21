@@ -136,17 +136,33 @@ func taskConsole(root string) error {
 }
 
 // taskAll builds the binaries worth publishing: the Windows one to double click
-// and the Linux one for a server, which also serves the command line.
+// and the Linux one for a server, which also serves the command line. The 64 bit
+// builds come first in each group, the 32 bit and small machine ones last.
 func taskAll(root string) error {
-	targets := []struct{ goos, goarch string }{
-		{"windows", "amd64"},
-		{"windows", "arm64"},
-		{"linux", "amd64"},
-		{"linux", "arm64"},
+	// goarm, where it is set, is the instruction set a 32 bit ARM build is for.
+	// GOARCH only says arm, and which of the versions a board needs is the
+	// difference between a program that runs there and one that does not, so it
+	// is passed in the environment and it is part of the file name, since a
+	// downloader has to be able to tell those files apart as well.
+	targets := []struct {
+		goos, goarch, goarm string
+	}{
+		{"windows", "amd64", ""},
+		{"windows", "arm64", ""},
+		{"windows", "386", ""},
+		{"linux", "amd64", ""},
+		{"linux", "arm64", ""},
+		{"linux", "386", ""},
+		{"linux", "arm", "7"},
 	}
 	for _, t := range targets {
 		env := []string{"GOOS=" + t.goos, "GOARCH=" + t.goarch, "CGO_ENABLED=0"}
-		name := appName(t.goos, "-"+t.goos+"-"+t.goarch)
+		arch := t.goarch
+		if t.goarm != "" {
+			env = append(env, "GOARM="+t.goarm)
+			arch += "v" + t.goarm
+		}
+		name := appName(t.goos, "-"+t.goos+"-"+arch)
 		if err := buildFor(root, t.goos, t.goarch, name, true, env); err != nil {
 			return err
 		}
@@ -186,9 +202,14 @@ func taskResources(root string) error {
 	// the version information into an object file. Running it by module path
 	// keeps it out of go.mod, which needs the module mode: the vendor directory
 	// cannot resolve a package that is not a dependency.
+	//
+	// One file per architecture, named rsrc_windows_<arch>.syso, which is also
+	// how the toolchain knows which one belongs to which build. Every Windows
+	// architecture that is built needs its own, or that build would be the one
+	// without an icon and version information.
 	env := []string{"GOFLAGS=-mod=mod"}
 	return runGo(root, env, "run", winresVersion, "make",
-		"--in", resConfig, "--out", resPrefix, "--arch", "amd64")
+		"--in", resConfig, "--out", resPrefix, "--arch", "amd64,arm64,386")
 }
 
 func taskTest(root string) error {

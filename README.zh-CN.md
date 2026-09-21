@@ -78,7 +78,7 @@ build.cmd
 go run ./tools/build            # 列出所有任务
 go run ./tools/build build      # 当前平台
 go run ./tools/build console    # 控制台版本，供脚本/服务使用
-go run ./tools/build all        # Windows 与 Linux，amd64 与 arm64
+go run ./tools/build all        # Windows 与 Linux，amd64、arm64、386 与 armv7
 go run ./tools/build test       # go vet 与 go test
 go run ./tools/build icon       # 按绘图代码重绘图标
 go run ./tools/build resources  # 重新生成 Windows 资源文件
@@ -101,14 +101,17 @@ CMake 自身不编译任何东西：编译器是 Go 工具链，编译参数由�
 也就要求生成器本身不依赖 C 工具链，Ninja 是合适的选择（单个可执行文件，无需
 安装程序）。
 
-交叉编译覆盖 Windows 和 Linux。macOS 是例外：托盘依赖 cgo，必须在本机安装
-Xcode 命令行工具（`xcode-select --install`）后编译。
+交叉编译覆盖 Windows 和 Linux 的 `amd64`、`arm64`、`386` 与 `armv7`。最后一个是
+32 位 ARM 构建，文件名里带上指令集版本，因为光写 `arm` 无法说明它能在哪些板子上
+跑。macOS 是例外：托盘依赖 cgo，必须在本机安装 Xcode 命令行工具
+（`xcode-select --install`）后编译。
 
 Windows 可执行文件内含图标、版本信息和 DPI 感知清单，由
-`winres/rsrc_windows_amd64.syso` 嵌入；图标和该文件都是生成的（源码里的绘图代码
-与 `winres/winres.json`），用上面的 `icon`、`resources` 任务重新生成即可。两者
-都生成在 `winres/` 内、也就是它们的来源文件旁边，因此仓库根目录只有源码。两者
-都是可复现的，没有改动图案时重新生成不会产生任何差异。
+`winres/rsrc_windows_<arch>.syso` 嵌入——一个架构一份（`amd64`、`arm64` 与
+`386`），工具链也正是靠文件名判断该带上哪一份。图标和这些资源文件都是生成的
+（来源是源码里的绘图代码与 `winres/winres.json`），用上面的 `icon`、`resources`
+任务重新生成即可。它们都生成在 `winres/` 内、也就是各自的来源文件旁边，因此仓库
+根目录只有源码。它们都是可复现的，没有改动图案时重新生成不会产生任何差异。
 
 ## 使用
 
