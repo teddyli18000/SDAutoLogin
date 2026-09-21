@@ -40,7 +40,7 @@ func TestLoadConfigCreatesAFileWithDefaults(t *testing.T) {
 
 func TestLoadConfigReadsAFileWithABOM(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	body := append([]byte{0xEF, 0xBB, 0xBF}, []byte(`{"username":"23D001","password":"p@ss"}`)...)
+	body := append([]byte{0xEF, 0xBB, 0xBF}, []byte(`{"username":"s1234567","password":"p@ss"}`)...)
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestLoadConfigReadsAFileWithABOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a UTF-8 BOM must not stop the parse: %v", err)
 	}
-	if cfg.Username != "23D001" || cfg.Password != "p@ss" {
+	if cfg.Username != "s1234567" || cfg.Password != "p@ss" {
 		t.Errorf("the file was not read: %+v", cfg)
 	}
 	// Fields the file leaves out keep their default, which is what makes an
@@ -103,7 +103,7 @@ func TestValidateReportsEveryProblem(t *testing.T) {
 
 func TestValidateAcceptsTheDefaults(t *testing.T) {
 	cfg := defaultConfig()
-	cfg.Username = "23D001"
+	cfg.Username = "s1234567"
 	cfg.Password = "p@ss"
 
 	if errs := cfg.Validate(); len(errs) != 0 {
@@ -113,7 +113,7 @@ func TestValidateAcceptsTheDefaults(t *testing.T) {
 
 func TestValidateSkipsBlankProbesAndReportsTheBadOnes(t *testing.T) {
 	cfg := defaultConfig()
-	cfg.Username = "23D001"
+	cfg.Username = "s1234567"
 	cfg.Password = "p@ss"
 	// A blank entry is what an empty row in the settings page looks like, and it
 	// is dropped before saving rather than reported.
@@ -179,9 +179,9 @@ func TestCompactProbesTrimsAndDropsBlanks(t *testing.T) {
 }
 
 func TestAccountAndOperatorName(t *testing.T) {
-	cfg := &Config{Username: "23D001", AccountPrefix: ",0,", AccountSuffix: "@zgyd"}
+	cfg := &Config{Username: "s1234567", AccountPrefix: ",0,", AccountSuffix: "@zgyd"}
 
-	if got := cfg.Account(); got != ",0,23D001@zgyd" {
+	if got := cfg.Account(); got != ",0,s1234567@zgyd" {
 		t.Errorf("Account() = %q", got)
 	}
 	if got := cfg.OperatorName(); got != "China Mobile" {
@@ -206,7 +206,7 @@ func TestConfiguredNeedsBothAnAccountAndAPassword(t *testing.T) {
 		t.Error("a blank user name counts as configured")
 	}
 
-	cfg.Username = "23D001"
+	cfg.Username = "s1234567"
 	cfg.Password = ""
 	if cfg.Configured() {
 		t.Error("a missing password counts as configured")
@@ -224,7 +224,7 @@ func TestSaveOmitsThePasswordWhenItIsNotRemembered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Username = "23D001"
+	cfg.Username = "s1234567"
 	cfg.Password = "topsecret"
 	cfg.RememberPassword = false
 
@@ -254,7 +254,7 @@ func TestSaveRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Username = "23D001"
+	cfg.Username = "s1234567"
 	cfg.Password = "topsecret"
 	cfg.AccountSuffix = "@cucc"
 	cfg.CheckIntervalSeconds = 30
@@ -277,7 +277,7 @@ func TestSaveRoundTrips(t *testing.T) {
 
 func TestSummaryNeverContainsThePassword(t *testing.T) {
 	cfg := defaultConfig()
-	cfg.Username = "23D001"
+	cfg.Username = "s1234567"
 	cfg.Password = "topsecret"
 
 	if summary := cfg.Summary(); strings.Contains(summary, "topsecret") {

@@ -44,7 +44,7 @@ func (s *stubPortal) start(t *testing.T) *config.Config {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, "var v4ip = '10.90.0.85';")
+		_, _ = io.WriteString(w, "var v4ip = '203.0.113.7';")
 	})
 	mux.HandleFunc("/generate_204", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
@@ -77,15 +77,15 @@ func (s *stubPortal) start(t *testing.T) *config.Config {
 		if s.online {
 			result = "1"
 		}
-		fmt.Fprintf(w, `{"result":%s,"user_account":"23D001",`+
-			`"online_ip":"10.90.0.85","online_time":"2026-09-14 08:56:10"}`, result)
+		fmt.Fprintf(w, `{"result":%s,"user_account":"s1234567",`+
+			`"online_ip":"203.0.113.7","online_time":"2026-01-01 00:00:00"}`, result)
 	})
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
 	return &config.Config{
-		Username:             "23D001",
+		Username:             "s1234567",
 		Password:             "p@ss",
 		RememberPassword:     true,
 		PortalBaseURL:        srv.URL + "/",
@@ -126,7 +126,7 @@ func TestTickReportsAnOnlineSession(t *testing.T) {
 	if snap.State != StateOnline {
 		t.Fatalf("State = %v, want Online (message %q)", snap.State, snap.Message)
 	}
-	if snap.ClientIP != "10.90.0.85" || snap.Account != "23D001" {
+	if snap.ClientIP != "203.0.113.7" || snap.Account != "s1234567" {
 		t.Errorf("snapshot = %+v", snap)
 	}
 	if _, logins := sp.counts(); logins != 0 {
@@ -255,7 +255,7 @@ func TestTickReportsAMissingAccount(t *testing.T) {
 func TestTickReportsAnUnreachablePortal(t *testing.T) {
 	base := closedBase(t)
 	cfg := &config.Config{
-		Username:           "23D001",
+		Username:           "s1234567",
 		Password:           "p@ss",
 		PortalBaseURL:      base + "/",
 		EportalURL:         base + "/eportal/",

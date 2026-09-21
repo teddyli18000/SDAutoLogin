@@ -12,12 +12,12 @@ import (
 	"sdautologin/internal/config"
 )
 
-const portalHome = `<html><script>var v4ip = '10.90.0.85'; var v6ip = '2001:db8::1';</script></html>`
+const portalHome = `<html><script>var v4ip = '203.0.113.7'; var v6ip = '2001:db8::1';</script></html>`
 
 // testConfig points both portal endpoints at one stub server.
 func testConfig(base string) *config.Config {
 	return &config.Config{
-		Username:           "23D001",
+		Username:           "s1234567",
 		Password:           "p@ss",
 		AccountPrefix:      ",0,",
 		AccountSuffix:      "@zgyd",
@@ -106,8 +106,8 @@ func (s *stubPortal) seenActions() []string {
 }
 
 func TestQueryStatusReportsAnOnlineSession(t *testing.T) {
-	s := &stubPortal{onlineList: `{"result":1,"user_account":"23D001","online_ip":"10.90.0.99",` +
-		`"online_mac":"d8ef42ae2054","online_time":"2026-09-14 08:56:10","online_ipv6_1":"2001:db8::2"}`}
+	s := &stubPortal{onlineList: `{"result":1,"user_account":"s1234567","online_ip":"203.0.113.9",` +
+		`"online_mac":"aabbccddeeff","online_time":"2026-01-01 00:00:00","online_ipv6_1":"2001:db8::2"}`}
 
 	st := NewClient(s.start(t)).QueryStatus()
 
@@ -116,13 +116,13 @@ func TestQueryStatusReportsAnOnlineSession(t *testing.T) {
 	}
 	// The address online_list reports is the authenticated one and wins over the
 	// one the home page embeds.
-	if st.ClientIP != "10.90.0.99" {
+	if st.ClientIP != "203.0.113.9" {
 		t.Errorf("ClientIP = %q, want the address online_list reported", st.ClientIP)
 	}
 	if st.ClientIPv6 != "2001:db8::2" {
 		t.Errorf("ClientIPv6 = %q", st.ClientIPv6)
 	}
-	if st.Account != "23D001" || st.MAC != "d8ef42ae2054" || st.OnlineSince != "2026-09-14 08:56:10" {
+	if st.Account != "s1234567" || st.MAC != "aabbccddeeff" || st.OnlineSince != "2026-01-01 00:00:00" {
 		t.Errorf("Status = %+v, want the account, mac and session start", st)
 	}
 	if st.Message != "online" {
@@ -137,7 +137,7 @@ func TestQueryStatusFallsBackToTheAddressOnTheHomePage(t *testing.T) {
 
 	st := NewClient(s.start(t)).QueryStatus()
 
-	if st.ClientIP != "10.90.0.85" {
+	if st.ClientIP != "203.0.113.7" {
 		t.Errorf("ClientIP = %q, want the v4ip from the home page", st.ClientIP)
 	}
 	if st.ClientIPv6 != "2001:db8::1" {
@@ -232,7 +232,7 @@ func TestQueryStatusReportsAnUnreachablePortal(t *testing.T) {
 func TestLoginAccepted(t *testing.T) {
 	s := &stubPortal{loginReply: `{"result":1,"ret_code":"0"}`}
 
-	res := NewClient(s.start(t)).Login(Status{ClientIP: "10.90.0.85"})
+	res := NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"})
 
 	if !res.Success {
 		t.Fatalf("Login = %+v, want success", res)
@@ -251,7 +251,7 @@ func TestLoginAccepted(t *testing.T) {
 func TestLoginRejectedWithAKnownRetCode(t *testing.T) {
 	s := &stubPortal{loginReply: `{"result":0,"ret_code":"1"}`}
 
-	res := NewClient(s.start(t)).Login(Status{ClientIP: "10.90.0.85"})
+	res := NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"})
 
 	if res.Success {
 		t.Fatalf("Login = %+v, want a rejection", res)
@@ -269,7 +269,7 @@ func TestLoginUsesThePortalMessageForAnUnknownRetCode(t *testing.T) {
 	// "user does not exist". The client has to resolve that before showing it.
 	s := &stubPortal{loginReply: `{"result":0,"ret_code":"99","msg":"\u7528\u6237\u4e0d\u5b58\u5728"}`}
 
-	res := NewClient(s.start(t)).Login(Status{ClientIP: "10.90.0.85"})
+	res := NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"})
 
 	if want := "\u7528\u6237\u4e0d\u5b58\u5728"; res.Message != want {
 		t.Errorf("Message = %q, want %q", res.Message, want)
@@ -280,9 +280,9 @@ func TestLoginSendsTheExpectedParameters(t *testing.T) {
 	s := &stubPortal{loginReply: `{"result":1,"ret_code":"0"}`}
 
 	NewClient(s.start(t)).Login(Status{
-		ClientIP:   "10.90.0.85",
+		ClientIP:   "203.0.113.7",
 		ClientIPv6: "2001:db8::1",
-		MAC:        "d8ef42ae2054",
+		MAC:        "aabbccddeeff",
 	})
 
 	q := s.lastLoginQuery()
@@ -293,11 +293,11 @@ func TestLoginSendsTheExpectedParameters(t *testing.T) {
 		"c":              "Portal",
 		"a":              "login",
 		"login_method":   "1",
-		"user_account":   ",0,23D001@zgyd",
+		"user_account":   ",0,s1234567@zgyd",
 		"user_password":  "p@ss",
-		"wlan_user_ip":   "10.90.0.85",
+		"wlan_user_ip":   "203.0.113.7",
 		"wlan_user_ipv6": "2001:db8::1",
-		"wlan_user_mac":  "d8ef42ae2054",
+		"wlan_user_mac":  "aabbccddeeff",
 		"jsVersion":      "3.3.3",
 	}
 	for key, value := range want {
@@ -315,7 +315,7 @@ func TestLoginFallsBackToAZeroMAC(t *testing.T) {
 	// produce a usable request.
 	s := &stubPortal{loginReply: `{"result":1,"ret_code":"0"}`}
 
-	NewClient(s.start(t)).Login(Status{ClientIP: "10.90.0.85"})
+	NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"})
 
 	if got := s.lastLoginQuery().Get("wlan_user_mac"); got != "000000000000" {
 		t.Errorf("wlan_user_mac = %q, want the zero mac", got)
@@ -323,7 +323,7 @@ func TestLoginFallsBackToAZeroMAC(t *testing.T) {
 }
 
 func TestLoginReportsAFailedRequest(t *testing.T) {
-	res := NewClient(testConfig(closedBase(t))).Login(Status{ClientIP: "10.90.0.85"})
+	res := NewClient(testConfig(closedBase(t))).Login(Status{ClientIP: "203.0.113.7"})
 
 	if res.Success {
 		t.Error("Success = true although the request could not be sent")

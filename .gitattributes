@@ -3,3 +3,8 @@
 *.go text
 *.sh text eol=lf
 *.cmd text eol=crlf
+
+# the generated Windows resources are binaries: store them byte for byte, do not
+# let git guess and touch their line endings
+*.syso binary
+*.ico binary
