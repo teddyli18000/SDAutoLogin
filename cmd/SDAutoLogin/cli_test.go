@@ -227,6 +227,86 @@ func TestResolveAppDirLetsHomeWin(t *testing.T) {
 	}
 }
 
+func TestParseOptionsTakesTheAppAddressWhenThereIsOne(t *testing.T) {
+	// --app is the one option whose value is optional: the bare form is the
+	// common one on a desktop, and an address is only named by a machine that
+	// should serve the window somewhere specific.
+	bare, rest, err := parseOptions([]string{"--app"})
+	if err != nil {
+		t.Fatalf("parseOptions(--app): %v", err)
+	}
+	if bare.app == nil {
+		t.Fatal("--app was not recorded")
+	}
+	if *bare.app != "" {
+		t.Errorf("app = %q, want an empty address", *bare.app)
+	}
+	if len(rest) != 0 {
+		t.Errorf("rest = %v, want nothing left over", rest)
+	}
+
+	named, _, err := parseOptions([]string{"--app=0.0.0.0:8088"})
+	if err != nil {
+		t.Fatalf("parseOptions(--app=0.0.0.0:8088): %v", err)
+	}
+	if named.app == nil || *named.app != "0.0.0.0:8088" {
+		t.Errorf("app = %v, want the address that was given", named.app)
+	}
+
+	// The spaced form belongs to the options that need a value, which --app is
+	// not one of, so the address is left over as a stray argument and reported
+	// as one instead of being swallowed.
+	spaced, rest, err := parseOptions([]string{"--app", "0.0.0.0:8088"})
+	if err != nil {
+		t.Fatalf("parseOptions(--app 0.0.0.0:8088): %v", err)
+	}
+	if spaced.app == nil || *spaced.app != "" {
+		t.Errorf("app = %v, want an empty address", spaced.app)
+	}
+	if len(rest) != 1 || rest[0] != "0.0.0.0:8088" {
+		t.Errorf("rest = %v, want the address left over", rest)
+	}
+}
+
+func TestCheckOnlyAcceptsAnOptionInTheModeItBelongsTo(t *testing.T) {
+	addr := "127.0.0.1:8088"
+
+	refused := []struct {
+		what    string
+		opts    options
+		command string
+	}{
+		{"--settings where no page is served", options{settings: &addr}, "status"},
+		{"--json where there is nothing to report", options{json: true}, "run"},
+		{"--app where no window is opened", options{app: &addr}, "run"},
+		{"--app where no window is opened", options{app: &addr}, "status"},
+	}
+	for _, c := range refused {
+		if err := c.opts.check(c.command); err == nil {
+			t.Errorf("%s: check(%s) accepted it", c.what, c.command)
+		}
+	}
+
+	allowed := []struct {
+		opts    options
+		command string
+	}{
+		{options{settings: &addr}, "run"},
+		{options{settings: &addr}, "daemon"},
+		{options{json: true}, "status"},
+		{options{}, "run"},
+		// Asking what the program does is always answered, whatever else was
+		// written next to it.
+		{options{app: &addr}, "help"},
+		{options{json: true}, "version"},
+	}
+	for _, c := range allowed {
+		if err := c.opts.check(c.command); err != nil {
+			t.Errorf("check(%s) = %v, want it accepted", c.command, err)
+		}
+	}
+}
+
 func TestStatusNamesWhatTheCheckFound(t *testing.T) {
 	cases := []struct {
 		what  string

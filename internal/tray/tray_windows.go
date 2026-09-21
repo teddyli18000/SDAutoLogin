@@ -50,6 +50,7 @@ const (
 type trayApp struct {
 	state    *app.AppState
 	settings *app.Server
+	opts     Options
 
 	hwnd syscall.Handle
 	nid  notifyIconData
@@ -124,13 +125,13 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 // Run puts the tray icon up and blocks on the message loop. fallback is used
 // when the tray cannot be created, so the program keeps checking in the
 // background instead of quitting.
-func Run(state *app.AppState, fallback func()) {
+func Run(state *app.AppState, opts Options, fallback func()) {
 	// The tray window and its message loop must stay on one OS thread.
 	runtime.LockOSThread()
 
-	a := &trayApp{state: state}
+	a := &trayApp{state: state, opts: opts}
 	trayInstance = a
-	a.settings = app.NewServer(state, "", func() {
+	a.settings = app.NewServer(state, opts.SettingsAddr, func() {
 		// DestroyWindow has to run on the thread that created the window.
 		if hwnd := a.hwnd; hwnd != 0 {
 			procPostMessageW.Call(uintptr(hwnd), wmQuitRequested, 0, 0)
@@ -147,6 +148,11 @@ func Run(state *app.AppState, fallback func()) {
 		logging.Log.Error("creating the tray icon: %v, falling back to background mode", err)
 		// The half built window must not be offered as somewhere to post to.
 		trayInstance = nil
+		if a.opts.AppWindow {
+			// The page does not need the tray, so the window that was asked for
+			// can still be opened on a machine where the icon could not be.
+			a.openSettings()
+		}
 		fallback()
 		return
 	}
@@ -158,7 +164,7 @@ func Run(state *app.AppState, fallback func()) {
 	// Set before the loop starts: a message posted from here on is queued and
 	// handled as soon as the loop runs.
 	a.uiUp.Store(true)
-	if !state.Config().Configured() {
+	if a.opts.AppWindow || !state.Config().Configured() {
 		a.openSettings()
 	}
 
@@ -429,9 +435,14 @@ func doubleClickWindow() time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-// openSettings serves the settings page and hands it to the default browser.
+// openSettings serves the settings page and hands it to the browser, in a window
+// of its own when that was asked for.
 func (a *trayApp) openSettings() {
-	url, err := a.settings.OpenURL()
+	open := a.settings.OpenURL
+	if a.opts.AppWindow {
+		open = a.settings.OpenAppWindow
+	}
+	url, err := open()
 	if err == nil {
 		return
 	}

@@ -51,6 +51,12 @@ Options, for the commands that read the account:
   --save              write what was given here into config.json as well,
                       instead of using it for this run only
 
+Option for the tray mode:
+  --app[=ADDR]        open the settings page in a window of its own, without the
+                      browser around it; ADDR is where to serve it, and leaving
+                      it out keeps it on loopback. Needs a browser of the
+                      Chromium family, and falls back to the default browser
+
 Option for the run command:
   --settings=ADDR     also serve the settings page on ADDR, for example
                       127.0.0.1:8088 or 0.0.0.0:8088, so a machine with no tray
@@ -89,6 +95,10 @@ type options struct {
 	// settings is the address to serve the settings page on, for the run
 	// command; nil leaves the page off.
 	settings *string
+	// app is the address to serve the settings page on for the tray mode, nil
+	// when the settings page is only opened on demand. An empty address means
+	// loopback on a port the system picks.
+	app *string
 	// save also writes the overrides to config.json.
 	save bool
 	// json prints the status report as JSON instead of text.
@@ -101,13 +111,15 @@ type options struct {
 func knownOption(arg string) bool {
 	name, _, _ := strings.Cut(arg, "=")
 	switch name {
-	case "--home", "--username", "--password", "--isp", "--settings", "--save", "--json":
+	case "--home", "--username", "--password", "--isp", "--settings", "--app", "--save", "--json":
 		return true
 	}
 	return false
 }
 
-// takesValue reports whether the option needs a value of its own.
+// takesValue reports whether the option needs a value of its own. --app is not
+// one of them: an address is optional there, and leaving it out is the common
+// case on a desktop.
 func takesValue(name string) bool {
 	switch name {
 	case "--home", "--username", "--password", "--isp", "--settings":
@@ -149,6 +161,9 @@ func (o *options) set(name, value string) bool {
 	case "--settings":
 		v := value
 		o.settings = &v
+	case "--app":
+		v := value
+		o.app = &v
 	case "--save":
 		o.save = true
 	case "--json":
@@ -213,9 +228,18 @@ func (o options) applyTo(cfg *config.Config) {
 // check reports an option that does not belong to the command that was asked
 // for, rather than letting it be silently ignored.
 func (o options) check(command string) error {
+	// help and version describe the program itself and read no options at all,
+	// so they answer whatever else was written on the command line.
+	if command == "help" || command == "version" {
+		return nil
+	}
 	switch {
 	case o.settings != nil && command != "run" && command != "daemon":
 		return fmt.Errorf("--settings belongs to the run command, %s does not serve a settings page", command)
+	case o.app != nil:
+		// The tray is the only mode with a window, and it is the one that is
+		// asked for by naming no command at all.
+		return fmt.Errorf("--app belongs to the tray mode, %s does not open a window", command)
 	case o.json && command != "status":
 		return fmt.Errorf("--json belongs to the status command, %s has nothing to report as JSON", command)
 	}

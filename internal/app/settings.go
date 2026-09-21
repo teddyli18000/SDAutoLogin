@@ -149,11 +149,24 @@ func isLoopback(host string) bool {
 
 // OpenURL starts the server if needed and hands the address to the browser.
 func (s *Server) OpenURL() (string, error) {
+	return s.open(platform.OpenExternal)
+}
+
+// OpenAppWindow starts the server if needed and hands the address to a browser
+// window that has none of the browser chrome, so the settings page looks like an
+// application of its own. See platform.OpenAppWindow for what it falls back to.
+func (s *Server) OpenAppWindow() (string, error) {
+	return s.open(platform.OpenAppWindow)
+}
+
+// open serves the page and hands the address to opener. The address comes back
+// even when opening it failed, so the caller can show it to the user.
+func (s *Server) open(opener func(string) error) (string, error) {
 	url, err := s.URL()
 	if err != nil {
 		return "", err
 	}
-	if err := platform.OpenExternal(url); err != nil {
+	if err := opener(url); err != nil {
 		logging.Log.Warn("opening the settings page: %v", err)
 		return url, err
 	}

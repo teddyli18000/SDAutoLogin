@@ -206,11 +206,14 @@ help           print the usage text
 --settings=ADDR    run: also serve the settings page on ADDR, for a machine
                    with no tray and no display, for example 127.0.0.1:8088
 --json             status: print one line of JSON instead of the report
+--app[=ADDR]       open the settings page in a window of its own, without the
+                   browser around it, on ADDR or on loopback
 ```
 
 An option can also be written as `--name value`, but the form above is the one to
 use when the value holds a character the shell would act on, such as the `@` of a
-service suffix.
+service suffix. `--app` is the exception: its address is optional and has to be
+written with the `=`, so the bare `--app` is how a desktop starts.
 
 The options are read on every run and applied to that run only, so a container or
 a service without a terminal can be provisioned without the setup wizard; add
@@ -220,6 +223,14 @@ and exits rather than asking for it, since a service has nobody to ask.
 The same executable serves both modes: started without a command it puts the
 tray icon up and keeps running, started with one it does that one thing and
 exits. `-cli` is short for `run`, `-test-login` is short for `login`.
+
+`--app` keeps the tray but stops treating the settings page as a page: it opens
+it in a browser window with no address bar, no tabs and no menus, so it looks
+like an application of its own. Only the Chromium family can do that, so Chrome,
+Edge, Chromium or Brave is started with the window and the rest of its chrome
+left out. When none of them is installed, or the one that was found refuses to
+start, the page goes to the default browser instead and the log says so; a tab is
+worse than a window of its own, but better than nothing happening at all.
 
 On Windows the file is linked as a GUI program, so a double click does not open
 a console window. Started from a terminal it attaches to that terminal, so the
@@ -385,7 +396,7 @@ which is what keeps the public surface at the command line and the settings page
 | `internal/i18n/` | interface strings and system language detection |
 | `internal/logging/` | logger with rotation |
 | `internal/tray/` | tray per platform, with the Win32 primitives and the icon conversion |
-| `internal/platform/` | operating system glue: open a file or URL, autostart entry, single instance |
+| `internal/platform/` | operating system glue: open a file, a URL or an application window, autostart entry, single instance |
 | `internal/brand/` | icon drawing |
 | `winres/` | Windows icon, version and manifest, and the generated resource file compiled from them |
 | `tools/icogen/` | icon generator |

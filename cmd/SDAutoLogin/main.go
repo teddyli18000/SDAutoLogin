@@ -90,7 +90,14 @@ func runGUI(appDir string, opts options) {
 	if !cfg.Configured() {
 		logging.Log.Warn("no account configured yet, opening the settings page")
 	}
-	tray.Run(state, func() { runHeadless(state, nil) })
+	// --app turns the settings page into a window of its own. Without it the
+	// page stays what it has always been: a tab in the default browser, opened
+	// when the tray is clicked.
+	trayOpts := tray.Options{AppWindow: opts.app != nil}
+	if opts.app != nil {
+		trayOpts.SettingsAddr = *opts.app
+	}
+	tray.Run(state, trayOpts, func() { runHeadless(state, nil) })
 }
 
 func versionLine() string {

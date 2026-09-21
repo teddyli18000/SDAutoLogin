@@ -23,7 +23,7 @@ import (
 //
 // There is no fallback here: the toolkit either puts the icon up or the program
 // exits with it, so the caller's fallback is unused.
-func Run(state *app.AppState, _ func()) {
+func Run(state *app.AppState, opts Options, _ func()) {
 	// The tap handler is registered before the event loop starts on purpose.
 	// The Linux backend reads it while it exports the status notifier item, so a
 	// handler set from the ready callback can arrive too late: the item would be
@@ -37,7 +37,7 @@ func Run(state *app.AppState, _ func()) {
 	})
 
 	systray.Run(func() {
-		tray.Store(trayReady(state))
+		tray.Store(trayReady(state, opts))
 	}, func() {
 		state.Stop()
 		logging.Log.Info("tray stopped")
@@ -47,6 +47,7 @@ func Run(state *app.AppState, _ func()) {
 type unixTray struct {
 	state    *app.AppState
 	settings *app.Server
+	opts     Options
 
 	mu      sync.Mutex
 	mStatus *systray.MenuItem
@@ -59,16 +60,17 @@ type unixTray struct {
 	lastState   service.State
 }
 
-func trayReady(state *app.AppState) *unixTray {
+func trayReady(state *app.AppState, opts Options) *unixTray {
 	t := &unixTray{
 		state:       state,
+		opts:        opts,
 		lastState:   service.StateUnknown,
 		iconOnline:  brand.PNG(22, iconAccent(service.StateOnline)),
 		iconOffline: brand.PNG(22, iconAccent(service.StateUnknown)),
 		iconBusy:    brand.PNG(22, iconAccent(service.StateLoggingIn)),
 		iconError:   brand.PNG(22, iconAccent(service.StateError)),
 	}
-	t.settings = app.NewServer(state, "", func() {
+	t.settings = app.NewServer(state, opts.SettingsAddr, func() {
 		systray.Quit()
 	})
 
@@ -159,13 +161,21 @@ func trayReady(state *app.AppState) *unixTray {
 	if !t.state.Config().Configured() {
 		logging.Log.Warn("no account configured yet, opening the settings page")
 		t.openSettings()
+	} else if t.opts.AppWindow {
+		t.openSettings()
 	}
 	logging.Log.Debug("tray ready, menu items registered")
 	return t
 }
 
+// openSettings serves the settings page and hands it to the browser, in a window
+// of its own when that was asked for.
 func (t *unixTray) openSettings() {
-	url, err := t.settings.OpenURL()
+	open := t.settings.OpenURL
+	if t.opts.AppWindow {
+		open = t.settings.OpenAppWindow
+	}
+	url, err := open()
 	if err != nil {
 		logging.Log.Error("opening the settings page: %v", err)
 	}
