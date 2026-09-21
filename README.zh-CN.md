@@ -58,7 +58,8 @@
 ## 编译
 
 需要 Go 1.26 或更新版本。依赖已经 vendor 到仓库里，离线也能编译。产物统一放在
-`dist/`。
+`dist/`；`clean` 任务只删除其中的可执行文件，不会动设置和日志，因此在 `dist/`
+里运行的构建不会丢掉账号。
 
 最省事的方式，一条命令、不需要额外工具：
 
@@ -103,8 +104,9 @@ CMake 自身不编译任何东西：编译器是 Go 工具链，编译参数由�
 Xcode 命令行工具（`xcode-select --install`）后编译。
 
 Windows 可执行文件内含图标、版本信息和 DPI 感知清单，由
-`rsrc_windows_amd64.syso` 嵌入；图标和该文件都是生成的（源码里的绘图代码与
-`winres/winres.json`），用上面的 `icon`、`resources` 任务重新生成即可。两者
+`winres/rsrc_windows_amd64.syso` 嵌入；图标和该文件都是生成的（源码里的绘图代码
+与 `winres/winres.json`），用上面的 `icon`、`resources` 任务重新生成即可。两者
+都生成在 `winres/` 内、也就是它们的来源文件旁边，因此仓库根目录只有源码。两者
 都是可复现的，没有改动图案时重新生成不会产生任何差异。
 
 ## 使用
@@ -260,10 +262,12 @@ go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe .
 | `cli.go`、`setup.go` | 命令行 |
 | `log.go` | 带轮转的日志 |
 | `win32_windows.go`、`icon_windows.go`、`openurl_*.go`、`autostart_*.go` | 平台相关代码 |
-| `winres/`、`rsrc_windows_amd64.syso` | Windows 图标、版本、清单 |
+| `winres/` | Windows 图标、版本与清单，以及由它们编译出的资源文件 |
 | `tools/icogen/` | 图标生成器 |
 | `tools/build/` | 任务运行器，脚本与 CMake 目标都由它执行 |
 | `CMakeLists.txt` | 任务运行器的 CMake 前端 |
+| `dist/` | 编译结果，以及在 `dist/` 中运行时的设置与日志 |
+| `build/` | 使用 CMake 时的构建目录 |
 | `vendor/` | 依赖库 |
 
 ## 常见问题

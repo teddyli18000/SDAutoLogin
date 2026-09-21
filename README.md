@@ -67,7 +67,9 @@ portal itself.
 ## Build
 
 Requires Go 1.26 or newer. All dependencies are vendored, so the build works
-offline. Everything is written to `dist/`.
+offline. Everything is written to `dist/`; the `clean` task removes the
+executables from there but leaves settings and logs alone, so a build that was
+started from `dist/` keeps its account.
 
 One command, no extra tooling:
 
@@ -114,10 +116,12 @@ cgo, so that build has to be made on macOS with the Xcode command line tools
 installed (`xcode-select --install`).
 
 The Windows executable carries an icon, version information and a DPI aware
-application manifest, embedded from `rsrc_windows_amd64.syso`. The icon and that
-file are both generated, from the drawing code and from `winres/winres.json`;
-the `icon` and `resources` tasks above regenerate them. Both are reproducible,
-so rerunning them does not change the files unless the artwork changed.
+application manifest, embedded from `winres/rsrc_windows_amd64.syso`. The icon
+and that file are both generated, from the drawing code and from
+`winres/winres.json`; the `icon` and `resources` tasks above regenerate them.
+Both are written inside `winres/`, next to the files they are made from, so the
+repository root holds sources only. Both are reproducible, so rerunning them
+does not change the files unless the artwork changed.
 
 ## Usage
 
@@ -283,10 +287,12 @@ log is readable by anyone.
 | `cli.go`, `setup.go` | command line |
 | `log.go` | logger with rotation |
 | `win32_windows.go`, `icon_windows.go`, `openurl_*.go`, `autostart_*.go` | platform glue |
-| `winres/`, `rsrc_windows_amd64.syso` | Windows icon, version, manifest |
+| `winres/` | Windows icon, version and manifest, and the generated resource file compiled from them |
 | `tools/icogen/` | icon generator |
 | `tools/build/` | task runner, used by the scripts and the CMake targets |
 | `CMakeLists.txt` | CMake front end for the task runner |
+| `dist/` | build results, plus the settings and log of a build started from there |
+| `build/` | CMake build tree, when CMake is used |
 | `vendor/` | vendored dependencies |
 
 ## Troubleshooting
