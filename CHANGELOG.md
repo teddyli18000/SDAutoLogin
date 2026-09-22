@@ -288,7 +288,7 @@ fall back on.
 
 ### Tests
 
-104 cases, up from 52.
+105 cases, up from 52.
 
 - `internal/app` (5): the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use,
@@ -326,6 +326,9 @@ fall back on.
   for: an entry refused and the next one signing in, a refused entry being
   walked past on the next round, a busy portal *not* walking the list, and the
   wait being cut short by a check that was asked for.
+- `internal/webui` (1): every literal in the page markup that the script
+  replaces from the string table is compared with that table, so the two copies
+  of a sentence cannot drift apart unnoticed.
 
 ## v1.0.0 - 2026-09-21
 
