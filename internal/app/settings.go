@@ -70,9 +70,10 @@ type Server struct {
 	// addr is where to listen, empty for loopback on a port the system picks.
 	addr string
 
-	mu  sync.Mutex
-	srv *http.Server
-	url string
+	mu    sync.Mutex
+	srv   *http.Server
+	url   string
+	bound net.Addr
 	// entry is the token the address handed to a browser carries. The browser
 	// cannot put it in a header, since the first request is one it makes on its
 	// own, so it arrives in the address and is exchanged for a cookie before the
@@ -129,13 +130,15 @@ func (s *Server) URL() (string, error) {
 		IdleTimeout:       2 * time.Minute,
 	}
 	s.entry, s.session = entry, session
-	s.url = urlFor(listener.Addr(), entry)
+	s.bound = listener.Addr()
+	s.url = urlFor(s.bound, entry)
 	s.srv = srv
 	s.lastHit.Store(time.Now().UnixNano())
 
 	if onDemand {
 		// The tray opens the page when it is wanted, so the port is released
-		// again once it has gone unused for a while.
+		// again once it has gone unused for a while. The address is written to
+		// the log as it is handed out, since a new one is made for every opening.
 		go s.reapWhenIdle()
 	} else {
 		if host, _, err := net.SplitHostPort(listener.Addr().String()); err == nil && !isLoopback(host) {
@@ -153,10 +156,28 @@ func (s *Server) URL() (string, error) {
 		}
 	}()
 
-	if onDemand {
-		logging.Log.Info("settings page available at %s", s.url)
-	}
 	return s.url, nil
+}
+
+// rollEntry makes a new token for the address that is handed to a browser, so
+// the one before it stops working: an address that was seen, written into the
+// log or left in a browser's history opens the page once and no more. The
+// address that is current goes to the log as it is made, which is where an
+// operator with no tray reads it.
+func (s *Server) rollEntry() (string, error) {
+	entry, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+
+	s.mu.Lock()
+	s.entry = entry
+	s.url = urlFor(s.bound, entry)
+	url := s.url
+	s.mu.Unlock()
+
+	logging.Log.Info("settings page at %s", url)
+	return url, nil
 }
 
 // urlFor builds the address to hand to a browser out of the address the server
@@ -211,8 +232,15 @@ func (s *Server) OpenAppWindow() (string, error) {
 
 // open serves the page and hands the address to opener. The address comes back
 // even when opening it failed, so the caller can show it to the user.
+//
+// Every opening gets an address of its own. The one that was handed out last
+// time is spent by this, which is what makes two openings in a row work rather
+// than sending the second browser to an address the first has already used.
 func (s *Server) open(opener func(string) error) (string, error) {
-	url, err := s.URL()
+	if _, err := s.URL(); err != nil {
+		return "", err
+	}
+	url, err := s.rollEntry()
 	if err != nil {
 		return "", err
 	}
@@ -226,7 +254,7 @@ func (s *Server) open(opener func(string) error) (string, error) {
 func (s *Server) Stop() {
 	s.mu.Lock()
 	srv := s.srv
-	s.srv, s.url, s.entry, s.session = nil, "", "", ""
+	s.srv, s.url, s.bound, s.entry, s.session = nil, "", nil, "", ""
 	s.mu.Unlock()
 	if srv != nil {
 		_ = srv.Close()
@@ -351,10 +379,20 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 // startSession hands the browser the cookie the rest of the session is checked
 // against, and sends it to the page again without the token it arrived with.
+//
+// The address that was used is spent here, and the next one is made and written
+// to the log, so the page can always be opened again afterwards: from the tray,
+// or, on a machine that serves the page for remote management and has none, by
+// reading the newest address out of the log.
 func (s *Server) startSession(w http.ResponseWriter) {
 	s.mu.Lock()
 	session := s.session
 	s.mu.Unlock()
+	if _, err := s.rollEntry(); err != nil {
+		// The address that was used stays valid in that case. Saying so is
+		// better than a page that cannot be opened again at all.
+		logging.Log.Warn("making the next settings address: %v", err)
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    session,

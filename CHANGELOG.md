@@ -322,12 +322,20 @@ that implies.
   no token at all. That cookie is what every later request is checked against, and
   a request that changes something has to repeat the value in a header as well,
   which a page from another site cannot set.
+- An address is good for one opening. A new one is made for each opening the
+  program hands out and for each one that is used, so what a browser was left
+  with, and what someone read out of the log, is not a way in a second time. Each
+  new address goes to the log as it is made, which leaves a machine that serves
+  the page for remote management and has no tray with one to read: the current
+  address is always the newest of those lines. The second opening in a row is what
+  this had to keep working, so the tray rolls an address for every opening rather
+  than handing out the one it gave last time.
 
 ### Tests
 
-114 cases, up from 52.
+116 cases, up from 52.
 
-- `internal/app` (14): the settings server serves on the address it was given,
+- `internal/app` (16): the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use,
   knows what counts as loopback, and leaves the running configuration and the
   file it was read from untouched when a save is refused. The login self test is
@@ -339,7 +347,9 @@ that implies.
   never started, which an unwary constant time comparison would read as a match.
   The address it hands out is exchanged for a cookie that carries another value,
   an address with the token in it is refused on the API, and a write has to repeat
-  the cookie in a header.
+  the cookie in a header. An address is good for one opening and is replaced by
+  the one made as it is spent, and every opening the tray makes gets an address of
+  its own, so the opening after it is not sent to one that has been used.
 - `cmd/SDAutoLogin` (24): both forms of every option, the address that is
   optional for `--app`, which mode refuses which option, that `--app` is refused in
   a build without a tray, help and version answering regardless of what else is on

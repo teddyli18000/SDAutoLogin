@@ -133,8 +133,82 @@ func TestTheAddressIsExchangedForASessionCookie(t *testing.T) {
 	if cookie.Value != server.session {
 		t.Errorf("cookie value = %q, want the token the page goes on using", cookie.Value)
 	}
-	if cookie.Value == server.entry {
-		t.Error("the address and the session carry the same token, so an address that was seen stays a way in")
+	// The token the address carried is not the one the page keeps, so an address
+	// that was seen is not the session.
+	used := url[strings.Index(url, "token=")+len("token="):]
+	if cookie.Value == used {
+		t.Errorf("the address and the session carry the same token %q, so an address that was seen stays a way in", used)
+	}
+}
+
+// TestTheAddressIsGoodForOneOpening covers what one-opening addresses are for:
+// what a browser was left with, and what someone read out of a log or a history,
+// is not a way in a second time. The server makes the next one as it spends this
+// one, which is what the tray hands out afterwards.
+func TestTheAddressIsGoodForOneOpening(t *testing.T) {
+	server, url := startedServer(t, "127.0.0.1:0")
+
+	first, err := browser(t).Get(url)
+	if err != nil {
+		t.Fatalf("first opening: %v", err)
+	}
+	first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first opening: status %d, want 200", first.StatusCode)
+	}
+
+	second, err := browser(t).Get(url)
+	if err != nil {
+		t.Fatalf("second opening: %v", err)
+	}
+	second.Body.Close()
+	if second.StatusCode != http.StatusForbidden {
+		t.Errorf("second opening: status %d, want 403, the address was spent by the first", second.StatusCode)
+	}
+
+	next, err := server.URL()
+	if err != nil {
+		t.Fatalf("URL: %v", err)
+	}
+	if next == url {
+		t.Fatal("the spent address was not replaced")
+	}
+	opened, err := browser(t).Get(next)
+	if err != nil {
+		t.Fatalf("opening the next address: %v", err)
+	}
+	opened.Body.Close()
+	if opened.StatusCode != http.StatusOK {
+		t.Errorf("opening the next address: status %d, want 200", opened.StatusCode)
+	}
+}
+
+// TestEveryOpeningGetsItsOwnAddress is the tray path: two openings in a row have
+// to work, so the second cannot be handed the address the first has just used.
+func TestEveryOpeningGetsItsOwnAddress(t *testing.T) {
+	server, _ := startedServer(t, "127.0.0.1:0")
+
+	handed := make([]string, 0, 2)
+	for i := 0; i < 2; i++ {
+		url, err := server.open(func(string) error { return nil })
+		if err != nil {
+			t.Fatalf("open %d: %v", i+1, err)
+		}
+		for _, earlier := range handed {
+			if url == earlier {
+				t.Fatalf("opening %d was handed %q, the address of the opening before it", i+1, url)
+			}
+		}
+		handed = append(handed, url)
+
+		resp, err := browser(t).Get(url)
+		if err != nil {
+			t.Fatalf("opening %d: %v", i+1, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("opening %d: status %d, want 200", i+1, resp.StatusCode)
+		}
 	}
 }
 

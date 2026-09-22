@@ -187,11 +187,16 @@ read or change the configuration. After 15 minutes without a request the
 service shuts itself down and releases the port; it starts again the next time
 the page is opened.
 
+The address handed out is good for one opening, and a new one is made for every
+opening and for every one that is used. Each is written to the log as it is made,
+so the current address is always the newest of those lines.
+
 On a machine with no tray, `run --settings=ADDR` serves the same page on an
 address that was chosen. That endpoint starts at once and stays up until the program
 stops, and when ADDR is not a loopback address the page is reachable from the
 network with the token in its address as the only protection, so keep it on a
-trusted network or behind a tunnel.
+trusted network or behind a tunnel. The address to open is the newest one in the
+log, since the one before it was spent by the browser that opened it.
 
 **General**
 
@@ -689,8 +694,8 @@ log is readable by anyone.
   header. It is exchanged for a session cookie before the page is served, and the
   browser is sent to the same page without it, so the address bar, the history and
   the `Referer` of anything the page links to carry no token. Every request after
-  that is checked against the cookie, and a request that changes something has to
-  repeat it in a header.
+  that is checked against the cookie, a request that changes something has to
+  repeat it in a header, and the address itself is good for one opening.
 - The password has to be available to sign in unattended, so it is stored in
   `config.json` in clear text unless `rememberPassword` is turned off. The file is
   written readable by its owner alone, and so is the log in its directory, since

@@ -458,7 +458,7 @@ func cmdRun(appDir string, opts options) int {
 
 	state := app.New(cfg)
 	stop := make(chan struct{})
-	settingsURL := ""
+	var settingsServer *app.Server
 
 	if opts.settings != nil {
 		// The page does not need a tray, so a machine with no display can be
@@ -469,23 +469,29 @@ func cmdRun(appDir string, opts options) int {
 			close(stop)
 		})
 		defer server.Stop()
+		settingsServer = server
 
-		url, err := server.URL()
-		if err != nil {
+		if _, err := server.URL(); err != nil {
 			fmt.Fprintf(os.Stderr, "settings page: %v\n", err)
 			return 1
 		}
-		settingsURL = url
 	}
 
 	// A second copy is told where the page is, or that there is none, so the
-	// request is answered rather than dropped in silence.
+	// request is answered rather than dropped in silence. The address is read
+	// when it is asked for rather than kept: the page is opened with one that
+	// works once, and the one it is replaced by is the one to hand out now.
 	go platform.WaitForSettingsRequest(func() {
-		if settingsURL != "" {
-			logging.Log.Info("another copy asked for the settings page, it is at %s", settingsURL)
+		if settingsServer == nil {
+			logging.Log.Warn("another copy asked for the settings page, which the background mode does not serve")
 			return
 		}
-		logging.Log.Warn("another copy asked for the settings page, which the background mode does not serve")
+		url, err := settingsServer.URL()
+		if err != nil {
+			logging.Log.Warn("another copy asked for the settings page, and its address could not be made: %v", err)
+			return
+		}
+		logging.Log.Info("another copy asked for the settings page, it is at %s", url)
 	})
 
 	runHeadless(state, stop)
