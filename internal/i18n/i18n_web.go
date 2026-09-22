@@ -129,7 +129,7 @@ var webText = map[string]text{
 	"msg.unsaved":      {"有未保存的修改", "Unsaved changes"},
 	"msg.confirmQuit":  {"确定退出程序吗？退出不会注销校园网登录。", "Quit the application? This does not log the campus session out."},
 	"msg.noStatus":     {"尚无检测结果", "No check has finished yet"},
-	"msg.quitDone":     {"程序已退出，可以关闭此页面。", "The application has quit, you can close this page."},
+	"msg.quitDone":     {"程序已退出，此页面可以关闭。", "The application has quit. This page can be closed."},
 	"msg.confirmRemove": {
 		"删除账号 {0}？该账号的密码也会从配置里移除。",
 		"Remove account {0}? Its password is removed from the configuration as well."},
