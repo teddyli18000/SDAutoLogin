@@ -359,7 +359,7 @@ that implies.
 
 ### Tests
 
-122 cases, up from 52.
+128 cases, up from 52.
 
 - `internal/app` (16): the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use,
@@ -411,12 +411,20 @@ that implies.
 - `internal/webui` (1): every literal in the page markup that the script
   replaces from the string table is compared with that table, so the two copies
   of a sentence cannot drift apart unnoticed.
-- `tools/build` (6): the version the sources carry is the one the latest tag
+- `tools/build` (12): the version the sources carry is the one the latest tag
   names, the OpenWrt Makefile names the same one, a tree with no checkout falls
   back on the sources, a value is read from a constant of its own and from a
   block of variables alike, the link flags carry the version and the commit, and
   the variables the linker is told to write into are the ones the program reads.
-  It is the first test this package has.
+  The packaging half is held the same way: the layout of every container is
+  compared with the one a reader of its format sees, written out in full, so that
+  a change to one of them shows up as a difference and not as a package that
+  installs wrongly. That covers the ar archive and its two tar archives, the
+  header of the rpm tag by tag with the digest of its payload, the metadata of an
+  Arch package and the entries of a Windows archive. Every container is also
+  packed twice from the same input and has to come out the same bytes, which is
+  what the digest published next to a release depends on. It is the first test
+  this package has.
 
 ## v1.0.0 - 2026-09-21
 
