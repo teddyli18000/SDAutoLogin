@@ -11,9 +11,9 @@
 #   /etc/init.d/sdautologin restart
 #
 # An option that is left empty is not passed on, and then whatever config.json
-# holds decides. That is what makes it possible to configure the account from the
-# settings page instead: leave the account options here empty, turn the page on
-# with the settings option below, and the page writes config.json on the overlay.
+# holds decides. This allows configuring the account from the settings page
+# instead: leave the account options here empty, turn the page on with the
+# settings option below, and the page writes config.json on the overlay.
 
 START=95
 

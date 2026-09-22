@@ -5,7 +5,9 @@ const token = new URLSearchParams(location.search).get("token") || "";
 const state = {
   i18n: {},
   config: null,
-  status: null,
+  status: {},
+  operators: [],
+  errors: {},
   dirty: false,
   configured: true,
 };
@@ -37,14 +39,59 @@ async function api(path, options) {
   return { ok: resp.ok, status: resp.status, data };
 }
 
-/* ---------- rendering ---------- */
+/* ---------- building blocks ---------- */
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  Object.entries(attrs || {}).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === false) return;
+    if (key === "class") node.className = value;
+    else if (key === "text") node.textContent = value;
+    else if (key === "dataset") Object.assign(node.dataset, value);
+    else if (key === "value") node.value = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value === true ? "" : value);
+  });
+  children.flat().forEach((child) => {
+    if (child !== null && child !== undefined) node.append(child);
+  });
+  return node;
+}
+
+function button(label, extra) {
+  return el("button", { type: "button", class: "btn " + (extra || ""), text: label });
+}
+
+function iconButton(act, glyph, label, extra) {
+  return el("button", {
+    type: "button",
+    class: "icon " + (extra || ""),
+    title: label,
+    "aria-label": label,
+    dataset: { act },
+    text: glyph,
+  });
+}
+
+/* The service types are named in the language of the interface here, while the
+   log and the command line keep the English names the portal's own dropdown
+   uses. A suffix the dropdown does not list is shown as it is. */
+const OPERATOR_KEYS = { "": "op.campus", "@zgyd": "op.zgyd", "@cucc": "op.cucc", "@ctc": "op.ctc" };
+
+function operatorName(suffix) {
+  if (OPERATOR_KEYS[suffix]) return t(OPERATOR_KEYS[suffix]);
+  const known = state.operators.find((op) => op.Suffix === suffix);
+  return known ? known.Name : suffix;
+}
+
+/* ---------- text and language ---------- */
 
 function applyI18n() {
-  document.querySelectorAll("[data-i18n]").forEach((el) => {
-    el.textContent = t(el.dataset.i18n);
+  document.querySelectorAll("[data-i18n]").forEach((node) => {
+    node.textContent = t(node.dataset.i18n);
   });
-  document.querySelectorAll("[data-i18n-ph]").forEach((el) => {
-    el.placeholder = t(el.dataset.i18nPh);
+  document.querySelectorAll("[data-i18n-ph]").forEach((node) => {
+    node.placeholder = t(node.dataset.i18nPh);
   });
   document.title = t("app.name");
 }
@@ -58,118 +105,203 @@ function applyAutostart(on) {
   if (typeof on === "boolean") $("f-autostart").checked = on;
 }
 
+/* ---------- the login list ---------- */
+
 function applyConfig(cfg) {
   state.config = cfg;
-  $("f-username").value = cfg.username || "";
-  $("f-password").value = cfg.password || "";
   $("f-interval").value = cfg.checkIntervalSeconds;
   $("f-timeout").value = cfg.httpTimeoutSeconds;
   $("f-portal").value = cfg.portalBaseUrl || "";
   $("f-eportal").value = cfg.eportalUrl || "";
   $("f-prefix").value = cfg.accountPrefix || "";
-  $("f-suffix").value = cfg.accountSuffix || "";
   $("f-jsversion").value = cfg.jsVersion || "";
   $("f-remember").checked = !!cfg.rememberPassword;
   $("f-autologin").checked = !!cfg.autoLogin;
   $("f-internet").checked = !!cfg.checkInternet;
   $("f-verbose").checked = !!cfg.verboseLog;
   $("f-language").value = cfg.language || "auto";
-  $("f-isp").value = cfg.accountSuffix || "";
   renderProbes(cfg.probeUrls || []);
+  renderAccounts(cfg.accounts || []);
 }
 
-function renderProbes(list) {
-  const box = $("probeList");
-  box.innerHTML = "";
-  list.forEach((value) => box.appendChild(probeRow(value)));
+function renderAccounts(accounts) {
+  const list = $("accountList");
+  list.innerHTML = "";
+  accounts.forEach((entry, index) => list.append(accountCard(entry, index)));
+  $("acctEmpty").hidden = accounts.length > 0;
+  $("acctWarn").hidden = !(accounts.length > 0 && accounts.every((entry) => entry.disabled));
+  applyErrors();
+  applyStatusBadges(state.status);
+  updateTestButtons();
 }
 
-function probeRow(value) {
-  const row = document.createElement("div");
-  row.className = "probe-row";
-  const input = document.createElement("input");
-  input.type = "text";
-  input.spellcheck = false;
-  input.value = value || "";
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.className = "btn ghost";
-  remove.textContent = t("btn.remove");
-  remove.addEventListener("click", () => {
-    row.remove();
-    markDirty();
+// The test action submits one entry from the saved list, which is keyed by
+// position, so an entry just moved or edited is not what the program would use
+// yet. The button therefore waits for a save.
+function updateTestButtons() {
+  Array.from(document.querySelectorAll('#accountList [data-act="test"]')).forEach((node) => {
+    const index = Number(node.closest(".account").dataset.index);
+    const entry = state.config && state.config.accounts && state.config.accounts[index];
+    const off = !!(entry && entry.disabled);
+    node.disabled = off || state.dirty;
+    node.title = off ? t("acct.disabled") : state.dirty ? t("acct.test.dirty") : "";
   });
-  input.addEventListener("input", markDirty);
-  row.append(input, remove);
-  return row;
 }
 
-function readProbes() {
-  return Array.from($("probeList").querySelectorAll("input"))
-    .map((i) => i.value.trim())
-    .filter((v) => v !== "");
-}
+function accountCard(entry, index) {
+  const isps = entry.isps && entry.isps.length ? entry.isps : [""];
 
-function renderStatus(st) {
-  state.status = st;
-  const pill = $("statePill");
-  pill.className = "state-pill " + (st.state || "checking");
-  $("stateText").textContent = t("state." + (st.state || "checking"));
-  $("stClientIp").textContent = st.clientIp || "-";
-  $("stAccount").textContent = st.account || "-";
-  $("stSince").textContent = st.onlineSince || "-";
-  $("stLastLogin").textContent = st.lastLoginAt || "-";
-  $("stInternet").textContent = st.internetChecked
-    ? (st.internetOk ? t("status.internetOk") : t("status.internetNo"))
-    : "-";
-}
+  const number = el("span", { class: "account-no", text: String(index + 1) });
+  const grip = el("span", { class: "grip", title: t("acct.drag"), "aria-hidden": "true", text: "⠿" });
+  const card = el("article", { class: "account", dataset: { index: String(index) } });
 
-function renderErrors(errors) {
-  document.querySelectorAll("[data-error]").forEach((el) => { el.textContent = ""; el.dataset.key = ""; });
-  document.querySelectorAll(".invalid").forEach((el) => el.classList.remove("invalid"));
-  if (!errors) return;
-  Object.keys(errors).forEach((field) => {
-    const key = errors[field];
-    const slot = document.querySelector('[data-error="' + field + '"]');
-    if (slot) {
-      slot.textContent = t(key);
-      slot.dataset.key = key;
-    }
-    const input = $("f-" + field) || document.querySelector("[name=" + field + "]");
-    if (input) input.classList.add("invalid");
+  const head = el("div", { class: "account-head" },
+    grip,
+    number,
+    el("span", {
+      class: "account-title",
+      text: entry.username || t("acct.card", index + 1),
+    }),
+    // The three states an entry can be in besides usable: the session is on it,
+    // the portal refused it for a while, or it is switched off. applyStatusBadges
+    // fills in what they say.
+    el("span", { class: "badge active", text: t("acct.active"), hidden: true }),
+    el("span", { class: "badge skipped", hidden: true }),
+    el("span", { class: "badge off", text: t("acct.disabled"), hidden: !entry.disabled }),
+    el("div", { class: "spacer" }),
+    el("label", { class: "switch" },
+      el("input", {
+        type: "checkbox",
+        dataset: { field: "enabled" },
+        checked: !entry.disabled,
+        onchange: markDirty,
+      }),
+      el("span", { text: t("acct.enabled") })),
+    el("div", { class: "account-tools" },
+      iconButton("up", "↑", t("acct.up")),
+      iconButton("down", "↓", t("acct.down")),
+      iconButton("remove", "×", t("acct.remove"), "danger")));
+
+  const usernameID = "acct-" + index + "-username";
+  const passwordID = "acct-" + index + "-password";
+
+  const username = el("input", {
+    id: usernameID,
+    autocomplete: "off",
+    spellcheck: "false",
+    value: entry.username || "",
+    oninput: markDirty,
+    dataset: { field: "username" },
   });
-  const generic = errors["_"];
-  if (generic && !Object.keys(errors).some((k) => k !== "_")) {
-    toast(t(generic), true);
-  }
+
+  const password = el("input", {
+    id: passwordID,
+    type: "password",
+    autocomplete: "off",
+    value: entry.password || "",
+    oninput: markDirty,
+    dataset: { field: "password" },
+  });
+
+  const show = button(t("field.show"), "ghost");
+  show.dataset.act = "show";
+
+  const chips = el("div", { class: "chips", dataset: { chips: "" } },
+    isps.map((suffix) => chip(suffix)));
+
+  const picker = servicePicker(isps);
+  const custom = el("input", {
+    class: "custom-suffix",
+    hidden: true,
+    spellcheck: "false",
+    placeholder: t("acct.custom.ph"),
+    dataset: { act: "custom" },
+    onkeydown: (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addCustomSuffix(card);
+      }
+    },
+    onblur: (event) => {
+      if (event.target.value.trim() !== "") addCustomSuffix(card);
+    },
+  });
+
+  const test = button(t("acct.test"), "ghost");
+  test.dataset.act = "test";
+  const testResult = el("div", { class: "test-result", hidden: true });
+
+  const body = el("div", { class: "account-body" },
+    row(usernameID, t("field.account"), username, t("field.account.hint"), "accounts." + index + ".username"),
+    row(passwordID, t("field.password"), el("div", { class: "input-row" }, password, show),
+      null, "accounts." + index + ".password"),
+    row(null, t("acct.services"), el("div", { class: "services" },
+      chips,
+      el("div", { class: "service-add" }, picker, custom),
+      el("p", { class: "hint", text: t("acct.services.hint") })), null, null),
+    el("div", { class: "account-foot" }, test, testResult));
+
+  card.append(head, body);
+  return card;
 }
 
-let toastTimer = null;
-function toast(text, isError) {
-  const el = $("toast");
-  el.textContent = text;
-  el.style.color = isError ? "var(--err)" : "var(--ok)";
-  el.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 6000);
+function row(labelID, label, control, hint, errorKey) {
+  return el("div", { class: "row" },
+    el("label", { class: "row-label", for: labelID, text: label }),
+    el("div", { class: "row-body" },
+      control,
+      hint ? el("p", { class: "hint", text: hint }) : null,
+      errorKey ? el("p", { class: "error", dataset: { error: errorKey } }) : null));
 }
 
-function markDirty() {
-  state.dirty = true;
-  $("dirtyBadge").hidden = false;
+// A chip is one service type of one account. They are dragged, or moved with
+// the arrow keys while one has the focus, because their order is the order the
+// portal is asked in.
+function chip(suffix) {
+  return el("span", {
+    class: "chip",
+    draggable: "true",
+    tabindex: "0",
+    title: t("acct.services"),
+    dataset: { suffix },
+  },
+    el("span", { class: "chip-name", text: operatorName(suffix) }),
+    el("button", {
+      type: "button",
+      class: "chip-x",
+      title: t("btn.remove"),
+      "aria-label": t("btn.remove"),
+      dataset: { act: "unservice" },
+      text: "×",
+    }));
 }
 
-/* ---------- collecting and saving ---------- */
+function servicePicker(chosen) {
+  const select = el("select", { class: "picker", dataset: { act: "service-picker" } });
+  select.append(el("option", { value: "__add", text: t("acct.addService") }));
+  state.operators.forEach((op) => {
+    if (chosen.includes(op.Suffix)) return;
+    select.append(el("option", { value: op.Suffix, text: operatorName(op.Suffix) }));
+  });
+  select.append(el("option", { value: "__custom", text: t("acct.custom") }));
+  return select;
+}
+
+/* ---------- reading and writing the list ---------- */
 
 function collect() {
+  const accounts = Array.from($("accountList").children).map((card) => ({
+    username: card.querySelector('[data-field="username"]').value.trim(),
+    password: card.querySelector('[data-field="password"]').value,
+    disabled: !card.querySelector('[data-field="enabled"]').checked,
+    isps: Array.from(card.querySelectorAll(".chip")).map((node) => node.dataset.suffix),
+  }));
   return {
-    username: $("f-username").value.trim(),
-    password: $("f-password").value,
+    accounts,
     rememberPassword: $("f-remember").checked,
     portalBaseUrl: $("f-portal").value.trim(),
     eportalUrl: $("f-eportal").value.trim(),
     accountPrefix: $("f-prefix").value,
-    accountSuffix: $("f-isp").value,
     checkIntervalSeconds: parseInt($("f-interval").value, 10) || 0,
     httpTimeoutSeconds: parseInt($("f-timeout").value, 10) || 0,
     autoLogin: $("f-autologin").checked,
@@ -181,22 +313,253 @@ function collect() {
   };
 }
 
+/* redraw rebuilds the list from the values read out of the DOM; every change to
+   the order, the services or the account count ends here. */
+function redraw(accounts) {
+  state.config.accounts = accounts;
+  renderAccounts(accounts);
+  markDirty();
+}
+
+function addAccount() {
+  const accounts = collect().accounts;
+  accounts.push({ username: "", password: "", isps: [""] });
+  redraw(accounts);
+  const last = $("accountList").lastElementChild;
+  if (last) last.querySelector('[data-field="username"]').focus();
+}
+
+function removeAccount(index) {
+  const accounts = collect().accounts;
+  confirmDialog(t("msg.confirmRemove", accounts[index].username || t("acct.card", index + 1)))
+    .then((yes) => {
+      if (!yes) return;
+      accounts.splice(index, 1);
+      state.status = Object.assign({}, state.status, { entryIndex: -1, skipped: [] });
+      redraw(accounts);
+    });
+}
+
+// moveAccount swaps one entry with its neighbour; the position in this list is
+// the priority.
+function moveAccount(index, delta) {
+  const accounts = collect().accounts;
+  const to = index + delta;
+  if (to < 0 || to >= accounts.length) return;
+  const moved = accounts.splice(index, 1)[0];
+  accounts.splice(to, 0, moved);
+  state.status = Object.assign({}, state.status, { entryIndex: -1, skipped: [] });
+  redraw(accounts);
+}
+
+// applyOrder rewrites the list from the order the cards are in after a drag,
+// where order[i] is the position the card at i came from.
+function applyOrder(order) {
+  const accounts = collect().accounts;
+  const sorted = order.map((from) => accounts[from]).filter(Boolean);
+  if (sorted.length !== accounts.length) {
+    renderAccounts(accounts);
+    return;
+  }
+  state.status = Object.assign({}, state.status, { entryIndex: -1, skipped: [] });
+  redraw(sorted);
+}
+
+function renumber() {
+  Array.from($("accountList").children).forEach((card, i) => {
+    const badge = card.querySelector(".account-no");
+    if (badge) badge.textContent = String(i + 1);
+  });
+}
+
+function addService(card, suffix) {
+  const chips = card.querySelector("[data-chips]");
+  const chosen = Array.from(chips.children).map((node) => node.dataset.suffix);
+  if (chosen.includes(suffix)) return;
+  chips.append(chip(suffix));
+  markDirty();
+}
+
+function addCustomSuffix(card) {
+  const input = card.querySelector('[data-act="custom"]');
+  const suffix = input.value.trim();
+  input.value = "";
+  input.hidden = true;
+  if (suffix === "") return;
+  addService(card, suffix);
+  // The picker was built before this suffix existed, so it is rebuilt to drop
+  // the suffix that was just added.
+  refreshPicker(card);
+}
+
+function refreshPicker(card) {
+  const chosen = Array.from(card.querySelectorAll(".chip")).map((node) => node.dataset.suffix);
+  const old = card.querySelector('[data-act="service-picker"]');
+  old.replaceWith(servicePicker(chosen));
+  // A suffix that is already there is dropped from the picker, so a select that
+  // was showing it has to go back to the placeholder.
+  const picker = card.querySelector('[data-act="service-picker"]');
+  picker.value = "__add";
+}
+
+/* ---------- status ---------- */
+
+function entryLabel(index, usedSuffix) {
+  const cfg = state.config;
+  if (!cfg || !cfg.accounts || index < 0 || index >= cfg.accounts.length) return "-";
+  const entry = cfg.accounts[index];
+  const all = entry.isps && entry.isps.length ? entry.isps : [""];
+  const isps = usedSuffix === undefined ? all : [usedSuffix];
+  return (entry.username || t("acct.card", index + 1)) + " (" + isps.map(operatorName).join(", ") + ")";
+}
+
+// activeEntryLabel names the entry the session is on, picking the one service
+// type out when the portal echoed it.
+function activeEntryLabel(st) {
+  if (!st || typeof st.entryIndex !== "number" || st.entryIndex < 0) return "-";
+  const cfg = state.config;
+  if (!cfg || !cfg.accounts || st.entryIndex >= cfg.accounts.length) return "-";
+  const isps = cfg.accounts[st.entryIndex].isps || [""];
+  const echoed = st.account || "";
+  const used = isps.find((suffix) => suffix !== "" && echoed.includes(suffix));
+  return entryLabel(st.entryIndex, used);
+}
+
+function formatWait(seconds) {
+  if (seconds < 60) return seconds + "s";
+  return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+}
+
+function applyStatusBadges(st) {
+  if (!st) return;
+  Array.from($("accountList").children).forEach((card) => {
+    const index = Number(card.dataset.index);
+    const active = card.querySelector(".badge.active");
+    const skipped = card.querySelector(".badge.skipped");
+    if (active) {
+      active.hidden = st.entryIndex !== index;
+      active.textContent = t("acct.active");
+    }
+    if (skipped) {
+      const why = (st.skipped || []).find((item) => item.index === index);
+      skipped.hidden = !why;
+      if (why) {
+        // The portal's answer is localised by its ret_code, and one this program
+        // has never seen is shown as the portal wrote it.
+        const reason = state.i18n["retcode." + why.retCode] || why.message;
+        skipped.textContent = t("acct.skipped", formatWait(why.retryInS), reason);
+      }
+    }
+  });
+  updateSummary();
+}
+
+function updateSummary() {
+  const count = $("accountList").children.length;
+  const label = activeEntryLabel(state.status);
+  $("acctSummary").textContent = label === "-"
+    ? t("acct.summaryOnly", count)
+    : t("acct.summary", count, label);
+}
+
+function renderStatus(st) {
+  state.status = st || {};
+  const code = st.state || "checking";
+  $("statePill").dataset.state = code;
+  $("stateText").textContent = state.i18n["state." + code] ? t("state." + code) : t("msg.noStatus");
+  $("stEntry").textContent = activeEntryLabel(st);
+  $("stClientIp").textContent = st.clientIp || "-";
+  $("stAccount").textContent = st.account || "-";
+  $("stSince").textContent = st.onlineSince || "-";
+  $("stLastLogin").textContent = st.lastLoginAt || "-";
+  $("stInternet").textContent = st.internetChecked
+    ? (st.internetOk ? t("status.internetOk") : t("status.internetNo"))
+    : "-";
+  applyStatusBadges(state.status);
+}
+
+/* ---------- errors and toasts ---------- */
+
+function applyErrors() {
+  document.querySelectorAll("[data-error]").forEach((node) => { node.textContent = ""; });
+  document.querySelectorAll(".invalid").forEach((node) => node.classList.remove("invalid"));
+
+  Object.entries(state.errors).forEach(([field, key]) => {
+    const slot = document.querySelector('[data-error="' + field + '"]');
+    if (slot) slot.textContent = t(key);
+
+    const entry = field.match(/^accounts\.(\d+)\.(username|password)$/);
+    if (entry) {
+      const card = document.querySelector('.account[data-index="' + entry[1] + '"]');
+      const input = card && card.querySelector('[data-field="' + entry[2] + '"]');
+      if (input) input.classList.add("invalid");
+      return;
+    }
+    const input = $("f-" + field);
+    if (input) input.classList.add("invalid");
+  });
+
+  const generic = state.errors["_"];
+  if (generic) toast(t(generic), true);
+}
+
+let toastTimer = null;
+function toast(text, isError) {
+  const node = $("toast");
+  node.textContent = text;
+  node.classList.toggle("bad", !!isError);
+  node.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { node.hidden = true; }, 6000);
+}
+
+function markDirty() {
+  state.dirty = true;
+  $("dirtyBadge").hidden = false;
+  updateTestButtons();
+}
+
+/* ---------- dialogs ---------- */
+
+let confirmResolve = null;
+
+function confirmDialog(text) {
+  $("confirmText").textContent = text;
+  $("confirm").hidden = false;
+  $("confirmYes").focus();
+  return new Promise((resolve) => { confirmResolve = resolve; });
+}
+
+function closeConfirm(answer) {
+  if ($("confirm").hidden) return;
+  $("confirm").hidden = true;
+  if (confirmResolve) {
+    confirmResolve(answer);
+    confirmResolve = null;
+  }
+}
+
+/* ---------- saving ---------- */
+
 async function submit() {
   const btn = $("btnSave");
   btn.disabled = true;
+  btn.textContent = t("msg.saving");
   const res = await api("/api/config", { method: "POST", body: JSON.stringify(collect()) });
   btn.disabled = false;
+  btn.textContent = t("btn.save");
   if (res.unreachable) {
     toast(t("msg.stale"), true);
     return false;
   }
   if (!res.ok || !res.data.ok) {
-    renderErrors(res.data.errors || { _: "err.saveFailed" });
+    state.errors = res.data.errors || { _: "err.saveFailed" };
+    renderAccounts(collect().accounts);
     return false;
   }
-  renderErrors(null);
-  applyConfig(res.data.config);
+  state.errors = {};
   state.dirty = false;
+  applyConfig(res.data.config);
   $("dirtyBadge").hidden = true;
   toast(t("msg.saved"));
   state.configured = true;
@@ -221,19 +584,91 @@ async function refreshStatus() {
   applyAutostart(res.data.autostart);
 }
 
+/* ---------- the login self test ---------- */
+
+async function testEntry(index, buttonNode) {
+  if (buttonNode) {
+    buttonNode.disabled = true;
+    buttonNode.textContent = t("acct.testing");
+  }
+  const res = await api("/api/action", {
+    method: "POST",
+    body: JSON.stringify({ action: "testLogin", index: index }),
+  });
+  if (buttonNode) {
+    buttonNode.disabled = false;
+    buttonNode.textContent = t("acct.test");
+  }
+  if (res.unreachable) {
+    toast(t("msg.stale"), true);
+    return;
+  }
+  if (!res.ok) {
+    toast(t("err.noUsableEntry"), true);
+    return;
+  }
+  const card = document.querySelector('.account[data-index="' + index + '"]');
+  if (!card) return;
+  const box = card.querySelector(".test-result");
+  const retCode = res.data.result.retCode || "";
+  const message = state.i18n["retcode." + retCode] || res.data.result.message || "";
+  const accepted = !!res.data.result.success;
+
+  box.hidden = false;
+  box.className = "test-result " + (accepted ? "ok" : "bad");
+  box.replaceChildren(
+    el("div", { class: "test-line" },
+      el("span", { class: "test-entry", text: entryLabel(index) }),
+      el("span", { class: "test-verdict", text: accepted ? t("acct.testOk") : t("acct.testFail", message) })),
+    el("details", {},
+      el("summary", { text: t("test.raw") + " (" + t("test.retcode") + " " + (retCode === "" ? "-" : retCode) + ")" }),
+      el("pre", { text: (res.data.result.raw || "").trim() })));
+  toast(accepted ? t("msg.testAccepted") : t("msg.testRejected", message), !accepted);
+}
+
+/* ---------- probes ---------- */
+
+function renderProbes(list) {
+  const box = $("probeList");
+  box.innerHTML = "";
+  list.forEach((value) => box.append(probeRow(value)));
+}
+
+function probeRow(value) {
+  const input = el("input", {
+    type: "text",
+    spellcheck: "false",
+    value: value || "",
+    oninput: markDirty,
+  });
+  const remove = button(t("btn.remove"), "ghost");
+  remove.onclick = () => { remove.parentElement.remove(); markDirty(); };
+  return el("div", { class: "probe-row" }, input, remove);
+}
+
+function readProbes() {
+  return Array.from($("probeList").querySelectorAll("input"))
+    .map((input) => input.value.trim())
+    .filter((value) => value !== "");
+}
+
 /* ---------- language ---------- */
 
 async function switchLanguage(lang) {
   const res = await api("/api/bootstrap?lang=" + encodeURIComponent(lang));
   if (!res.ok) return;
   state.i18n = res.data.i18n || state.i18n;
+  state.operators = res.data.operators || state.operators;
   applyI18n();
   applyLang(res.data.lang);
   applyAutostart(res.data.autostart);
-  renderProbes(readProbes());
-  renderStatus(res.data.status || state.status);
+  const accounts = collect().accounts;
+  const probes = readProbes();
   $("f-language").value = lang;
-  $("f-isp").value = state.config ? state.config.accountSuffix : "";
+  renderProbes(probes);
+  renderAccounts(accounts);
+  renderStatus(res.data.status || state.status);
+  fillWizardSelect(state.operators);
   markDirty();
   await submit();
 }
@@ -260,18 +695,12 @@ async function loadLogTail() {
   }
 }
 
-function renderTest(test) {
-  const box = $("testResult");
-  const retCode = test.result.retCode || "";
-  const message = state.i18n["retcode." + retCode] || test.result.message || "";
-  const lines = [
-    t("status.state") + ": " + t("state." + (test.after.state || "checking")),
-    "ret_code: " + (retCode === "" ? "-" : retCode) + "  " + message,
-    "raw: " + (test.result.raw || "").trim(),
-  ];
-  box.textContent = lines.join("\n");
-  box.hidden = false;
-  toast(test.result.success ? t("msg.testAccepted") : t("msg.testRejected", message), !test.result.success);
+function fillWizardSelect(operators) {
+  const select = $("w-isp");
+  select.innerHTML = "";
+  operators.forEach((op) => {
+    select.append(el("option", { value: op.Suffix, text: operatorName(op.Suffix) }));
+  });
 }
 
 function wire() {
@@ -279,17 +708,13 @@ function wire() {
     tab.addEventListener("click", () => switchTab(tab.dataset.tab));
   });
 
-  ["f-username", "f-password", "f-interval", "f-timeout", "f-portal", "f-eportal",
-    "f-prefix", "f-suffix", "f-jsversion"].forEach((id) => {
-      $(id).addEventListener("input", markDirty);
-    });
-  ["f-remember", "f-autologin", "f-internet", "f-verbose"].forEach((id) => {
-    $(id).addEventListener("change", markDirty);
-  });
-  $("f-isp").addEventListener("change", () => {
-    $("f-suffix").value = $("f-isp").value;
-    markDirty();
-  });
+  ["f-interval", "f-timeout", "f-portal", "f-eportal", "f-prefix", "f-jsversion"]
+    .forEach((id) => $(id).addEventListener("input", markDirty));
+  ["f-remember", "f-autologin", "f-internet", "f-verbose"]
+    .forEach((id) => $(id).addEventListener("change", markDirty));
+
+  $("f-language").addEventListener("change", () => switchLanguage($("f-language").value));
+
   $("f-autostart").addEventListener("change", async () => {
     const box = $("f-autostart");
     const res = await api("/api/action", {
@@ -304,18 +729,13 @@ function wire() {
     applyAutostart(res.data.autostart);
     toast(t("msg.autostart"));
   });
-  $("f-language").addEventListener("change", () => switchLanguage($("f-language").value));
-
-  $("btnShow").addEventListener("click", () => {
-    const box = $("f-password");
-    box.type = box.type === "password" ? "text" : "password";
-  });
 
   $("btnAddProbe").addEventListener("click", () => {
-    $("probeList").appendChild(probeRow(""));
+    $("probeList").append(probeRow(""));
     markDirty();
   });
 
+  $("btnAddAccount").addEventListener("click", addAccount);
   $("btnSave").addEventListener("click", submit);
 
   $("btnCheck").addEventListener("click", async () => {
@@ -324,15 +744,7 @@ function wire() {
     setTimeout(refreshStatus, 1200);
   });
 
-  $("btnTest").addEventListener("click", async () => {
-    toast(t("msg.testRunning"));
-    const res = await api("/api/action", { method: "POST", body: JSON.stringify({ action: "testLogin" }) });
-    if (res.unreachable) {
-      toast(t("msg.stale"), true);
-      return;
-    }
-    if (res.ok) renderTest(res.data);
-  });
+  $("btnTestFirst").addEventListener("click", (event) => testEntry(0, event.currentTarget));
 
   $("btnReload").addEventListener("click", async () => {
     const res = await api("/api/action", { method: "POST", body: JSON.stringify({ action: "reload" }) });
@@ -341,6 +753,7 @@ function wire() {
       return;
     }
     if (res.ok && res.data.config) {
+      state.errors = {};
       applyConfig(res.data.config);
       toast(t("msg.saved"));
       refreshStatus();
@@ -355,66 +768,220 @@ function wire() {
   });
 
   $("btnQuit").addEventListener("click", async () => {
-    if (!confirm(t("msg.confirmQuit"))) return;
+    if (!await confirmDialog(t("msg.confirmQuit"))) return;
     await api("/api/action", { method: "POST", body: JSON.stringify({ action: "quit" }) });
-    document.body.innerHTML = "<p style='padding:40px;font-family:sans-serif'>" + t("msg.quitDone") + "</p>";
+    document.body.replaceChildren(el("p", { class: "gone", text: t("msg.quitDone") }));
   });
+
+  $("confirmYes").addEventListener("click", () => closeConfirm(true));
+  $("confirmNo").addEventListener("click", () => closeConfirm(false));
+  $("confirm").addEventListener("click", (event) => {
+    if (event.target === $("confirm")) closeConfirm(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeConfirm(false);
+  });
+
+  wireAccounts();
 
   $("w-language").addEventListener("change", () => switchLanguage($("w-language").value));
   $("btnWizardFinish").addEventListener("click", async () => {
-    const user = $("w-username").value.trim();
-    if (!user) {
+    const username = $("w-username").value.trim();
+    if (!username) {
       const slot = document.querySelector('[data-error="wizard"]');
       slot.textContent = t("err.accountRequired");
       return;
     }
-    $("f-username").value = user;
-    $("f-password").value = $("w-password").value;
-    $("f-isp").value = $("w-isp").value;
-    $("f-suffix").value = $("w-isp").value;
-    if (await submit()) {
-      $("wizard").hidden = true;
-    }
+    const accounts = collect().accounts;
+    accounts[0] = {
+      username: username,
+      password: $("w-password").value,
+      isps: [$("w-isp").value],
+      disabled: false,
+    };
+    state.config.accounts = accounts;
+    if (await submit()) $("wizard").hidden = true;
   });
 
-  window.addEventListener("beforeunload", (e) => {
+  window.addEventListener("beforeunload", (event) => {
     if (state.dirty) {
-      e.preventDefault();
-      e.returnValue = "";
+      event.preventDefault();
+      event.returnValue = "";
     }
   });
 }
 
-function fillSelects(operators) {
-  const fill = (select, value) => {
-    select.innerHTML = "";
-    operators.forEach((op) => {
-      const opt = document.createElement("option");
-      opt.value = op.Suffix;
-      opt.textContent = op.Name;
-      select.appendChild(opt);
-    });
-    select.value = value || "";
-  };
-  fill($("f-isp"), "");
-  fill($("w-isp"), "");
+/* The cards are rebuilt whenever the list changes, so their controls are wired
+   once, on the list itself, and read the card they were clicked in. */
+function wireAccounts() {
+  const list = $("accountList");
+  const indexOf = (node) => Number(node.closest(".account").dataset.index);
+
+  list.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-act]");
+    if (!target) return;
+    const card = target.closest(".account");
+    const index = indexOf(target);
+    switch (target.dataset.act) {
+      case "up": moveAccount(index, -1); break;
+      case "down": moveAccount(index, 1); break;
+      case "remove": removeAccount(index); break;
+      case "test": testEntry(index, target); break;
+      case "unservice":
+        target.closest(".chip").remove();
+        refreshPicker(card);
+        markDirty();
+        break;
+      case "show": {
+        const input = card.querySelector('[data-field="password"]');
+        input.type = input.type === "password" ? "text" : "password";
+        target.textContent = input.type === "password" ? t("field.show") : t("field.hide");
+        break;
+      }
+    }
+  });
+
+  list.addEventListener("change", (event) => {
+    const enabled = event.target.closest('[data-field="enabled"]');
+    if (enabled) {
+      // The badge marks an entry as out of the running, so it follows the switch
+      // instead of waiting for a save.
+      const off = enabled.closest(".account").querySelector(".badge.off");
+      if (off) off.hidden = enabled.checked;
+      return;
+    }
+    const picker = event.target.closest('[data-act="service-picker"]');
+    if (!picker) return;
+    const card = picker.closest(".account");
+    const value = picker.value;
+    if (value === "__add") return;
+    if (value === "__custom") {
+      const input = card.querySelector('[data-act="custom"]');
+      input.hidden = false;
+      input.focus();
+      picker.value = "__add";
+      return;
+    }
+    addService(card, value);
+    refreshPicker(card);
+  });
+
+  // Drag and drop: only the grip starts a card drag, because a card that is
+  // draggable everywhere would be dragged out of the middle of a password
+  // selection. A chip is draggable itself, within its own row.
+  let dragging = null;
+  let draggingChip = null;
+
+  list.addEventListener("mousedown", (event) => {
+    const card = event.target.closest(".account");
+    if (card) card.draggable = !!event.target.closest(".grip");
+  });
+
+  list.addEventListener("dragstart", (event) => {
+    const chipNode = event.target.closest(".chip");
+    if (chipNode) {
+      draggingChip = chipNode;
+      chipNode.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", chipNode.dataset.suffix);
+      return;
+    }
+    const card = event.target.closest(".account");
+    if (!card || !card.draggable) return;
+    dragging = card;
+    card.classList.add("dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", card.dataset.index);
+  });
+
+  list.addEventListener("dragover", (event) => {
+    if (draggingChip) {
+      event.preventDefault();
+      const over = event.target.closest(".chip");
+      if (!over || over === draggingChip) return;
+      const box = draggingChip.parentElement;
+      const rect = over.getBoundingClientRect();
+      const after = event.clientX > rect.left + rect.width / 2;
+      box.insertBefore(draggingChip, after ? over.nextSibling : over);
+      return;
+    }
+    if (!dragging) return;
+    event.preventDefault();
+    const over = event.target.closest(".account");
+    if (!over || over === dragging) return;
+    const rect = over.getBoundingClientRect();
+    const after = event.clientY > rect.top + rect.height / 2;
+    list.insertBefore(dragging, after ? over.nextSibling : over);
+    renumber();
+  });
+
+  list.addEventListener("drop", (event) => event.preventDefault());
+
+  list.addEventListener("dragend", () => {
+    if (draggingChip) {
+      draggingChip.classList.remove("dragging");
+      draggingChip = null;
+      markDirty();
+      return;
+    }
+    if (!dragging) return;
+    dragging.classList.remove("dragging");
+    dragging.draggable = false;
+    dragging = null;
+    applyOrder(Array.from(list.children).map((card) => Number(card.dataset.index)));
+  });
+
+  // The arrow keys move what has the focus: a chip within its account, a card
+  // within the list. Both are orders the user sets and the program follows.
+  list.addEventListener("keydown", (event) => {
+    if (!event.altKey) return;
+
+    const chipNode = event.target.closest(".chip");
+    if (chipNode) {
+      const sibling = event.key === "ArrowLeft" ? chipNode.previousElementSibling
+        : event.key === "ArrowRight" ? chipNode.nextElementSibling
+          : null;
+      if (!sibling) return;
+      event.preventDefault();
+      const box = chipNode.parentElement;
+      if (event.key === "ArrowLeft") box.insertBefore(chipNode, sibling);
+      else box.insertBefore(sibling, chipNode);
+      chipNode.focus();
+      markDirty();
+      return;
+    }
+
+    const card = event.target.closest(".account");
+    if (!card) return;
+    const index = Number(card.dataset.index);
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveAccount(index, -1);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveAccount(index, 1);
+    }
+  });
 }
 
 async function boot() {
   const res = await api("/api/bootstrap");
   if (!res.ok) {
-    document.body.innerHTML =
-      "<p style='padding:40px;font-family:sans-serif'>This page needs the one time token from the tray menu.</p>";
+    document.body.replaceChildren(el("p", {
+      class: "gone",
+      text: "This page needs the one time token from the tray menu.",
+    }));
     return;
   }
   const data = res.data;
   state.i18n = data.i18n || {};
+  state.operators = data.operators || [];
   state.configured = !!data.configured;
 
   applyI18n();
   applyLang(data.lang);
   applyAutostart(data.autostart);
-  fillSelects(data.operators || []);
+  fillWizardSelect(state.operators);
   applyConfig(data.config || {});
   renderStatus(data.status || {});
 
@@ -427,7 +994,6 @@ async function boot() {
   $("abConfigPath").textContent = (data.paths || {}).config || "-";
   $("abLogPath").textContent = (data.paths || {}).log || "-";
   $("w-language").value = data.config ? (data.config.language || "auto") : "auto";
-  $("w-isp").value = data.config ? (data.config.accountSuffix || "") : "";
 
   wire();
   if (!state.configured) $("wizard").hidden = false;

@@ -118,7 +118,7 @@ const (
 )
 
 // rpmFile is one entry the package installs: a file, or a directory the package
-// owns, which is what lets rpm take it away again.
+// owns, which lets rpm take it away again.
 type rpmFile struct {
 	path string
 	mode int64
@@ -205,8 +205,8 @@ func rpmFiles(root string, t target) ([]rpmFile, error) {
 				continue
 			}
 			seen[d] = true
-			// parentDirs keeps the trailing slash, since that is what a tar
-			// entry of a directory carries, and rpm writes the path without it.
+			// parentDirs keeps the trailing slash, as a tar entry of a directory
+			// carries one, and rpm writes the path without it.
 			dirs = append(dirs, strings.TrimSuffix(d, "/"))
 		}
 	}
@@ -269,7 +269,7 @@ func rpmLeadArch(arch string) byte {
 
 // rpmSignatureHeader is the header that carries the digests of what follows it.
 // rpm checks them before it looks at anything else, and refuses a package whose
-// header digest does not match, which is the point of writing them.
+// header digest does not match.
 func rpmSignatureHeader(header, payload []byte) []byte {
 	sum256 := sha256.Sum256(header)
 	sum1 := sha1.Sum(header)
@@ -359,7 +359,7 @@ func rpmDescription() string {
 		"\n" +
 		"The service runs as the " + pkgName + " system user, with its settings and its log\n" +
 		"in /var/lib/" + pkgName + ". An account has to be written down once before the\n" +
-		"service stays up, which is what /usr/share/doc/" + pkgName + "/README.md is about.\n"
+		"service stays up; see /usr/share/doc/" + pkgName + "/README.md.\n"
 }
 
 // The scriptlets. They are the same work the Debian maintainer scripts do, in
@@ -401,7 +401,7 @@ esac
 
 // rpmPayload is the payload of a package: the files and the directories as a
 // cpio archive, inside a gzip stream. The entries are in the order the file list
-// has them, which is what rpm matches them against.
+// has them, which is the order rpm matches them in.
 func rpmPayload(files []rpmFile) ([]byte, error) {
 	var cpio bytes.Buffer
 	for i, f := range files {
@@ -450,7 +450,7 @@ func rpmCpioEntry(b *bytes.Buffer, f rpmFile, ino int) {
 	rpmCpioPad(b)
 }
 
-// rpmCpioTrailer ends the archive, which is what an extractor reads until.
+// rpmCpioTrailer ends the archive, the marker an extractor reads until.
 func rpmCpioTrailer(b *bytes.Buffer) {
 	fmt.Fprintf(b, "070701%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x",
 		0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, len("TRAILER!!!\x00"), 0)
@@ -633,12 +633,11 @@ func rpmBinEntry(tag int, data []byte) rpmEntry {
 // and then the data of every tag, each aligned to the width of its type and
 // addressed by its offset from the start of that data.
 //
-// The whole header is wrapped in a region, which is how rpm tells a header it can
-// trust to be complete from one that was assembled out of pieces. The region is
-// an entry of its own at the front of the index, whose data is a sixteen byte
-// trailer at the end that says how many entries the region covers. The tag of
-// that entry is not the same in both headers, and rpm refuses a header that uses
-// the wrong one.
+// The whole header is wrapped in a region, which lets rpm tell a header it can
+// trust to be complete from one assembled out of pieces. The region is an entry
+// of its own at the front of the index, whose data is a sixteen byte trailer at
+// the end that says how many entries the region covers. The tag of that entry is
+// not the same in both headers, and rpm refuses a header that uses the wrong one.
 func rpmHeader(regionTag int, entries []rpmEntry) []byte {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].tag < entries[j].tag })
 
@@ -702,7 +701,7 @@ func rpmWriteInt32(b *bytes.Buffer, value int32) {
 }
 
 // fixedString is a string written into a field of a fixed width and padded with
-// zeroes, which is how the lead carries a name.
+// zeroes, the way the lead carries a name.
 func fixedString(s string, width int) []byte {
 	out := make([]byte, width)
 	copy(out, s)

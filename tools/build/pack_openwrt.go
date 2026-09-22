@@ -21,9 +21,9 @@ const (
 	initFile       = "/etc/init.d/sdautologin"
 	openwrtWrapper = "/usr/bin/SDAutoLogin"
 	openwrtBinary  = "/usr/lib/sdautologin/SDAutoLogin.gz"
-	// wrapperVersion is what the wrapper script carries where the version of the
-	// program goes, written over by packageOpenwrt. The script is a file a
-	// reader can open, so it holds a marker rather than a number that would go
+	// wrapperVersion is the marker the wrapper script carries where the version
+	// of the program goes, written over by packageOpenwrt. The script is a file
+	// a reader can open, so it holds a marker rather than a number that would go
 	// stale there.
 	wrapperVersion = "@VERSION@"
 )
@@ -103,10 +103,10 @@ func packageOpenwrt(root string, t target) error {
 // openwrtWrapperEntry reads the wrapper script the router runs and writes the
 // version of the program into it.
 //
-// The version ends up in the name the program is unpacked to, which is the one
-// thing that tells the program of a new package apart from the copy the previous
-// one left in /tmp. A missing marker is an error rather than a versionless
-// package: the script would then unpack to a name no upgrade would ever change.
+// The version ends up in the name the program is unpacked to, and that name tells
+// the program of a new package from the copy the previous one left in /tmp. A
+// missing marker is an error rather than a versionless package: the script would
+// then unpack to a name no upgrade would ever change.
 func openwrtWrapperEntry(root, version string) (pkgEntry, error) {
 	path := filepath.Join(root, openwrtDir, "root", openwrtWrapper)
 	src, err := readText(path)
@@ -143,9 +143,9 @@ Description: %s
 }
 
 // openwrtArch is the architecture name OpenWrt gives a MIPS build: the core the
-// binary is compiled for, 24Kc, which is what both the big endian Atheros boards
-// and the little endian MediaTek ones have. Neither of them has a floating point
-// unit, which is why these builds are softfloat.
+// binary is compiled for, 24Kc, which both the big endian Atheros boards and the
+// little endian MediaTek ones have. Neither of them has a floating point unit,
+// which is why these builds are softfloat.
 func openwrtArch(goarch string) string {
 	if goarch == "mipsle" {
 		return "mipsel_24kc"

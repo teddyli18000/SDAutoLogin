@@ -22,8 +22,8 @@ var (
 )
 
 // Icon renders the mark: a rounded badge holding a padlock, tinted by session
-// state. It is drawn from primitives at 4x and then box filtered down, which
-// gives clean edges without pulling in a font or a rasteriser dependency.
+// state. It is drawn from primitives at 4x and then box filtered down, so no
+// font or rasteriser dependency is needed.
 //
 // The proportions are chosen for the 16 px tray icon: the shackle stays two
 // pixels thick and the body keeps half a pixel of margin on each side, so the
@@ -52,7 +52,7 @@ func Icon(size int, accent color.RGBA) *image.RGBA {
 // towards zero for positive and negative values.
 func px(v float64) int { return int(math.Round(v)) }
 
-// PNG returns the mark encoded as PNG, which is what the Linux and macOS tray
+// PNG returns the mark encoded as PNG, the format the Linux and macOS tray
 // backends want.
 func PNG(size int, accent color.RGBA) []byte {
 	var buf bytes.Buffer

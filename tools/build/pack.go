@@ -29,9 +29,9 @@ import (
 const (
 	// pkgDir is where the packages are written, inside distDir.
 	pkgDir = "packages"
-	// pkgName is the name the packages carry. It is lower case, which is how
-	// OpenWrt and the Debian archive want it, and it is also the name of the
-	// UCI configuration and of the init script in the OpenWrt package.
+	// pkgName is the name the packages carry. It is lower case, as OpenWrt and
+	// the Debian archive want it, and it is also the name of the UCI
+	// configuration and of the init script in the OpenWrt package.
 	pkgName = "sdautologin"
 	// pkgRelease is the revision of the packaging, bumped when only the files
 	// around the binary change. Every one of these formats spells a version
@@ -67,11 +67,11 @@ const (
 	changelogPath = docDir + "/CHANGELOG.md"
 )
 
-// systemdFiles is what a package for a distribution that boots with systemd
+// systemdFiles lists what a package for a distribution that boots with systemd
 // installs: the program, the unit that runs it, the file that declares the user
-// it runs as, the licence and the two documents. The paths are named the way
-// they are on the target, which is what the rpm and the pacman formats write;
-// the Debian layout adds the leading dot of its own archives.
+// it runs as, the licence and the two documents. The paths are named as they are
+// on the target, the way the rpm and the pacman formats write them; the Debian
+// layout adds the leading dot of its own archives.
 func systemdFiles(root, binary string) ([]pkgEntry, error) {
 	bin, err := readBinary(binary)
 	if err != nil {
@@ -149,10 +149,10 @@ func readBinary(source string) ([]byte, error) {
 	return os.ReadFile(source)
 }
 
-// readText reads a file that a program on the target will read, refusing one
-// that has Windows line endings: a shell script whose shebang ends in a carriage
-// return does not run at all, and the platform the sources were checked out on is
-// the last thing that should decide that, so it is checked instead of assumed.
+// readText reads a file that a program on the target will read, refusing one with
+// Windows line endings: a shell script whose shebang ends in a carriage return
+// does not run at all, and the checkout platform should not decide that, so it is
+// checked rather than assumed.
 func readText(source string) ([]byte, error) {
 	data, err := os.ReadFile(source)
 	if err != nil {
@@ -236,9 +236,9 @@ func tarData(entries []pkgEntry, c compression) ([]byte, error) {
 }
 
 // compressWith runs an external compressor over an archive. The standard library
-// can write gzip and nothing else, and a missing tool is named in the error,
-// because a packaging run is the wrong place for a bare "executable file not
-// found": whoever reads it has to know what to install.
+// can write gzip and nothing else, and a missing tool is named in the error: a
+// packaging run should not fail with a bare "executable file not found", and the
+// reader has to know what to install.
 func compressWith(tool string, args []string, data []byte) ([]byte, error) {
 	path, err := exec.LookPath(tool)
 	if err != nil {
@@ -293,9 +293,9 @@ type arMember struct {
 	data []byte
 }
 
-// writeAr writes an ar archive, which is what an ipk and a deb both are. The
+// writeAr writes an ar archive, the container an ipk and a deb both use. The
 // members carry their name padded with spaces and an odd sized one is followed
-// by a newline, which is the format dpkg-deb writes and dpkg and opkg read.
+// by a newline, the format dpkg-deb writes and dpkg and opkg read.
 func writeAr(w io.Writer, members []arMember) error {
 	if _, err := io.WriteString(w, "!<arch>\n"); err != nil {
 		return err
@@ -418,14 +418,13 @@ func writePackage(root, name string, data []byte) error {
 
 // checksumsFile is the list of digests written next to the packages, in the
 // spelling the sha256sum tool reads and writes: the digest, two spaces and the
-// name. It is what somebody who downloaded a release checks what they got
-// against, and it is the one part of a release that is worth having even when
-// nothing is signed.
+// name. A downloaded release is checked against it, and it is the one part of a
+// release that is useful even when nothing is signed.
 const checksumsFile = "SHA256SUMS"
 
-// writeChecksums writes the digest of every package into SHA256SUMS. The order
-// is the one the file names sort in, which is what makes the file itself come out
-// the same on every run.
+// writeChecksums writes the digest of every package into SHA256SUMS. The order is
+// the one the file names sort in, so the file itself comes out the same on every
+// run.
 func writeChecksums(root string) error {
 	dir := filepath.Join(root, distDir, pkgDir)
 	entries, err := os.ReadDir(dir)
@@ -507,7 +506,7 @@ func gzipBytes(data []byte) ([]byte, error) {
 }
 
 // appVersion and appRepo read the constants out of the source of internal/app,
-// which is where the program and every package read them from, so the two cannot
+// the same place the program and every package read them from, so the two cannot
 // disagree about them.
 func appVersion(root string) (string, error) { return appConst(root, "Version") }
 

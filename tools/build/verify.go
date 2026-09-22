@@ -5,11 +5,11 @@
 // bsdtar reads the Arch package and its listing, and the Windows archives are
 // compared with the builds they were made from and with the manifests that point
 // at them. Packing everything a second time then says whether the result is the
-// same bytes, which is what makes a release built twice the same release.
+// same bytes, so a release built twice is the same release.
 //
 // A tool that is not installed is named and counted, rather than passed over:
 // a run that reports success without having looked at anything is worse than one
-// that says what it could not look at.
+// that names what it could not look at.
 
 package main
 
@@ -26,12 +26,12 @@ import (
 	"strings"
 )
 
-// wantSystemd is what a package for a distribution that boots with systemd has to
-// hold, wantDeb the same for the Debian layout, which keeps the licence in the
+// wantSystemd lists what a package for a distribution that boots with systemd has
+// to hold, wantDeb the same for the Debian layout, which keeps the licence in the
 // copyright file instead, and wantOpenwrt what the router package has to hold.
-// They are written down here instead of being taken from the code that packs
-// them on purpose: a check that asks the thing it checks what it wrote cannot
-// catch a file that was never written at all.
+// They are written down here rather than taken from the code that packs them on
+// purpose: a check that asks the thing it checks what it wrote cannot catch a file
+// that was never written at all.
 var (
 	wantSystemd = []string{
 		"usr/bin/SDAutoLogin",
@@ -201,8 +201,8 @@ func verifyRpm(path string) (string, error) {
 }
 
 // verifyPacman reads an Arch package with bsdtar, and compares the files it holds
-// with the digests its own listing carries, which is what "pacman -Qkk" checks an
-// installed package against.
+// with the digests its own listing carries, as "pacman -Qkk" does for an installed
+// package.
 func verifyPacman(path string) (string, error) {
 	tool, err := lookTool("bsdtar")
 	if err != nil {
@@ -497,6 +497,6 @@ func firstLines(s string, n int) string {
 	return strings.Join(lines, "; ")
 }
 
-// slash is a path with forward slashes, which is how the archives name things
-// whatever system they were written on.
+// slash is a path with forward slashes, the way the archives name things whatever
+// system they were written on.
 func slash(name string) string { return strings.ReplaceAll(name, "\\", "/") }

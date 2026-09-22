@@ -17,15 +17,20 @@ const portalHome = `<html><script>var v4ip = '203.0.113.7'; var v6ip = '2001:db8
 // testConfig points both portal endpoints at one stub server.
 func testConfig(base string) *config.Config {
 	return &config.Config{
-		Username:           "s1234567",
-		Password:           "p@ss",
+		Accounts: []config.Account{
+			{Username: "s1234567", Password: "p@ss", ISPs: []string{"@zgyd"}},
+		},
 		AccountPrefix:      ",0,",
-		AccountSuffix:      "@zgyd",
 		PortalBaseURL:      base + "/",
 		EportalURL:         base + "/eportal/",
 		HTTPTimeoutSeconds: 5,
 		JsVersion:          "3.3.3",
 	}
+}
+
+// testAttempt is the one attempt the test configuration asks for.
+func testAttempt() config.Attempt {
+	return config.Attempt{Index: 0, Username: "s1234567", Password: "p@ss", ISP: "@zgyd"}
 }
 
 // closedBase is the address of a server that has been shut down again, so a
@@ -232,7 +237,7 @@ func TestQueryStatusReportsAnUnreachablePortal(t *testing.T) {
 func TestLoginAccepted(t *testing.T) {
 	s := &stubPortal{loginReply: `{"result":1,"ret_code":"0"}`}
 
-	res := NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"})
+	res := NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"}, testAttempt())
 
 	if !res.Success {
 		t.Fatalf("Login = %+v, want success", res)
@@ -251,7 +256,7 @@ func TestLoginAccepted(t *testing.T) {
 func TestLoginRejectedWithAKnownRetCode(t *testing.T) {
 	s := &stubPortal{loginReply: `{"result":0,"ret_code":"1"}`}
 
-	res := NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"})
+	res := NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"}, testAttempt())
 
 	if res.Success {
 		t.Fatalf("Login = %+v, want a rejection", res)
@@ -269,7 +274,7 @@ func TestLoginUsesThePortalMessageForAnUnknownRetCode(t *testing.T) {
 	// "user does not exist". The client has to resolve that before showing it.
 	s := &stubPortal{loginReply: `{"result":0,"ret_code":"99","msg":"\u7528\u6237\u4e0d\u5b58\u5728"}`}
 
-	res := NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"})
+	res := NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"}, testAttempt())
 
 	if want := "\u7528\u6237\u4e0d\u5b58\u5728"; res.Message != want {
 		t.Errorf("Message = %q, want %q", res.Message, want)
@@ -283,7 +288,7 @@ func TestLoginSendsTheExpectedParameters(t *testing.T) {
 		ClientIP:   "203.0.113.7",
 		ClientIPv6: "2001:db8::1",
 		MAC:        "aabbccddeeff",
-	})
+	}, testAttempt())
 
 	q := s.lastLoginQuery()
 	if q == nil {
@@ -315,7 +320,7 @@ func TestLoginFallsBackToAZeroMAC(t *testing.T) {
 	// produce a usable request.
 	s := &stubPortal{loginReply: `{"result":1,"ret_code":"0"}`}
 
-	NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"})
+	NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"}, testAttempt())
 
 	if got := s.lastLoginQuery().Get("wlan_user_mac"); got != "000000000000" {
 		t.Errorf("wlan_user_mac = %q, want the zero mac", got)
@@ -323,7 +328,7 @@ func TestLoginFallsBackToAZeroMAC(t *testing.T) {
 }
 
 func TestLoginReportsAFailedRequest(t *testing.T) {
-	res := NewClient(testConfig(closedBase(t))).Login(Status{ClientIP: "203.0.113.7"})
+	res := NewClient(testConfig(closedBase(t))).Login(Status{ClientIP: "203.0.113.7"}, testAttempt())
 
 	if res.Success {
 		t.Error("Success = true although the request could not be sent")
@@ -334,13 +339,13 @@ func TestLoginReportsAFailedRequest(t *testing.T) {
 }
 
 func TestTheClientNeverLogsOut(t *testing.T) {
-	// A logout would leave the machine offline, which is exactly what this
+	// A logout would leave the machine offline, which is the outcome this
 	// program exists to prevent.
 	s := &stubPortal{onlineList: `{"result":0}`, loginReply: `{"result":1,"ret_code":"0"}`}
 	client := NewClient(s.start(t))
 
 	st := client.QueryStatus()
-	client.Login(st)
+	client.Login(st, testAttempt())
 	client.QueryStatus()
 	client.ProbeInternet()
 
@@ -404,15 +409,24 @@ func TestTruncateCollapsesWhitespaceAndCutsLongText(t *testing.T) {
 
 func TestLoggedURLsNeverContainThePassword(t *testing.T) {
 	// The login request carries the password in its query string and that URL is
-	// written to the log, so it has to be masked first.
-	client := NewClient(&config.Config{Password: "p@ss"})
-	raw := "http://portal/eportal/?a=login&user_password=" + url.QueryEscape("p@ss")
+	// written to the log, so it has to be masked first. It masks the parameter
+	// rather than one particular password, since the login list may hold several
+	// accounts and the one being submitted is the one that must not reach the
+	// log.
+	client := NewClient(&config.Config{})
+	secret := "p@ss@word"
+	raw := "http://portal/eportal/?a=login&user_password=" + url.QueryEscape(secret)
 
 	got := client.safeURL(raw)
-	if strings.Contains(got, url.QueryEscape("p@ss")) || strings.Contains(got, "p@ss") {
+	if strings.Contains(got, url.QueryEscape(secret)) || strings.Contains(got, secret) {
 		t.Errorf("safeURL left the password in place: %s", got)
 	}
-	if !strings.Contains(got, "***") {
-		t.Errorf("safeURL = %s, want the password replaced", got)
+	if !strings.Contains(got, "user_password=***") {
+		t.Errorf("safeURL = %s, want the parameter replaced", got)
+	}
+	// The rest of the request has to survive, or the log line is not worth
+	// reading.
+	if !strings.Contains(got, "a=login") {
+		t.Errorf("safeURL = %s, want the other parameters left alone", got)
 	}
 }

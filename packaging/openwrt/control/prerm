@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Stop the service before the files go, which is what opkg runs this for.
+# Stop the service before the files go: opkg runs this for that.
 #
 # It matters more here than it does elsewhere: the program runs out of /tmp,
 # unpacked from the archive in /usr/lib, so a process left behind by a removal

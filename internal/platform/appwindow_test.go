@@ -30,7 +30,7 @@ func TestAppWindowCommandAsksTheBrowserForAWindowOfItsOwn(t *testing.T) {
 		},
 		{
 			// macOS starts the bundle through the launcher and passes the flag
-			// on, which is what brings up the same kind of window.
+			// on, bringing up the same kind of window.
 			"darwin",
 			"/Applications/Google Chrome.app",
 			"open",
@@ -50,9 +50,8 @@ func TestAppWindowCommandAsksTheBrowserForAWindowOfItsOwn(t *testing.T) {
 }
 
 func TestFindAppBrowserTakesTheFirstOneThatIsThere(t *testing.T) {
-	// The path has to be absolute for the system the tests run on, because that
-	// is what decides whether a candidate is looked for on the file system or on
-	// PATH.
+	// The path has to be absolute for the system the tests run on, since that
+	// decides whether a candidate is looked for on the file system or on PATH.
 	installed := filepath.Join(t.TempDir(), "chrome")
 	candidates := []string{installed, "chromium", "microsoft-edge"}
 

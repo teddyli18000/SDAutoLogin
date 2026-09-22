@@ -84,6 +84,7 @@ var (
 	reOnlineV6    = regexp.MustCompile(`"online_ipv6_1"\s*:\s*"([^"]*)"`)
 	reMsg         = regexp.MustCompile(`"msg"\s*:\s*"((?:[^"\\]|\\.)*)"`)
 	reRetCode     = regexp.MustCompile(`"ret_code"\s*:\s*"?(\d+)"?`)
+	rePassword    = regexp.MustCompile(`(?i)(user_password=)[^&]*`)
 )
 
 func NewClient(cfg *config.Config) *Client {
@@ -178,10 +179,10 @@ func (c *Client) QueryStatus() Status {
 	return st
 }
 
-// Login submits the credentials, mirroring what the login page does for
-// login_method=1. It never logs out, so a failed attempt leaves the current
-// session untouched.
-func (c *Client) Login(st Status) LoginResult {
+// Login submits the credentials of one attempt, mirroring what the login page
+// does for login_method=1. It never logs out, so a failed attempt leaves the
+// current session untouched.
+func (c *Client) Login(st Status, attempt config.Attempt) LoginResult {
 	var result LoginResult
 
 	mac := st.MAC
@@ -193,8 +194,8 @@ func (c *Client) Login(st Status) LoginResult {
 	q.Set("a", "login")
 	q.Set("callback", "dr"+strconv.Itoa(1000+rand.Intn(9000)))
 	q.Set("login_method", "1")
-	q.Set("user_account", c.cfg.Account())
-	q.Set("user_password", c.cfg.Password)
+	q.Set("user_account", c.cfg.Account(attempt.Username, attempt.ISP))
+	q.Set("user_password", attempt.Password)
 	q.Set("wlan_user_ip", st.ClientIP)
 	q.Set("wlan_user_ipv6", st.ClientIPv6)
 	q.Set("wlan_user_mac", mac)
@@ -204,7 +205,7 @@ func (c *Client) Login(st Status) LoginResult {
 	q.Set("v", strconv.Itoa(500+rand.Intn(9500)))
 
 	logging.Log.Debug("login params: login_method=1 user_account=%q wlan_user_ip=%q wlan_user_ipv6=%q wlan_user_mac=%q jsVersion=%q",
-		c.cfg.Account(), st.ClientIP, st.ClientIPv6, mac, c.cfg.JsVersion)
+		c.cfg.Account(attempt.Username, attempt.ISP), st.ClientIP, st.ClientIPv6, mac, c.cfg.JsVersion)
 
 	code, body, err := c.get(c.plain, c.cfg.EportalURL+"?"+q.Encode())
 	if err != nil {
@@ -326,13 +327,12 @@ func (c *Client) get(client *http.Client, rawURL string) (int, string, error) {
 	return resp.StatusCode, string(data), nil
 }
 
-// safeURL removes the password from a request URL before it is logged.
+// safeURL removes the password from a request URL before it is logged. It masks
+// the parameter rather than a particular password, since the login list may hold
+// several accounts and the one being submitted is the one that must not reach
+// the log.
 func (c *Client) safeURL(rawURL string) string {
-	if c.cfg.Password == "" {
-		return rawURL
-	}
-	out := strings.ReplaceAll(rawURL, url.QueryEscape(c.cfg.Password), "***")
-	return strings.ReplaceAll(out, c.cfg.Password, "***")
+	return rePassword.ReplaceAllString(rawURL, "${1}***")
 }
 
 func elapsedMS(start time.Time) int64 {

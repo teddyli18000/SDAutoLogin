@@ -4,7 +4,7 @@
 # still build and pass its tests, and do the packages still come out right. The
 # second one installs the tools of the formats and then runs the same "packages"
 # and "verify" tasks a release is cut with, so what is checked here is what would
-# be published, and not something that merely looks like it.
+# be published.
 #
 # Both jobs run inside the Go image rather than on whatever the runner happens to
 # have, because the toolchain version is part of what is being checked and the
@@ -62,9 +62,9 @@ jobs:
       - name: pack every format
         run: go run ./tools/build packages
 
-      # This is the check that matters: every package is read back with the tool
-      # that installs it, and everything is then packed a second time to see
-      # whether a release built twice is the same release.
+      # Every package is read back with the tool that installs it, and everything
+      # is then packed a second time to see whether a release built twice is the
+      # same release.
       - name: check every package
         run: go run ./tools/build verify
 
@@ -79,12 +79,12 @@ jobs:
         run: |
           apt-get install -y --no-install-recommends curl jq
 
-      # A tag is what makes a release, and it has to name the version that is
+      # A tag makes a release, and it has to name the version that is
       # inside the packages: the two manifests the packaging writes point at
       # <address>/releases/download/v<version>/<file>, so a tag that disagrees
       # with the build would publish files that nothing points at. The check
       # below is the cheap version of that; the version living in a single place
-      # in the sources is what would make it unnecessary.
+      # in the sources would make it unnecessary.
       - name: publish the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -122,7 +122,7 @@ jobs:
           fi
 
           # The packages and SHA256SUMS as the attachments of the release,
-          # which is where the two manifests say they are.
+          # where the two manifests say they are.
           for file in dist/packages/*; do
             [ -f "$file" ] || continue
             name=$(basename "$file")

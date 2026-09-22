@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"sdautologin/internal/config"
@@ -86,10 +87,17 @@ func TestParseOptionsKeepsTheShortcutsAndTheConfigFlag(t *testing.T) {
 		if len(rest) != len(args) {
 			t.Errorf("parseOptions(%v) left %v over, want the arguments handed back", args, rest)
 		}
-		if opts != (options{}) {
+		if !emptyOptions(opts) {
 			t.Errorf("parseOptions(%v) read an option out of %v", args, rest)
 		}
 	}
+}
+
+// emptyOptions reports whether nothing at all was read out of the arguments.
+func emptyOptions(o options) bool {
+	return o.home == nil && o.username == nil && o.password == nil && o.isp == nil &&
+		len(o.accounts) == 0 && o.settings == nil && o.app == nil &&
+		!o.save && !o.json && !o.noLog
 }
 
 func TestParseOptionsRejectsAMissingValue(t *testing.T) {
@@ -114,8 +122,8 @@ func TestParseOptionsAcceptsAValueThatLooksLikeADash(t *testing.T) {
 }
 
 func TestParseOptionsTakesTheOptionsThatHaveNoValue(t *testing.T) {
-	// --save takes no value of its own, so it has to be recognised on its own
-	// instead of being left behind as a stray argument.
+	// --save takes no value, so it has to be recognised by itself instead of
+	// being left behind as a stray argument.
 	opts, rest, err := parseOptions([]string{"--username=u", "--save"})
 	if err != nil {
 		t.Fatalf("parseOptions: %v", err)
@@ -136,8 +144,8 @@ func TestParseOptionsTakesTheOptionsThatHaveNoValue(t *testing.T) {
 }
 
 func TestParseOptionsSilencesTheLogFile(t *testing.T) {
-	// --no-log takes no value, belongs to no command in particular, and is what a
-	// machine with a small flash passes on every start.
+	// --no-log takes no value, belongs to no command in particular, and a machine
+	// with a small flash passes it on every start.
 	opts, rest, err := parseOptions([]string{"run", "--home=/etc/sdautologin", "--no-log"})
 	if err != nil {
 		t.Fatalf("parseOptions: %v", err)
@@ -163,8 +171,8 @@ func TestParseOptionsSilencesTheLogFile(t *testing.T) {
 }
 
 func TestParseOptionsKeepsAnExplicitlyEmptyValue(t *testing.T) {
-	// An empty suffix is how the campus network itself is asked for: it has no
-	// operator suffix, and leaving the option out would keep the configured one.
+	// An empty suffix asks for the campus network itself: it has no operator
+	// suffix, and leaving the option out would keep the configured one.
 	opts, _, err := parseOptions([]string{"--isp="})
 	if err != nil {
 		t.Fatalf("parseOptions: %v", err)
@@ -189,16 +197,26 @@ func TestParseOptionsReportsNothingForNoOptions(t *testing.T) {
 }
 
 func TestApplyToOnlyChangesWhatWasGiven(t *testing.T) {
-	cfg := &config.Config{Username: "old", Password: "old", AccountSuffix: "@cucc"}
+	// An option that was not given leaves the entry alone, so one secret can be
+	// passed without repeating the rest.
+	cfg := &config.Config{Accounts: []config.Account{
+		{Username: "old", Password: "old", ISPs: []string{"@cucc"}},
+	}}
 	password := "new"
 
-	options{password: &password}.applyTo(cfg)
-
-	if cfg.Password != "new" {
-		t.Errorf("Password = %q, want the override", cfg.Password)
+	if err := (options{password: &password}).applyTo(cfg); err != nil {
+		t.Fatal(err)
 	}
-	if cfg.Username != "old" || cfg.AccountSuffix != "@cucc" {
-		t.Errorf("an option that was not given changed the configuration: %+v", cfg)
+
+	if len(cfg.Accounts) != 1 {
+		t.Fatalf("Accounts = %+v, want the one entry", cfg.Accounts)
+	}
+	entry := cfg.Accounts[0]
+	if entry.Password != "new" {
+		t.Errorf("Password = %q, want the override", entry.Password)
+	}
+	if entry.Username != "old" || len(entry.ISPs) != 1 || entry.ISPs[0] != "@cucc" {
+		t.Errorf("an option that was not given changed the entry: %+v", entry)
 	}
 }
 
@@ -206,13 +224,143 @@ func TestApplyToSetsEverythingThatWasGiven(t *testing.T) {
 	cfg := &config.Config{AccountPrefix: ",0,"}
 	username, password, isp := "s1234567", "p@ss", "@zgyd"
 
-	options{username: &username, password: &password, isp: &isp}.applyTo(cfg)
-
-	if cfg.Username != username || cfg.Password != password || cfg.AccountSuffix != isp {
-		t.Errorf("configuration = %+v", cfg)
+	if err := (options{username: &username, password: &password, isp: &isp}).applyTo(cfg); err != nil {
+		t.Fatal(err)
 	}
-	if got := cfg.Account(); got != ",0,s1234567@zgyd" {
+
+	if len(cfg.Accounts) != 1 {
+		t.Fatalf("Accounts = %+v, want a single entry", cfg.Accounts)
+	}
+	entry := cfg.Accounts[0]
+	if entry.Username != username || entry.Password != password {
+		t.Errorf("entry = %+v", entry)
+	}
+	if len(entry.ISPs) != 1 || entry.ISPs[0] != isp {
+		t.Errorf("ISPs = %v, want the service that was given", entry.ISPs)
+	}
+	if got := cfg.Account(username, isp); got != ",0,s1234567@zgyd" {
 		t.Errorf("Account() = %q, want the overridden account", got)
+	}
+}
+
+func TestApplyToReplacesTheListWithTheAccountsGiven(t *testing.T) {
+	// What a provisioning script names is the accounts to use, in the order it
+	// names them, rather than an addition to whatever the file held.
+	cfg := &config.Config{Accounts: []config.Account{
+		{Username: "stale", Password: "stale", ISPs: []string{""}},
+	}}
+	opts := options{accounts: []string{"first:one@zgyd", "second:two@cucc+zgyd", "third:three"}}
+
+	if err := opts.applyTo(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Accounts) != 3 {
+		t.Fatalf("Accounts = %+v, want the three that were given", cfg.Accounts)
+	}
+	if cfg.Accounts[0].Username != "first" || cfg.Accounts[0].Password != "one" {
+		t.Errorf("the first entry is %+v", cfg.Accounts[0])
+	}
+	if got := cfg.Accounts[0].ISPs; len(got) != 1 || got[0] != "@zgyd" {
+		t.Errorf("ISPs = %v, want the one service type", got)
+	}
+	// The order of the service types is the order they are tried in, so the
+	// order they were written in has to survive.
+	if got := cfg.Accounts[1].ISPs; len(got) != 2 || got[0] != "@cucc" || got[1] != "@zgyd" {
+		t.Errorf("ISPs = %v, want both service types in the order they were given", got)
+	}
+	// No service type at all is the campus network, which the configuration
+	// fills in when it is normalized.
+	if got := cfg.Accounts[2].ISPs; len(got) != 0 {
+		t.Errorf("ISPs = %v, want nothing for the entry that named no service", got)
+	}
+}
+
+func TestParseAccount(t *testing.T) {
+	cases := []struct {
+		raw      string
+		username string
+		password string
+		isps     []string
+	}{
+		{"s1234567:simple", "s1234567", "simple", nil},
+		{"s1234567:simple@zgyd", "s1234567", "simple", []string{"@zgyd"}},
+		{"s1234567:simple@zgyd+cucc", "s1234567", "simple", []string{"@zgyd", "@cucc"}},
+		// An empty element in front is the campus network itself, the way to name
+		// it when another service type is to be tried after it.
+		{"s1234567:simple@+zgyd", "s1234567", "simple", []string{"", "@zgyd"}},
+		{"s1234567:@zgyd", "s1234567", "", []string{"@zgyd"}},
+		{"s1234567:p:with:colons@zgyd", "s1234567", "p:with:colons", []string{"@zgyd"}},
+		{"  s1234567  :simple", "s1234567", "simple", nil},
+	}
+	for _, c := range cases {
+		entry, err := parseAccount(c.raw)
+		if err != nil {
+			t.Errorf("parseAccount(%q): %v", c.raw, err)
+			continue
+		}
+		if entry.Username != c.username || entry.Password != c.password {
+			t.Errorf("parseAccount(%q) = %q/%q, want %q/%q",
+				c.raw, entry.Username, entry.Password, c.username, c.password)
+		}
+		if len(entry.ISPs) != len(c.isps) {
+			t.Errorf("parseAccount(%q) ISPs = %v, want %v", c.raw, entry.ISPs, c.isps)
+			continue
+		}
+		for i := range c.isps {
+			if entry.ISPs[i] != c.isps[i] {
+				t.Errorf("parseAccount(%q) ISPs = %v, want %v", c.raw, entry.ISPs, c.isps)
+			}
+		}
+	}
+
+	// A value that names no account, and one with two @ in it, which cannot be
+	// told apart from a password that holds one, are refused rather than guessed
+	// at. The message never repeats the value, since it holds the password.
+	for _, bad := range []string{
+		"", "s1234567", ":hunter2", "   :hunter2",
+		"s1234567:hunter2@zgyd@cucc", "s1234567:@zgyd@cucc",
+	} {
+		_, err := parseAccount(bad)
+		if err == nil {
+			t.Errorf("parseAccount(%q) accepted a value it cannot read", bad)
+			continue
+		}
+		if strings.Contains(err.Error(), "hunter2") {
+			t.Errorf("the error repeats the value it refused: %v", err)
+		}
+	}
+}
+
+func TestAccountCannotBeCombinedWithTheSingleAccountOptions(t *testing.T) {
+	// The two say the same thing in different ways, and quietly preferring one
+	// of them would leave a script with a configuration it did not ask for.
+	username := "s1234567"
+	cfg := &config.Config{}
+
+	err := options{accounts: []string{"first:one"}, username: &username}.applyTo(cfg)
+
+	if err == nil {
+		t.Fatal("--account and --username were accepted together")
+	}
+	if len(cfg.Accounts) != 0 {
+		t.Errorf("the configuration was changed anyway: %+v", cfg.Accounts)
+	}
+}
+
+func TestParseOptionsTakesTheAccountOptionMoreThanOnce(t *testing.T) {
+	opts, rest, err := parseOptions([]string{"--account=first:one", "--account=second:two"})
+	if err != nil {
+		t.Fatalf("parseOptions: %v", err)
+	}
+	if len(opts.accounts) != 2 || opts.accounts[0] != "first:one" || opts.accounts[1] != "second:two" {
+		t.Errorf("accounts = %v, want both of them in order", opts.accounts)
+	}
+	if len(rest) != 0 {
+		t.Errorf("rest = %v", rest)
+	}
+	if !opts.accountGiven() {
+		t.Error("--account counts as an account option")
 	}
 }
 
@@ -243,7 +391,7 @@ func TestResolveAppDirLetsHomeWin(t *testing.T) {
 	}
 
 	// No --home at all, or an empty one, leaves the choice to the installation
-	// directory, which is what a portable copy relies on.
+	// directory, which a portable copy relies on.
 	for _, home := range []*string{nil, new(string)} {
 		switch got := resolveAppDir(home); got {
 		case "":
@@ -340,8 +488,8 @@ func TestCheckOnlyAcceptsAnOptionInTheModeItBelongsTo(t *testing.T) {
 func TestCheckTrayOnlyAllowsAppWhereThereIsATray(t *testing.T) {
 	addr := "127.0.0.1:8088"
 
-	// The tray is what opens a window of its own, so a build that has none has
-	// to refuse the option instead of starting up and ignoring it.
+	// The tray opens a window of its own, so a build that has none has to refuse
+	// the option instead of starting up and ignoring it.
 	if err := checkTray(options{app: &addr}, false); err == nil {
 		t.Error("--app was accepted in a build without a tray")
 	}
@@ -414,8 +562,8 @@ func TestStatusJSONCarriesTheFieldsAScriptNeeds(t *testing.T) {
 		t.Fatalf("the report is not JSON: %v", err)
 	}
 
-	// The field names are a promise to whoever writes the monitoring script, so
-	// the whole set is pinned down here.
+	// The field names are a promise to any monitoring script, so the whole set is
+	// pinned down here.
 	want := map[string]any{
 		"portal":      "http://10.9.1.3/",
 		"state":       "online",

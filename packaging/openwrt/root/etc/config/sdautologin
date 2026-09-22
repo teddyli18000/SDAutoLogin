@@ -1,7 +1,7 @@
 config sdautologin 'main'
 	# The account the router signs in with. Leave an option empty to let
-	# config.json decide instead, which is what the settings page writes: setting
-	# the account here overrides that file on every start.
+	# config.json decide instead, as the settings page does: setting the account
+	# here overrides that file on every start.
 	option username ''
 	option password ''
 	# Service suffix such as @zgyd, empty being the campus network itself.

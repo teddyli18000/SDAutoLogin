@@ -429,9 +429,9 @@ func (a *trayApp) openSettingsFromClick() {
 }
 
 // doubleClickWindow is how long Windows itself waits for the second click of a
-// double click, which is exactly the interval in which a repeat is not a new
-// request. The first click compares against a zero timestamp, which time.Since
-// reports as far more than any interval, so it always gets through.
+// double click, the interval in which a repeat is not a new request. The first
+// click compares against a zero timestamp, which time.Since reports as far more
+// than any interval, so it always gets through.
 func doubleClickWindow() time.Duration {
 	ms, _, _ := procGetDoubleClickTime.Call()
 	if ms == 0 {

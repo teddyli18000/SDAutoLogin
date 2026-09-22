@@ -62,7 +62,7 @@
 `dist/`；`clean` 任务只删除其中的可执行文件，不会动设置和日志，因此在 `dist/`
 里运行的构建不会丢掉账号。
 
-最省事的方式，一条命令、不需要额外工具：
+一条命令即可，不需要额外工具：
 
 ```bat
 build.cmd
@@ -72,7 +72,7 @@ build.cmd
 ./build.sh
 ```
 
-同样的任务也可以直接调用，交叉编译等场合用它更方便：
+同样的任务也可以直接调用，交叉编译等场合用它：
 
 ```sh
 go run ./tools/build            # 列出所有任务
@@ -96,7 +96,7 @@ go run ./tools/build clean
 `dpkg-deb`、读 rpm 的 `rpm`，以及读 Arch 包的 `bsdtar`。找不到的工具会被点名并计入
 「未校验」，而不是被悄悄放过；一个包都没能校验的这一次运行会直接失败。
 
-如果你习惯 CMake，它也驱动同一批任务：
+CMake 也驱动同一批任务：
 
 ```sh
 cmake -S . -B build -G Ninja
@@ -116,14 +116,14 @@ CMake 自身不编译任何东西：编译器是 Go 工具链，编译参数由�
 
 交叉编译覆盖 Windows 和 Linux 的 `amd64`、`arm64`、`386`、`armv7`、`mips` 与
 `mipsle`。最后三个把 `GOARCH` 单独说不清的东西写进了文件名：`armv7` 是 32 位
-ARM 版的指令集，`mips-softfloat` 与 `mipsle-softfloat` 是给路由器的——那些机器
+ARM 版的指令集，`mips-softfloat` 与 `mipsle-softfloat` 是给路由器的，那些机器
 没有浮点单元。MIPS 的两种字节序都在，是因为板子两种都有：Atheros 系（ath79、
 ar71xx）是大端，MediaTek 系（ramips、mt76x8）是小端。在路由器上、以及任何没有
 桌面的机器上，请用 `run`：托盘需要桌面会话，而设置页用 `--settings` 从网络上访问。
 
 每个 Linux 目标都会构建两份。第二份文件名里带 `-notray`：它去掉了托盘，连带
 D-Bus 客户端以及只有托盘才需要的那些东西，体积因此小约五分之一（`mipsle` 从
-10.0 MiB 降到 7.7 MiB）。这一份是给路由器的——那里没有桌面会话可以放图标。在这
+10.0 MiB 降到 7.7 MiB）。这一份是给路由器的，那里没有桌面会话可以放图标。在这
 种构建里，`--app` 会直接报错而不是被忽略，因为独立窗口正是由托盘打开的。保留托盘
 的那一份是默认版本，供有桌面的机器使用。
 
@@ -131,7 +131,7 @@ macOS 是例外：托盘依赖 cgo，必须在本机安装 Xcode 命令行工具
 （`xcode-select --install`）后编译。
 
 Windows 可执行文件内含图标、版本信息和 DPI 感知清单，由
-`winres/rsrc_windows_<arch>.syso` 嵌入——一个架构一份（`amd64`、`arm64` 与
+`winres/rsrc_windows_<arch>.syso` 嵌入，一个架构一份（`amd64`、`arm64` 与
 `386`），工具链也正是靠文件名判断该带上哪一份。图标和这些资源文件都是生成的
 （来源是源码里的绘图代码与 `winres/winres.json`），用上面的 `icon`、`resources`
 任务重新生成即可。它们都生成在 `winres/` 内、也就是各自的来源文件旁边，因此仓库
@@ -173,10 +173,10 @@ Windows 可执行文件内含图标、版本信息和 DPI 感知清单，由
 
 **常规**
 
-- 账号：学号、用户名或完整邮箱都可以。
-- 密码，以及是否写入配置文件。
-- 服务类型：校园网、中国移动（`@zgyd`）、中国联通（`@cucc`）、
-  中国电信（`@ctc`）。
+- 登录账号列表：一个账号一条，每条自带该账号可用的服务类型，即校园网、中国移动
+  （`@zgyd`）、中国联通（`@cucc`）与中国电信（`@ctc`）。拖动（或用方向键）调整
+  顺序，顺序就是尝试的优先级，详见下一节。
+- 密码是否写入配置文件。
 - 界面语言。
 - 掉线后自动登录。
 - 开机自动运行。
@@ -185,12 +185,36 @@ Windows 可执行文件内含图标、版本信息和 DPI 感知清单，由
 **高级**
 
 - 门户首页地址和认证接口地址。
-- 账号前缀与后缀，二者会拼成最终提交的账号。
+- 账号前缀，它与账号、服务类型一起拼成最终提交的账号。
 - 请求超时和 `jsVersion` 参数。
 - 详细日志。
 
 修改后页面会标记为未保存；点击**保存**会写入 `config.json`、重启检测循环，
-并立刻执行一次检测，效果马上可见。
+并立刻执行一次检测，效果马上可见。每条账号上的测试按钮要等设置保存后才可用：
+能问程序的，只有它正在使用的那份列表。
+
+## 账号与尝试顺序
+
+门户对一个客户端 IP 只允许一个会话，因此多个账号不可能同时在线。这张列表要解决的
+是另一种情况：首选账号本来能用，但已经不能用了，比如欠费、改了密码、被停用。此时程序
+会顺着列表往下，用下一个能用的账号登录。
+
+```
+1  s1234567   先中国移动，再中国联通
+2  s7654321   校园网
+3  s0000003   中国电信                        （已停用）
+```
+
+1. 从上往下依次尝试；一条账号按它自己列出的服务类型顺序各提交一次：上例第 1 条会
+   先试 `s1234567@zgyd`，再试 `s1234567@cucc`，都失败才轮到第 2 条。
+2. 「问题出在账号本身」的应答，比如密码错误、认证失败，会把该条暂时移出尝试队列
+   十分钟，并继续试下一条。十分钟既不至于拿一个错密码反复撞门户，也足够短，
+   修好之后很快会被发现；保存设置或手动点一次「立即检测」也会立刻解除。
+3. 「问题出在门户」的应答，比如系统忙、请求超时、应答读不出来，会保留该条并结束本轮，
+   因为门户繁忙时顺着列表走会把所有账号一次全判成坏的。
+4. 设置页会标出会话当前用的是哪一条，以及每条被跳过的条目、原因和剩余等待时间。
+
+已停用的条目完全不参与，这样就能在不删掉密码的前提下把它移出队列。
 
 ## 命令行
 
@@ -211,7 +235,9 @@ help           打印用法
                    供服务与容器使用
 --no-log           日志只留在控制台，不写 logs/app.log，供 flash 很小的机器
                    使用
---username=NAME    用该账号替代配置中的账号
+--account=USER:PASSWORD[@SERVICE[+SERVICE...]]
+                   登录列表里的一条；可重复给出多条，顺序就是尝试顺序
+--username=NAME    用该账号作为列表里唯一的一条
 --password=SECRET  用该密码替代配置中的密码
 --isp=SUFFIX       运营商后缀，例如 @zgyd；留空表示校园网本身
 --save             同时把命令行给出的值写入 config.json
@@ -228,7 +254,20 @@ help           打印用法
 
 这些选项每次运行都会读取，且只对本次运行生效，因此没有终端的环境（容器、服务）
 无需经过交互式向导即可完成配置；加上 `--save` 会一并写入 `config.json`。`run` 在
-缺少账号时会明确报错退出，而不是向用户提问——服务场景没有人能回答向导。
+缺少账号时会明确报错退出，而不是向用户提问，因为服务场景没有人能回答向导。
+
+账号选项描述的是**整张列表**，而不是往列表里追加，因为脚本要的就是整张列表：
+
+```sh
+# 一条账号，服务与容器场景就是这样
+SDAutoLogin run --account=s1234567:SECRET@zgyd --save
+
+# 多条，顺序即尝试顺序；一条也可以写多个服务类型，由 @ 引出
+SDAutoLogin run --account=s1234567:SECRET@zgyd+cucc --account=s7654321:OTHER --save
+```
+
+密码里含 `@` 时无法用这种写法，因为 `@` 就是引出服务类型的那个字符；这种情况用
+`--username` 与 `--password`。
 
 GUI 与命令行是**同一个可执行文件**，只是参数不同：不带子命令时启动托盘并常驻，
 带子命令时执行一次后退出。`-cli` 等同于 `run`，`-test-login` 等同于 `login`。
@@ -236,8 +275,7 @@ GUI 与命令行是**同一个可执行文件**，只是参数不同：不带子
 `--app` 保留托盘，但不再把设置页当作网页：它在一个没有地址栏、没有标签页、没有
 菜单的浏览器窗口里打开，看起来就是一个独立的应用程序。只有 Chromium 内核能这么
 做，因此会去启动 chrome/edge/chromium/brave。一个都没装、或找到的那个启动失败时，
-设置页改交给默认浏览器，并在日志里说明——标签页不如独立窗口，但总好过什么都没
-发生。
+设置页改交给默认浏览器，并在日志里说明。
 
 Windows 上该文件按 GUI 程序链接，双击不会弹出控制台窗口；从终端启动时会自动
 附接到该终端，因此输出能显示出来。如果要把输出重定向到管道，或需要脚本读取
@@ -270,13 +308,15 @@ SDAutoLogin status --json | jq -r .state
 
 | 字段 | 默认值 | 含义 |
 | --- | --- | --- |
-| `username` | | 学号、用户名或邮箱 |
-| `password` | | 密码，仅在 `rememberPassword` 为真时写入 |
+| `accounts` | `[]` | 登录列表，数组顺序就是尝试顺序 |
+| `accounts[].username` | | 学号、用户名或邮箱 |
+| `accounts[].password` | | 密码，仅在 `rememberPassword` 为真时写入 |
+| `accounts[].disabled` | 不存在 | 出现且为真表示该条不参与尝试 |
+| `accounts[].isps` | `[""]` | 运营商后缀，例如 `@zgyd`，数组顺序就是尝试顺序 |
 | `rememberPassword` | `true` | 是否把密码保存在文件中 |
 | `portalBaseUrl` | `http://10.9.1.3/` | 门户首页，用于读取客户端 IP |
 | `eportalUrl` | `http://10.9.1.3:801/eportal/` | Dr.COM 认证接口根地址 |
 | `accountPrefix` | `,0,` | 门户登录页使用的账号前缀 |
-| `accountSuffix` | | 运营商后缀，例如 `@zgyd` |
 | `checkIntervalSeconds` | `15` | 检测间隔，最小 5 秒 |
 | `httpTimeoutSeconds` | `6` | 请求超时，最小 2 秒 |
 | `autoLogin` | `true` | 掉线后自动登录 |
@@ -286,6 +326,21 @@ SDAutoLogin status --json | jq -r .state
 | `probeUrls` | 见下 | 连通性检测地址 |
 | `jsVersion` | `3.3.3` | 门户页面提交的参数 |
 | `language` | `auto` | `auto`、`zh` 或 `en` |
+
+```json
+{
+  "accounts": [
+    { "username": "s1234567", "password": "SECRET", "isps": ["@zgyd", "@cucc"] },
+    { "username": "s7654321", "password": "OTHER", "isps": [""] },
+    { "username": "s0000003", "password": "SECRET", "disabled": true, "isps": ["@ctc"] }
+  ],
+  "accountPrefix": ",0,",
+  "checkIntervalSeconds": 15
+}
+```
+
+旧版本写下的文件（单个 `username`、`password`、`accountSuffix`）会被读成列表里的
+一条，并在下次保存时写成新结构，不需要手工改动。
 
 默认探测地址：`http://connect.rom.miui.com/generate_204`、
 `http://www.baidu.com`、`http://www.msftconnecttest.com/connecttest.txt`。
@@ -305,19 +360,19 @@ SDAutoLogin status --json | jq -r .state
   （例如路由器）就是这么做的：同样的日志行无论如何都会输出到控制台。
 
 默认情况下两者都在可执行文件旁边，所以在 `dist/` 里编译出来的程序，它的配置和
-日志也在 `dist/` 里；移动可执行文件时记得把 `config.json` 一起移动。
+日志也在 `dist/` 里；移动可执行文件时要连 `config.json` 一起移动。
 `--home=DIR` 可以把它们改放到 DIR，下面 service 和容器就是这么做的，这样可执行
 文件本身可以留在只读的 `/usr` 上。
 
 ## 部署
 
 服务场景用 `run`：无托盘、无显示器地持续检测，日志走 stderr，收到 `SIGTERM` 后
-退出。它在没有账号时会拒绝启动，因此账号要先写一次——可以在命令行上用 `--save`
+退出。它在没有账号时会拒绝启动，因此账号要先写一次：可以在命令行上用 `--save`
 一次性写入，也可以在启动时加上 `--settings`，再从设置页里填写。
 
 ### 安装包
 
-`go run ./tools/build packages` 会为每个值得安装本程序的发行版各打一个包：
+`go run ./tools/build packages` 会为每个发行版各打一个包：
 
 | 发行版 | 安装包 | 安装方式 |
 | --- | --- | --- |
@@ -329,23 +384,23 @@ SDAutoLogin status --json | jq -r .state
 
 每个包装的东西是一样的，只是按各家的规矩摆放：无托盘那份程序、运行它的 systemd
 unit、声明 `sdautologin` 用户的那个文件，以及许可证和文档。设置与日志都在
-`/var/lib/sdautologin`；服务由安装包启用；每个包都得先给一个账号，否则服务起不来
-——服务面前没有人能回答配置向导。OpenWrt 是唯一的例外，那里既没有 systemd 也没有
+`/var/lib/sdautologin`；服务由安装包启用；每个包都得先给一个账号，否则服务起不来，
+因为服务面前没有人能回答配置向导。OpenWrt 是唯一的例外，那里既没有 systemd 也没有
 `/var/lib`，细节见它自己那一节。
 
 这些包由构建任务自己写出，只用标准库：机器上不需要任何打包工具链，ipk 和 deb 更是
 什么都不需要。Arch 包是唯一的例外，因为 Go 没有 zstd 或 xz 的写入器：装了 `zstd`
 就用它，否则用 `xz` 或 `gzip`，任务会说明用的是哪一个。
 
-这些包都没有签名。本地安装不成问题——`dpkg -i`、`rpm -i` 与 `pacman -U` 都接受
+这些包都没有签名。本地安装不成问题：`dpkg -i`、`rpm -i` 与 `pacman -U` 都接受
 未签名的文件，pacman 只有在配置要求签名、而 `LocalFileSigLevel` 不是 `Optional` 时
-才会拒绝；但要做成自己的仓库就需要一把密钥，而密钥不是构建任务能凭空造出来的。
-任务写在包旁边的是 `SHA256SUMS`：按 `sha256sum` 工具的格式一行一个文件，下载了
-发布产物的人可以拿它核对自己拿到的东西。
+才会拒绝。要做成自己的仓库则需要一把密钥，而密钥不是构建任务能凭空造出来的。
+任务写在包旁边的是 `SHA256SUMS`：按 `sha256sum` 工具的格式一行一个文件，下载到的
+发布产物可以拿它核对。
 
-`go run ./tools/build verify` 会用各个格式自己的工具把包读回来——deb 和 ipk 用
+`go run ./tools/build verify` 会用各个格式自己的工具把包读回来：deb 和 ipk 用
 `dpkg-deb`，rpm 用 `rpm -K` 与 `rpm -qpl`，Arch 包用 `bsdtar` 和它自己携带的那份
-文件清单——并把 Windows 压缩包与它所依据的编译产物逐字节比对，再确认 Scoop 与
+文件清单；并把 Windows 压缩包与它所依据的编译产物逐字节比对，再确认 Scoop 与
 winget 清单里的摘要指向的是当前这个压缩包。最后它会把所有包再打一遍，只要有一个
 字节不同就报错：同一个版本打两次，本来就必须是同一个发布产物。
 
@@ -354,8 +409,8 @@ winget 清单里的摘要指向的是当前这个压缩包。最后它会把所�
 与 `gofmt` 检查，所以装不上的包会在发布之前被发现，而不是发布之后。
 
 打标签推送时会发布 release：同一次运行会创建它，并把各个包连同 `SHA256SUMS`
-作为附件挂上去，两个安装清单指向的正是那里。标签必须是 `v` 加上源码里的版本号
-——1.0.0 对应 `v1.0.0`；两者对不上时这一步会拒绝发布，否则清单会指向并不存在的
+作为附件挂上去，两个安装清单指向的正是那里。标签必须是 `v` 加上源码里的版本号，
+1.0.0 对应 `v1.0.0`；两者对不上时这一步会拒绝发布，否则清单会指向并不存在的
 文件。已经存在的 release 会直接沿用，因此同一条标签推两次不会让运行失败。
 
 ### Debian 与 Ubuntu
@@ -402,7 +457,7 @@ sudo systemctl restart sdautologin
 
 `dist/packages/manifests/` 里放的是两个能安装这种压缩包的包管理器所要的东西，即
 `scoop/sdautologin.json` 与 winget 清单的三个文件。两者都把发布产物写成下载地址
-`<项目地址>/releases/download/v<版本>/`，这正是本项目所在的 Gitea 存放发布附件的
+`<项目地址>/releases/download/v<版本>/`，也就是本项目所在的 Gitea 存放发布附件的
 路径；如果发布挪到别处，改 `tools/build/pack_win.go` 里的 `releaseURL`，两个
 清单都会跟着变。winget 命令行本身就能校验它们
 （`winget validate --manifest dist/packages/manifests/winget`）；Scoop 清单把设置和
@@ -411,8 +466,8 @@ sudo systemctl restart sdautologin
 ### systemd
 
 [packaging/systemd](packaging/systemd) 里有两份现成的 unit，一份是系统服务，一份
-供 `systemctl --user` 使用；用户级那份开头就是它自己的安装步骤。系统级那份正是安装
-包里放的文件，所以手工安装无非是把安装包做的事手做一遍：
+供 `systemctl --user` 使用；用户级那份开头就是它自己的安装步骤。系统级那份就是安装
+包里放的文件，下面的步骤就是它做的事：
 
 ```sh
 install -m 0755 dist/SDAutoLogin-linux-amd64 /usr/bin/SDAutoLogin
@@ -452,8 +507,7 @@ docker run --rm -v sdautologin:/data sdautologin \
 ```
 
 `--home=/data` 写在入口点里，因此 `status` 之类的一次性命令读取的是同一份设置。
-当 `status` 报告会话不在线时，容器会被标记为 unhealthy——这正是这个程序唯一值得
-关注的事情。
+当 `status` 报告会话不在线时，容器会被标记为 unhealthy。
 
 ### OpenWrt
 
@@ -470,7 +524,7 @@ docker run --rm -v sdautologin:/data sdautologin \
 路由器最缺的是 flash，所以程序是以压缩形式装到
 `/usr/lib/sdautologin/SDAutoLogin.gz` 的，而 `/usr/bin/SDAutoLogin` 是一个短小的
 包装脚本，首次启动时把它解到 `/tmp` 再从那里运行。这样 flash 占用从 7.7 MiB 降到
-2.7 MiB，代价是运行时占用 7.7 MiB 内存，而内存是这两者里更容易让出来的。`/tmp`
+2.7 MiB，代价是运行时占用 7.7 MiB 内存。`/tmp`
 里的那份每次开机、每次升级各解一次，而且解出来的文件名里带着版本号，所以新包会解出
 自己的程序，而不是继续运行上一个包留在内存里的那份。
 
@@ -490,7 +544,7 @@ uci commit sdautologin
 /etc/init.d/sdautologin restart
 ```
 
-留空的选项不会被传下去，此时由 `config.json` 决定——设置页写的就是它。没有显示器
+留空的选项不会被传下去，此时由 `config.json` 决定，设置页写的就是它。没有显示器
 的路由器可以把设置页打开，从它所服务的网络里访问：
 
 ```sh
@@ -545,8 +599,8 @@ make menuconfig          # Network -> sdautologin
 - 无人值守登录必须能拿到密码，因此除非关闭 `rememberPassword`，密码会以明文
   保存在 `config.json` 中。该文件按"仅本人可读"写入，日志也一样（日志里同样会
   出现账号），并且日志住在自己的目录里：两个文件 `0600`，目录 `0700`。旧版本留下
-  的、所有人都能读的文件会在下次写入时被收紧。systemd 的 unit 再声明一遍同样的
-  事：两个 unit 都设 `UMask=0077`，系统服务还把 state 目录定为 `0700`。
+  的、所有人都能读的文件会在下次写入时被收紧。两个 unit 都设 `UMask=0077`，
+  系统服务还把 state 目录定为 `0700`。
 - 程序从不调用注销接口，因此退出程序不会导致断网。
 
 ## 项目结构

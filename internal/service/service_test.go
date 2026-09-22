@@ -19,22 +19,27 @@ import (
 type stubPortal struct {
 	// online is what online_list reports before any login.
 	online bool
-	// afterLogin, when set, is what online_list reports once a login has been
+	// afterLogin, when set, is the online_list result once a login has been
 	// submitted. Pointing it at false reproduces the reply that accepts a login
 	// and still calls the client offline.
 	afterLogin *bool
-	// omitResult leaves the result field out of the online_list reply, which is
-	// what makes the session state unknown.
+	// omitResult leaves the result field out of the online_list reply, so the
+	// session state is unknown.
 	omitResult bool
 	// loginBody is the raw reply of the login endpoint.
 	loginBody string
+	// loginBodies are the replies of the login endpoint, one per attempt, the
+	// last one repeating. A refused first account followed by an accepted second
+	// is the failover case.
+	loginBodies []string
 	// intercepted makes the reachability probe answer 200 instead of 204, the
 	// way a captive portal does.
 	intercepted bool
 
-	mu      sync.Mutex
-	queries int
-	logins  int
+	mu        sync.Mutex
+	queries   int
+	logins    int
+	attempted []string
 }
 
 func boolPtr(v bool) *bool { return &v }
@@ -62,7 +67,16 @@ func (s *stubPortal) start(t *testing.T) *config.Config {
 
 		if r.URL.Query().Get("a") == "login" {
 			s.logins++
-			_, _ = io.WriteString(w, s.loginBody)
+			s.attempted = append(s.attempted, r.URL.Query().Get("user_account"))
+			body := s.loginBody
+			if len(s.loginBodies) > 0 {
+				i := s.logins - 1
+				if i >= len(s.loginBodies) {
+					i = len(s.loginBodies) - 1
+				}
+				body = s.loginBodies[i]
+			}
+			_, _ = io.WriteString(w, body)
 			return
 		}
 		s.queries++
@@ -85,13 +99,13 @@ func (s *stubPortal) start(t *testing.T) *config.Config {
 	t.Cleanup(srv.Close)
 
 	return &config.Config{
-		Username:             "s1234567",
-		Password:             "p@ss",
+		Accounts: []config.Account{
+			{Username: "s1234567", Password: "p@ss", ISPs: []string{"@zgyd"}},
+		},
 		RememberPassword:     true,
 		PortalBaseURL:        srv.URL + "/",
 		EportalURL:           srv.URL + "/eportal/",
 		AccountPrefix:        ",0,",
-		AccountSuffix:        "@zgyd",
 		CheckIntervalSeconds: 5,
 		HTTPTimeoutSeconds:   5,
 		AutoLogin:            true,
@@ -104,6 +118,14 @@ func (s *stubPortal) counts() (queries, logins int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.queries, s.logins
+}
+
+// submitted is the user_account of every login request that reached the portal,
+// in order, showing which account was tried when.
+func (s *stubPortal) submitted() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.attempted...)
 }
 
 // closedBase is the address of a server that has been shut down again, so a
@@ -129,6 +151,11 @@ func TestTickReportsAnOnlineSession(t *testing.T) {
 	if snap.ClientIP != "203.0.113.7" || snap.Account != "s1234567" {
 		t.Errorf("snapshot = %+v", snap)
 	}
+	// The portal names the account the session is on, so the interface can mark
+	// which entry of the list that is, even one this program did not sign in.
+	if snap.EntryIndex != 0 || snap.Entry != "s1234567 (China Mobile)" {
+		t.Errorf("Entry = %q at %d, want the configured entry", snap.Entry, snap.EntryIndex)
+	}
 	if _, logins := sp.counts(); logins != 0 {
 		t.Errorf("logins = %d, a login must not be attempted while the session is up", logins)
 	}
@@ -147,8 +174,11 @@ func TestTickSignsBackInAfterADisconnection(t *testing.T) {
 	if snap.LastLoginAt == "" {
 		t.Error("the successful login was not recorded")
 	}
-	if !strings.Contains(snap.Message, "signed in at") {
+	if !strings.Contains(snap.Message, "signed in as") {
 		t.Errorf("Message = %q", snap.Message)
+	}
+	if snap.EntryIndex != 0 {
+		t.Errorf("EntryIndex = %d, want the entry that signed in", snap.EntryIndex)
 	}
 	if _, logins := sp.counts(); logins != 1 {
 		t.Errorf("logins = %d, want exactly one attempt", logins)
@@ -182,12 +212,147 @@ func TestTickReportsARejectedLogin(t *testing.T) {
 	if snap.State != StateError {
 		t.Fatalf("State = %v, want Error", snap.State)
 	}
-	if snap.LastError != "wrong account or password" {
-		t.Errorf("LastError = %q", snap.LastError)
+	// The reason has to reach the snapshot: the page shows it on the entry, and
+	// the tray and the log have nothing else to go on.
+	if !strings.Contains(snap.Message, "wrong account or password") {
+		t.Errorf("Message = %q, want the reason the portal gave", snap.Message)
 	}
-	if !strings.Contains(snap.Message, "login failed") {
-		t.Errorf("Message = %q", snap.Message)
+	if len(snap.Skipped) != 1 || snap.Skipped[0].Index != 0 {
+		t.Fatalf("Skipped = %+v, want the entry that was refused", snap.Skipped)
 	}
+	if snap.Skipped[0].Message != "wrong account or password" {
+		t.Errorf("Skipped[0].Message = %q", snap.Skipped[0].Message)
+	}
+	// The code travels with it, since the settings page says the same thing in
+	// the language of its own interface.
+	if snap.Skipped[0].RetCode != "1" {
+		t.Errorf("Skipped[0].RetCode = %q, want the answer of the portal", snap.Skipped[0].RetCode)
+	}
+	if snap.Skipped[0].RetryInS <= 0 {
+		t.Errorf("RetryInS = %d, want the wait that is left of the cooldown", snap.Skipped[0].RetryInS)
+	}
+}
+
+func TestTickMovesOnToTheNextAccount(t *testing.T) {
+	// The first account is refused for a reason of its own, so the second one is
+	// tried in the same round, which is the point of the list.
+	sp := &stubPortal{
+		online:      false,
+		afterLogin:  boolPtr(true),
+		loginBodies: []string{`{"result":0,"ret_code":"1"}`, `{"result":1,"ret_code":"0"}`},
+	}
+	cfg := twoAccounts(sp.start(t))
+	svc := NewService(cfg)
+
+	svc.tick()
+
+	snap := svc.Snapshot()
+	if snap.State != StateOnline {
+		t.Fatalf("State = %v, want Online (message %q)", snap.State, snap.Message)
+	}
+	if snap.EntryIndex != 1 {
+		t.Errorf("EntryIndex = %d, want the second entry", snap.EntryIndex)
+	}
+	if got := sp.submitted(); len(got) != 2 || got[0] != ",0,s1234567@zgyd" || got[1] != ",0,s7654321" {
+		t.Errorf("the portal was asked for %v, want the first account and then the second", got)
+	}
+	if len(snap.Skipped) != 1 || snap.Skipped[0].Index != 0 {
+		t.Errorf("Skipped = %+v, want the first entry left alone", snap.Skipped)
+	}
+}
+
+func TestTickWalksPastAnAccountThatWasRefused(t *testing.T) {
+	// Once an entry is known to be broken, the next round must not submit it
+	// again, so a wrong password is not tried every check interval; that is the
+	// cooldown's job.
+	sp := &stubPortal{
+		online:      false,
+		afterLogin:  boolPtr(true),
+		loginBodies: []string{`{"result":0,"ret_code":"1"}`, `{"result":1,"ret_code":"0"}`},
+	}
+	svc := NewService(twoAccounts(sp.start(t)))
+
+	svc.tick() // refuses the first entry, signs in with the second
+	svc.tick() // the session is up, so nothing is submitted either
+
+	if got := sp.submitted(); len(got) != 2 {
+		t.Errorf("the portal was asked for %v, want the refused entry to be left alone", got)
+	}
+}
+
+func TestATemporaryFailureDoesNotWalkTheList(t *testing.T) {
+	// A portal that is busy is not an account that is broken. Walking the list
+	// on that answer would mark every account as refused in a single round.
+	sp := &stubPortal{online: false, loginBodies: []string{`{"result":0,"ret_code":"3"}`}}
+	svc := NewService(twoAccounts(sp.start(t)))
+
+	svc.tick()
+
+	snap := svc.Snapshot()
+	if snap.State != StateError {
+		t.Fatalf("State = %v, want Error", snap.State)
+	}
+	if len(snap.Skipped) != 0 {
+		t.Errorf("Skipped = %+v, want the entries left in the running", snap.Skipped)
+	}
+	if got := sp.submitted(); len(got) != 1 {
+		t.Errorf("the portal was asked for %v, want only the first account", got)
+	}
+	// The next round tries the same entry again, since nothing about it is known
+	// to be wrong.
+	svc.tick()
+	if got := sp.submitted(); len(got) != 2 {
+		t.Errorf("the portal was asked for %v, want the entry tried again", got)
+	}
+}
+
+func TestAskingForACheckGivesARefusedEntryAnotherChance(t *testing.T) {
+	// A check asked for by hand usually follows the fix, so the wait is cut
+	// short.
+	sp := &stubPortal{online: false, loginBody: `{"result":0,"ret_code":"1"}`}
+	svc := NewService(sp.start(t))
+
+	svc.tick()
+	if len(svc.rejected) != 1 {
+		t.Fatalf("rejected = %+v, want the entry the portal refused", svc.rejected)
+	}
+
+	svc.Trigger()
+
+	if len(svc.rejected) != 0 {
+		t.Errorf("rejected = %+v, want the refusals forgotten", svc.rejected)
+	}
+}
+
+func TestANewConfigurationForgetsWhatWasRefused(t *testing.T) {
+	// Saving the settings is the other way a fix reaches the program, and the
+	// configuration it installs here names no account at all, so the check the
+	// new loop runs straight away cannot put a refusal back.
+	sp := &stubPortal{online: false, loginBody: `{"result":0,"ret_code":"1"}`}
+	cfg := sp.start(t)
+	svc := NewService(cfg)
+
+	svc.tick()
+	if len(svc.rejected) != 1 {
+		t.Fatalf("rejected = %+v, want the entry the portal refused", svc.rejected)
+	}
+
+	empty := *cfg
+	empty.Accounts = nil
+	svc.Restart(&empty)
+	svc.Stop()
+
+	if len(svc.rejected) != 0 {
+		t.Errorf("rejected = %+v, want the refusals forgotten", svc.rejected)
+	}
+}
+
+// twoAccounts adds a second account to a test configuration for the failover
+// tests: one entry that can be refused and another that follows it.
+func twoAccounts(cfg *config.Config) *config.Config {
+	cfg.Accounts = append(cfg.Accounts,
+		config.Account{Username: "s7654321", Password: "other", ISPs: []string{""}})
+	return cfg
 }
 
 func TestTickDoesNotReconnectWhileTheStateIsUnknown(t *testing.T) {
@@ -234,8 +399,7 @@ func TestTickStaysOfflineWhenAutoLoginIsOff(t *testing.T) {
 func TestTickReportsAMissingAccount(t *testing.T) {
 	sp := &stubPortal{online: false}
 	cfg := sp.start(t)
-	cfg.Username = ""
-	cfg.Password = ""
+	cfg.Accounts = nil
 	svc := NewService(cfg)
 
 	svc.tick()
@@ -255,8 +419,9 @@ func TestTickReportsAMissingAccount(t *testing.T) {
 func TestTickReportsAnUnreachablePortal(t *testing.T) {
 	base := closedBase(t)
 	cfg := &config.Config{
-		Username:           "s1234567",
-		Password:           "p@ss",
+		Accounts: []config.Account{
+			{Username: "s1234567", Password: "p@ss", ISPs: []string{""}},
+		},
 		PortalBaseURL:      base + "/",
 		EportalURL:         base + "/eportal/",
 		HTTPTimeoutSeconds: 5,

@@ -8,18 +8,50 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
 	"sdautologin/internal/i18n"
 )
 
-// Config mirrors config.json, stored next to the executable.
-type Config struct {
-	// Username accepts a student id, a short name or a full mail address.
+// Account is one entry of the login list: an account, and the service types it
+// may be used with, in the order they are to be tried.
+//
+// The portal allows one session per client address, so these accounts can never
+// be online together. The list is therefore a failover order rather than a set
+// of sessions running side by side: an account that is out of credit, whose
+// password changed or that was closed is skipped for the next one.
+type Account struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
-	// RememberPassword decides whether Password is written to disk.
+	// Disabled keeps an entry out of the login list without deleting its
+	// password. The field is inverted, so an absent one means "in use": a flag
+	// that has to be present for an entry to work is easy to lose while editing
+	// by hand.
+	Disabled bool `json:"disabled,omitempty"`
+	// ISPs are the service suffixes to try for this account, in order, where an
+	// empty string is the campus network itself. The suffix is what the portal's
+	// own login page appends to the account.
+	ISPs []string `json:"isps"`
+}
+
+// Config mirrors config.json, stored next to the executable.
+type Config struct {
+	// Accounts is the login list, in priority order: the first entry that signs
+	// in is the one the session keeps.
+	Accounts []Account `json:"accounts"`
+
+	// Username, Password and AccountSuffix belong to the versions before the
+	// login list existed, when there was one account. They are read, moved into
+	// Accounts and not written again.
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	AccountSuffix string `json:"accountSuffix,omitempty"`
+
+	// RememberPassword decides whether the passwords are written to disk. It is
+	// one switch for the whole list: a switch per entry would be a row of the
+	// same checkbox, and the mode the program is for needs them all on.
 	RememberPassword bool `json:"rememberPassword"`
 
 	// PortalBaseURL is the portal home page, which embeds the client IP the
@@ -30,20 +62,18 @@ type Config struct {
 
 	// AccountPrefix is fixed to ",0," for a desktop browser login.
 	AccountPrefix string `json:"accountPrefix"`
-	// AccountSuffix selects the ISP, see Operators.
-	AccountSuffix string `json:"accountSuffix"`
 
 	CheckIntervalSeconds int  `json:"checkIntervalSeconds"`
 	HTTPTimeoutSeconds   int  `json:"httpTimeoutSeconds"`
 	AutoLogin            bool `json:"autoLogin"`
 	CheckInternet        bool `json:"checkInternet"`
-	// VerboseLog writes per-check diagnostics, which is what makes a dropped
-	// session diagnosable after the fact.
+	// VerboseLog writes per-check diagnostics, so a dropped session stays
+	// diagnosable after the fact.
 	VerboseLog bool `json:"verboseLog"`
-	// LogToFile writes the log to logs/app.log as well as to the console. It is
-	// the switch a machine with a small flash turns off, since what the program
-	// writes to the console is already collected by its service manager, and the
-	// rotating file is the same text on the flash a second time.
+	// LogToFile writes the log to logs/app.log as well as to the console. A
+	// machine with a small flash turns it off: its service manager already
+	// collects the console output, and the rotating file is the same text on the
+	// flash again.
 	LogToFile bool     `json:"logToFile"`
 	ProbeURLs []string `json:"probeUrls"`
 	JsVersion string   `json:"jsVersion"`
@@ -55,6 +85,7 @@ type Config struct {
 
 func defaultConfig() *Config {
 	return &Config{
+		Accounts:             []Account{},
 		PortalBaseURL:        "http://10.9.1.3/",
 		EportalURL:           "http://10.9.1.3:801/eportal/",
 		AccountPrefix:        ",0,",
@@ -102,7 +133,30 @@ func LoadConfig(path string) (*Config, error) {
 
 func (c *Config) Path() string { return c.path }
 
+// Clone returns a configuration that shares nothing mutable with c. A settings
+// request is decoded onto the clone, so a request refused for being invalid
+// leaves the running configuration untouched. A plain struct copy would not do:
+// its lists would still be the same arrays, which the JSON decoder fills in
+// place.
+func (c *Config) Clone() *Config {
+	out := *c
+	out.Accounts = slices.Clone(c.Accounts)
+	for i := range out.Accounts {
+		out.Accounts[i].ISPs = slices.Clone(c.Accounts[i].ISPs)
+	}
+	out.ProbeURLs = slices.Clone(c.ProbeURLs)
+	return &out
+}
+
 func (c *Config) normalize() {
+	c.migrate()
+	if c.Accounts == nil {
+		c.Accounts = []Account{}
+	}
+	for i := range c.Accounts {
+		c.Accounts[i].normalize()
+	}
+
 	if c.CheckIntervalSeconds < 5 {
 		c.CheckIntervalSeconds = 5
 	}
@@ -125,13 +179,125 @@ func (c *Config) normalize() {
 	}
 }
 
+// migrate moves the single account of a configuration file written before the
+// login list existed into that list. The old fields are cleared either way, so
+// a file that is saved again carries the list alone.
+func (c *Config) migrate() {
+	legacy := strings.TrimSpace(c.Username) != ""
+	if len(c.Accounts) == 0 && legacy {
+		c.Accounts = []Account{{
+			Username: c.Username,
+			Password: c.Password,
+			ISPs:     []string{c.AccountSuffix},
+		}}
+	}
+	c.Username, c.Password, c.AccountSuffix = "", "", ""
+}
+
+// normalize trims an entry and gives it a service type: an entry that names none
+// is the campus network itself, the portal dropdown's first choice.
+func (a *Account) normalize() {
+	a.Username = strings.TrimSpace(a.Username)
+	a.ISPs = CompactSuffixes(a.ISPs)
+	if len(a.ISPs) == 0 {
+		a.ISPs = []string{""}
+	}
+}
+
+// usable reports whether this entry can sign in at all.
+func (a Account) usable() bool {
+	return strings.TrimSpace(a.Username) != "" && a.Password != ""
+}
+
+// Attempt is one sign-in attempt: an account and one of the service types it may
+// be used with. Config.Attempts flattens the login list into them, in the order
+// they are to be tried.
+type Attempt struct {
+	// Index is the position of the entry in Accounts, so the settings page and
+	// the log can point at it.
+	Index    int
+	Username string
+	Password string
+	ISP      string
+}
+
+// Key identifies the attempt across a restart of the check loop, so the cooldown
+// of a rejected entry outlives it.
+func (a Attempt) Key() string { return a.Username + "\x00" + a.ISP }
+
+// Entry names the attempt for the log and the interface.
+func (a Attempt) Entry() string {
+	return fmt.Sprintf("%s (%s)", a.Username, OperatorName(a.ISP))
+}
+
+// Attempts is every sign-in attempt the configuration asks for, in priority
+// order: the entries that are not disabled and hold both an account and a
+// password, each with every service type it may be used with.
+func (c *Config) Attempts() []Attempt {
+	var out []Attempt
+	for i, a := range c.Accounts {
+		if a.Disabled || !a.usable() {
+			continue
+		}
+		for _, isp := range a.ISPs {
+			out = append(out, Attempt{
+				Index:    i,
+				Username: a.Username,
+				Password: a.Password,
+				ISP:      isp,
+			})
+		}
+	}
+	return out
+}
+
+// Account is the value submitted as user_account for one service type.
+func (c *Config) Account(username, isp string) string {
+	return c.AccountPrefix + username + isp
+}
+
+// Match finds the entry an account string from the portal belongs to, and which
+// of its service types that is. It returns -1 when the string names none of the
+// configured entries, as happens with a session signed in by something else.
+func (c *Config) Match(reported string) (int, string) {
+	stripped := strings.TrimPrefix(strings.TrimSpace(reported), c.AccountPrefix)
+	if stripped == "" {
+		return -1, ""
+	}
+	for i, a := range c.Accounts {
+		for _, isp := range a.ISPs {
+			if strings.EqualFold(a.Username+isp, stripped) {
+				return i, isp
+			}
+		}
+		// The portal does not always echo the suffix, so the account on its own
+		// is taken as a match as well.
+		if strings.EqualFold(a.Username, stripped) {
+			return i, a.ISPs[0]
+		}
+	}
+	return -1, ""
+}
+
+// EntryLabel names one entry of the login list and one of its service types, for
+// the log and the interface.
+func (c *Config) EntryLabel(index int, isp string) string {
+	if index < 0 || index >= len(c.Accounts) {
+		return ""
+	}
+	return fmt.Sprintf("%s (%s)", c.Accounts[index].Username, OperatorName(isp))
+}
+
+// Configured reports whether there is anything to sign in with.
+func (c *Config) Configured() bool { return len(c.Attempts()) > 0 }
+
 // configFileMode is the mode config.json is written with. The file holds the
-// password in clear text when it is remembered, so it belongs to its owner and
-// to nobody else: the program runs as that user, and a machine that several
-// people use is not one where a campus account is everybody's.
+// passwords in clear text when they are remembered, so it belongs to its owner
+// alone: the program runs as that user, and campus accounts are not shared on a
+// machine several people use.
 const configFileMode = 0o600
 
-// Save writes config.json, omitting the password when it is not remembered.
+// Save writes config.json, omitting the passwords when they are not remembered.
 func (c *Config) Save() error {
 	c.normalize()
 	data, err := c.marshal()
@@ -150,7 +316,11 @@ func (c *Config) marshal() ([]byte, error) {
 	type persistConfig Config
 	v := persistConfig(*c)
 	if !c.RememberPassword {
-		v.Password = ""
+		v.Accounts = make([]Account, len(c.Accounts))
+		copy(v.Accounts, c.Accounts)
+		for i := range v.Accounts {
+			v.Accounts[i].Password = ""
+		}
 	}
 	return json.MarshalIndent(v, "", "  ")
 }
@@ -169,43 +339,62 @@ var Operators = []Operator{
 	{"China Telecom", "@ctc"},
 }
 
-func (c *Config) OperatorName() string {
+// OperatorName names the service type a suffix selects. A suffix the portal's
+// dropdown does not list is shown as it is, since the entry is still usable.
+func OperatorName(suffix string) string {
 	for _, op := range Operators {
-		if op.Suffix == c.AccountSuffix {
+		if op.Suffix == suffix {
 			return op.Name
 		}
 	}
-	return "custom(" + c.AccountSuffix + ")"
+	return "custom(" + suffix + ")"
 }
 
-func (c *Config) Configured() bool {
-	return strings.TrimSpace(c.Username) != "" && c.Password != ""
-}
-
-// Account is the value submitted as user_account.
-func (c *Config) Account() string {
-	return c.AccountPrefix + c.Username + c.AccountSuffix
-}
-
-// Summary describes the active settings for the log. The password is never
-// included, so this is safe to print.
+// Summary describes the configured accounts and the settings that go with them,
+// for the log. No password is included, so this is safe to print.
 func (c *Config) Summary() string {
+	entries := make([]string, 0, len(c.Accounts))
+	for _, a := range c.Accounts {
+		services := make([]string, 0, len(a.ISPs))
+		for _, isp := range a.ISPs {
+			services = append(services, OperatorName(isp))
+		}
+		state := "on"
+		if a.Disabled {
+			state = "off"
+		}
+		entries = append(entries, fmt.Sprintf("%s(%s,%s)", a.Username, strings.Join(services, ">"), state))
+	}
 	return fmt.Sprintf(
-		"account=%q isp=%q prefix=%q suffix=%q interval=%ds timeout=%ds autoLogin=%v checkInternet=%v verboseLog=%v logToFile=%v rememberPassword=%v language=%q portal=%s eportal=%s",
-		c.Username, c.OperatorName(), c.AccountPrefix, c.AccountSuffix,
+		"accounts=%q prefix=%q interval=%ds timeout=%ds autoLogin=%v checkInternet=%v verboseLog=%v logToFile=%v rememberPassword=%v language=%q portal=%s eportal=%s",
+		strings.Join(entries, " "), c.AccountPrefix,
 		c.CheckIntervalSeconds, c.HTTPTimeoutSeconds, c.AutoLogin, c.CheckInternet,
 		c.VerboseLog, c.LogToFile, c.RememberPassword, c.Language, c.PortalBaseURL, c.EportalURL)
 }
 
-// Validate returns a field name to message key map, where the keys are looked
-// up in the shared string table by the settings page.
+// Validate returns a field path to message key map, where the keys are looked up
+// in the shared string table by the settings page. The paths address the login
+// list by position, so the page can put every message next to the input it is
+// about.
 func (c *Config) Validate() map[string]string {
 	errs := map[string]string{}
-	if strings.TrimSpace(c.Username) == "" {
-		errs["username"] = "err.accountRequired"
+	if len(c.Accounts) == 0 {
+		errs["accounts"] = "err.accountsRequired"
 	}
-	if c.Password == "" {
-		errs["password"] = "err.passwordRequired"
+	for i, a := range c.Accounts {
+		// An entry that is disabled is not used, so it is not asked to be
+		// complete: taking a half written one out of the running has to be
+		// possible without deleting it.
+		if a.Disabled {
+			continue
+		}
+		at := "accounts." + strconv.Itoa(i)
+		if strings.TrimSpace(a.Username) == "" {
+			errs[at+".username"] = "err.accountRequired"
+		}
+		if a.Password == "" {
+			errs[at+".password"] = "err.passwordRequired"
+		}
 	}
 	if c.CheckIntervalSeconds < 5 {
 		errs["checkIntervalSeconds"] = "err.intervalTooSmall"
@@ -237,6 +426,22 @@ func ValidHTTPURL(raw string) bool {
 		return false
 	}
 	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+// CompactSuffixes drops blank repeat entries and trims the rest before saving,
+// keeping the order the service types are tried in.
+func CompactSuffixes(list []string) []string {
+	out := make([]string, 0, len(list))
+	seen := map[string]bool{}
+	for _, suffix := range list {
+		s := strings.TrimSpace(suffix)
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 // CompactProbes drops blank entries and trims the rest before saving.

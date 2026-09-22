@@ -4,8 +4,8 @@
 // A package is a tar archive holding three files of metadata next to the payload
 // itself: what the package is, what a program has to run around installing it,
 // and a listing of every file with its digests. The archive is compressed as a
-// whole, and the compression is the one thing here that the standard library
-// cannot do on its own.
+// whole, and the compression is the part the standard library cannot do on its
+// own.
 
 package main
 
@@ -17,11 +17,10 @@ import (
 )
 
 // pacmanCompression is the compression to pack with. The official repositories
-// use zstd, xz is what they used before, and both need a tool of that name: the
-// standard library writes gzip, which is the fallback. pacman reads a package
-// through libarchive with every filter it has enabled and does not look at the
-// file name at all, so it takes any of the three; it is the Arch tools that only
-// write the first two.
+// use zstd, and xz before it; both need a tool of that name, and the standard
+// library writes only gzip, which is the fallback. pacman reads a package through
+// libarchive with every filter it has enabled and does not look at the file name
+// at all, so it takes any of the three; only the Arch tools stick to the first two.
 func pacmanCompression() compression {
 	for _, c := range []struct {
 		tool string
@@ -130,10 +129,10 @@ func pacmanPkgInfo(version, arch, repo string, files []pkgEntry) []byte {
 	return []byte(b.String())
 }
 
-// pacmanMtree is the listing of every file with its digests, which is what an
-// installed system is checked against afterwards ("pacman -Qkk"). It is written
-// the way the Arch tools write it, as one line per file with the keywords the
-// format uses for them, the directories leading to the files first.
+// pacmanMtree is the listing of every file with its digests, the one an installed
+// system is checked against afterwards ("pacman -Qkk"). It is written the way the
+// Arch tools write it, as one line per file with the keywords the format uses for
+// them, the directories leading to the files first.
 func pacmanMtree(files []pkgEntry) []byte {
 	var listing strings.Builder
 	listing.WriteString("#mtree\n/set type=file uid=0 gid=0 mode=644\n")

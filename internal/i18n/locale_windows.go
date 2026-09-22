@@ -4,9 +4,8 @@ package i18n
 
 import "syscall"
 
-// The lookup is declared here rather than shared with the tray: this package
-// stays free of dependencies, and one conversion call is not worth a package
-// boundary.
+// The lookup is declared here rather than shared with the tray, so this package
+// keeps no dependencies. One conversion call does not justify a shared package.
 var procGetUserDefaultUILanguage = syscall.NewLazyDLL("kernel32.dll").
 	NewProc("GetUserDefaultUILanguage")
 

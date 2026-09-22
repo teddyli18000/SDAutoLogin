@@ -3,7 +3,7 @@
 # The system user the service runs as is declared in
 # /usr/lib/sysusers.d/sdautologin.conf, but nothing reads that file on its own:
 # the trigger systemd ships only covers the users of systemd itself, so a package
-# that wants one asks for it here. This is what dh_installsysusers generates.
+# that wants one asks for it here. dh_installsysusers generates the same lines.
 if [ "$1" = configure ] && [ -x /usr/bin/systemd-sysusers ]; then
 	systemd-sysusers ${DPKG_ROOT:+--root="$DPKG_ROOT"} sdautologin.conf
 fi

@@ -40,16 +40,26 @@ Commands:
 
 Global option:
   --home=DIR          keep config.json and logs/ in DIR instead of next to the
-                      executable, which is what a service or a container uses to
-                      point them at a writable directory
+                      executable, so a service or a container can point them at
+                      a writable directory
   --no-log            keep the log on the console alone instead of also writing
-                      logs/app.log, which is what a machine with a small flash
-                      wants: its syslog already keeps what the program writes to
-                      the console, and the file would be the same text on the
-                      flash a second time
+                      logs/app.log. A machine with a small flash wants this: its
+                      syslog already keeps what the program writes to the
+                      console, and the file would be the same text on the flash
+                      a second time
 
 Options, for the commands that read the account:
-  --username=NAME     use this account instead of the configured one
+  --account=USER:PASSWORD[@SERVICE[+SERVICE...]]
+                      one entry of the login list, and the option may be
+                      repeated: the order they are given in is the order they are
+                      tried, and the first one that signs in is the one the
+                      session keeps. A service is a name such as zgyd, the @ of
+                      the portal's own spelling being optional; leaving the part
+                      after the password out means the campus network itself. The
+                      @ separates the password from the services, so a password
+                      that holds one has to be given with --username and
+                      --password instead.
+  --username=NAME     use this account, as the single entry of the list
   --password=SECRET   use this password instead of the configured one
   --isp=SUFFIX        service suffix such as @zgyd, an empty value for the
                       campus network itself
@@ -88,8 +98,8 @@ Files:
 `, app.Version)
 }
 
-// options are the values the command line may override, which is what makes the
-// program usable where nobody can answer the setup wizard.
+// options holds the values the command line may override, so a machine with no
+// one at the keyboard can be configured without the wizard or the settings page.
 type options struct {
 	// home is the directory that holds config.json and logs/, when it is not
 	// the one next to the executable.
@@ -97,6 +107,10 @@ type options struct {
 	username *string
 	password *string
 	isp      *string
+	// accounts are entries given whole, written as user:password@service, in the
+	// order they are to be tried. A provisioning script fills the login list by
+	// repeating the option.
+	accounts []string
 	// settings is the address to serve the settings page on, for the run
 	// command; nil leaves the page off.
 	settings *string
@@ -114,13 +128,13 @@ type options struct {
 }
 
 // knownOption reports whether arg is one of the options this program defines.
-// It is how a forgotten value is told apart from a value that merely starts with
-// a dash, such as a password.
+// This tells a forgotten value apart from a value that merely starts with a
+// dash, such as a password.
 func knownOption(arg string) bool {
 	name, _, _ := strings.Cut(arg, "=")
 	switch name {
-	case "--home", "--username", "--password", "--isp", "--settings", "--app",
-		"--save", "--json", "--no-log":
+	case "--home", "--username", "--password", "--isp", "--account", "--settings",
+		"--app", "--save", "--json", "--no-log":
 		return true
 	}
 	return false
@@ -131,7 +145,7 @@ func knownOption(arg string) bool {
 // case on a desktop.
 func takesValue(name string) bool {
 	switch name {
-	case "--home", "--username", "--password", "--isp", "--settings":
+	case "--home", "--username", "--password", "--isp", "--account", "--settings":
 		return true
 	}
 	return false
@@ -140,7 +154,7 @@ func takesValue(name string) bool {
 // knownWord reports whether arg is one of the arguments that start with a dash
 // without being an option this program reads: the shortcuts, and the flag the
 // config command takes. They are left in the argument list for the command to
-// pick up, and naming them is what tells a misspelled option apart from them.
+// pick up, so a misspelled option can be told apart from them.
 func knownWord(arg string) bool {
 	switch arg {
 	case "-h", "--help", "-help", "-v", "--version",
@@ -167,6 +181,8 @@ func (o *options) set(name, value string) bool {
 	case "--isp":
 		v := value
 		o.isp = &v
+	case "--account":
+		o.accounts = append(o.accounts, value)
 	case "--settings":
 		v := value
 		o.settings = &v
@@ -222,29 +238,98 @@ func (o options) given() bool {
 	return o.accountGiven() || o.noLog
 }
 
-// accountGiven reports whether one of the account options was used, which is when
-// the reminder about --save is worth printing: that reminder is about a secret
-// used for one run only, while --no-log is a switch whose whole point is to be
-// passed on every start.
+// accountGiven reports whether one of the account options was used. Only then is
+// the reminder about --save printed: that reminder is about a secret used for one
+// run only, while --no-log is a switch meant to be passed on every start.
 func (o options) accountGiven() bool {
-	return o.username != nil || o.password != nil || o.isp != nil
+	return o.username != nil || o.password != nil || o.isp != nil || len(o.accounts) > 0
 }
 
 // applyTo copies the overrides onto cfg. An option that was not given leaves the
 // configured value alone, so one secret can be passed without repeating the rest.
-func (o options) applyTo(cfg *config.Config) {
-	if o.username != nil {
-		cfg.Username = *o.username
+//
+// The account options describe the login list as a whole rather than adding to
+// it: a provisioning script names the accounts to use, in the order it names them.
+func (o options) applyTo(cfg *config.Config) error {
+	switch {
+	case len(o.accounts) > 0 && (o.username != nil || o.password != nil || o.isp != nil):
+		return fmt.Errorf("--account names the account and the service itself, so it cannot be combined with --username, --password or --isp")
+
+	case len(o.accounts) > 0:
+		list := make([]config.Account, 0, len(o.accounts))
+		for _, raw := range o.accounts {
+			entry, err := parseAccount(raw)
+			if err != nil {
+				return err
+			}
+			list = append(list, entry)
+		}
+		cfg.Accounts = list
+
+	case o.username != nil || o.password != nil || o.isp != nil:
+		// One account described field by field. What is not given is taken from
+		// the entry that is already there, so a password can be changed without
+		// repeating the account it belongs to.
+		var entry config.Account
+		if len(cfg.Accounts) > 0 {
+			entry = cfg.Accounts[0]
+		}
+		if o.username != nil {
+			entry.Username = *o.username
+		}
+		if o.password != nil {
+			entry.Password = *o.password
+		}
+		if o.isp != nil {
+			entry.ISPs = []string{*o.isp}
+		}
+		cfg.Accounts = []config.Account{entry}
 	}
-	if o.password != nil {
-		cfg.Password = *o.password
-	}
-	if o.isp != nil {
-		cfg.AccountSuffix = *o.isp
-	}
+
 	if o.noLog {
 		cfg.LogToFile = false
 	}
+	return nil
+}
+
+// parseAccount reads the one line form of an account,
+// user:password@service[+service...], for a script that sets up more than one
+// account.
+//
+// The @ always introduces the services, so an account with a password that holds
+// one has to be given with --username and --password instead. The services are
+// separated by +, the @ of the portal's own spelling in front of each being
+// optional, and an empty element is the campus network itself. Leaving the part
+// after the password out entirely means the campus network as well.
+//
+// A value with more than one @ cannot be read at all and is refused: it would be
+// a guess whether the last one starts a service or belongs to the password. The
+// value is never echoed back in an error, since it holds the password.
+func parseAccount(raw string) (config.Account, error) {
+	if strings.Count(raw, "@") > 1 {
+		return config.Account{}, fmt.Errorf("--account takes one @ at most, the one that introduces the services; a password holding another needs --username and --password")
+	}
+	credentials, services := raw, ""
+	if i := strings.Index(raw, "@"); i >= 0 {
+		credentials, services = raw[:i], raw[i+1:]
+	}
+	username, password, ok := strings.Cut(credentials, ":")
+	if !ok || strings.TrimSpace(username) == "" {
+		return config.Account{}, fmt.Errorf("--account is written as user:password@service, and this value is not")
+	}
+
+	entry := config.Account{Username: strings.TrimSpace(username), Password: password}
+	if services != "" {
+		for _, part := range strings.Split(services, "+") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				entry.ISPs = append(entry.ISPs, "")
+				continue
+			}
+			entry.ISPs = append(entry.ISPs, "@"+strings.TrimPrefix(part, "@"))
+		}
+	}
+	return entry, nil
 }
 
 // check reports an option that does not belong to the command that was asked
@@ -259,8 +344,8 @@ func (o options) check(command string) error {
 	case o.settings != nil && command != "run" && command != "daemon":
 		return fmt.Errorf("--settings belongs to the run command, %s does not serve a settings page", command)
 	case o.app != nil:
-		// The tray is the only mode with a window, and it is the one that is
-		// asked for by naming no command at all.
+		// The tray is the only mode with a window, and it is started by naming
+		// no command at all.
 		return fmt.Errorf("--app belongs to the tray mode, %s does not open a window", command)
 	case o.json && command != "status":
 		return fmt.Errorf("--json belongs to the status command, %s has nothing to report as JSON", command)
@@ -269,9 +354,8 @@ func (o options) check(command string) error {
 }
 
 // checkTray reports an option that needs a tray icon in a build that has none.
-// The tray is what opens a window of its own, so a build made for the machines
-// with no desktop session cannot honour --app, and saying so is better than
-// starting up and quietly ignoring it.
+// The tray opens a window of its own, so a build for machines with no desktop
+// session cannot honour --app. Refusing it is better than ignoring it after start.
 func checkTray(o options, hasTray bool) error {
 	if o.app != nil && !hasTray {
 		return fmt.Errorf("--app needs the tray, which this build does not have")
@@ -323,11 +407,14 @@ func loadForCLI(appDir string, opts options) (*config.Config, bool) {
 	}
 
 	if opts.given() {
-		opts.applyTo(cfg)
+		if err := opts.applyTo(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			return cfg, false
+		}
 		if opts.save {
-			// Save drops the password when it is not remembered, and the caller
-			// explicitly asked for these values to be written down.
-			if opts.password != nil {
+			// Save drops the passwords when they are not remembered, and the
+			// caller explicitly asked for these values to be written down.
+			if opts.password != nil || len(opts.accounts) > 0 {
 				cfg.RememberPassword = true
 			}
 			if err := cfg.Save(); err != nil {
@@ -357,9 +444,9 @@ func cmdRun(appDir string, opts options) int {
 		return 1
 	}
 	if !cfg.Configured() {
-		// A service has nobody to answer the setup wizard, and a config file
+		// A service has no one to answer the setup wizard, and a config file
 		// written from an empty prompt is worse than a clear failure.
-		fmt.Fprintln(os.Stderr, "no account configured: pass --username and --password, or run the config command first")
+		fmt.Fprintln(os.Stderr, "no account configured: pass --username and --password, or --account, or run the config command first")
 		return 1
 	}
 	if !platform.AcquireSingleInstance(false) {
@@ -390,7 +477,7 @@ func cmdRun(appDir string, opts options) int {
 	}
 
 	// A second copy is told where the page is, or that there is none, so the
-	// request does not go nowhere.
+	// request is answered rather than dropped in silence.
 	go platform.WaitForSettingsRequest(func() {
 		if settingsURL != "" {
 			logging.Log.Info("another copy asked for the settings page, it is at %s", settingsURL)
@@ -465,9 +552,9 @@ func newStatusReport(portalBaseURL string, st portal.Status) statusReport {
 	}
 }
 
-// statusState names what the check found, which is finer grained than the exit
-// code: a portal that cannot be reached and one that answers nothing useful are
-// both exit code 1, but they are a different story to tell.
+// statusState names what the check found, finer grained than the exit code: a
+// portal that cannot be reached and one that answers nothing useful are both
+// exit code 1, but they are a different story to tell.
 func statusState(st portal.Status) string {
 	switch {
 	case !st.Reachable:
@@ -481,7 +568,7 @@ func statusState(st portal.Status) string {
 	}
 }
 
-// statusExitCode is what a monitoring script reads: 0 online, 1 unknown or a
+// statusExitCode is the code a monitoring script reads: 0 online, 1 unknown or a
 // failure to ask the portal, 3 the portal says this client is not signed in.
 func statusExitCode(st portal.Status) int {
 	switch statusState(st) {
@@ -511,16 +598,19 @@ func cmdLogin(appDir string, opts options) int {
 	if !ok {
 		return 1
 	}
-	if !cfg.Configured() {
+	attempts := cfg.Attempts()
+	if len(attempts) == 0 {
 		fmt.Fprintln(os.Stderr, "no account configured, run: SDAutoLogin config")
 		return 1
 	}
-
-	test := app.New(cfg).TestLogin()
+	// A one shot test is about the first entry, the one the program tries first.
+	// The settings page can test any of them.
+	attempt := attempts[0]
+	test := app.New(cfg).TestLogin(attempt)
 	fmt.Printf("before       : online=%v ip=%s account=%s\n",
 		test.Before.Online, blank(test.Before.ClientIP), blank(test.Before.Account))
-	fmt.Printf("submitted    : %s (password %d chars)\n",
-		cfg.Account(), len(cfg.Password))
+	fmt.Printf("submitted    : %s (password %d chars, entry %d of %d)\n",
+		attempt.Entry(), len(attempt.Password), attempt.Index+1, len(cfg.Accounts))
 	fmt.Printf("success      : %v\n", test.Result.Success)
 	fmt.Printf("ret_code     : %s\n", blank(test.Result.RetCode))
 	fmt.Printf("message      : %s\n", test.Result.Message)

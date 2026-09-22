@@ -16,8 +16,8 @@ import (
 const maxLogSize = 4 << 20
 
 // The modes the log is made with. The log names the account and the addresses it
-// was signed in from, which is nobody else's business on a machine that several
-// people use, and it sits in a directory of its own for the same reason.
+// was signed in from, which is private on a machine that several people use, and
+// it sits in a directory of its own for the same reason.
 const (
 	logDirMode  = 0o700
 	logFileMode = 0o600
@@ -27,9 +27,9 @@ const (
 // to logs/app.log. DEBUG lines are only written when verbose mode is on, see
 // SetVerbose.
 //
-// The console copy goes to stderr rather than stdout so that what a command
-// prints on stdout is only its result, which is what lets a script read the
-// JSON of the status command without filtering the log out of it first.
+// The console copy goes to stderr rather than stdout, so a command's stdout
+// carries only its result and a script can read the JSON of the status command
+// without filtering the log out first.
 type Logger struct {
 	mu      sync.Mutex
 	dir     string
@@ -41,9 +41,9 @@ type Logger struct {
 var Log = &Logger{}
 
 // Init opens the log. dir is where app.log lives, and toFile false keeps the log
-// on the console alone, which is what a machine with a small flash wants: its
-// syslog already keeps whatever the program writes to stderr, and a rotating file
-// on top of that is the same text written to the flash twice.
+// on the console alone for a machine with a small flash: its syslog already keeps
+// whatever the program writes to stderr, and a rotating file on top of that is
+// the same text written to the flash twice.
 func (l *Logger) Init(dir string, toFile bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

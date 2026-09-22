@@ -55,7 +55,7 @@ include $(INCLUDE_DIR)/package.mk
 include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk
 
 # Go builds for some architectures and not others, and this is the list of the
-# ones it does, which is what DEPENDS is set to below.
+# ones it does; DEPENDS below is set to that list.
 define Package/sdautologin
   SECTION:=net
   CATEGORY:=Network

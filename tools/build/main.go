@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	// progName is what the program is called, which is the name of every file
-	// the build writes and of every package it makes.
+	// progName is the program name, and the name of every file the build writes
+	// and of every package it makes.
 	progName = "SDAutoLogin"
 	// mainPkg is the entry point package. Everything else is a library under
 	// internal/, so the build has to name it explicitly.
@@ -37,9 +37,9 @@ const (
 	// winresVersion is pinned so regenerating the resources is reproducible.
 	winresVersion = "github.com/tc-hib/go-winres@v0.3.3"
 
-	// notrayTag is the build tag of the builds that leave the tray out, which
-	// is the one every package is built from: there is no desktop session on a
-	// router, in a container or on a server to put an icon in.
+	// notrayTag is the build tag of the builds that leave the tray out. Every
+	// package is built from one: there is no desktop session on a router, in a
+	// container or on a server to put an icon in.
 	notrayTag = "notray"
 )
 
@@ -69,7 +69,7 @@ var tasks = map[string]task{
 	"clean":     {"remove the built executables, keeping settings and logs", taskClean},
 }
 
-// taskPackages is every format this repository publishes, which is what a release
+// taskPackages packs every format this repository publishes, which a release
 // needs. Each format builds the binaries it wants for itself, and the ones that
 // another format already built come out of the cache of the toolchain.
 //
@@ -174,8 +174,8 @@ func taskBuild(root string) error {
 
 func taskConsole(root string) error {
 	// Without -H=windowsgui the program keeps the console it was started from,
-	// which is what a script or a service wants. On the other systems the
-	// executable is a console program either way, so this is the same build.
+	// as a script or a service wants. On the other systems the executable is a
+	// console program either way, so this is the same build.
 	return buildFor(root, runtime.GOOS, runtime.GOARCH, appName(runtime.GOOS, "-console"), false, nil)
 }
 
@@ -185,8 +185,8 @@ type target struct {
 	// variant is how the file name spells the architecture, for the targets
 	// where GOARCH is not precise enough to be read on its own.
 	variant string
-	// extraEnv is what goes into the environment on top of GOOS and GOARCH, for
-	// the targets where GOARCH is not the whole story: arm does not say which
+	// extraEnv goes into the environment on top of GOOS and GOARCH, for the
+	// targets where GOARCH alone is not precise: arm does not say which
 	// instruction set it is for, and mips does not say whether the board has a
 	// floating point unit.
 	extraEnv []string
@@ -231,10 +231,9 @@ func buildTarget(root string, t target) error {
 // that a router or an embedded board has room for. The 64 bit builds come first
 // in each group, the small machine ones last.
 //
-// Every Linux build is made twice: the second one leaves the tray out, for the
-// machines that have no desktop session to put an icon in. A router never had a
-// use for one, and the tray is by far the largest thing the binary can do
-// without.
+// Every Linux build is made twice: the second leaves the tray out, for the
+// machines that have no desktop session to put an icon in. A router has no use
+// for one, and the tray is by far the largest thing the binary can do without.
 func targets() []target {
 	base := []target{
 		{goos: "windows", goarch: "amd64"},
@@ -244,10 +243,10 @@ func targets() []target {
 		{goos: "linux", goarch: "arm64"},
 		{goos: "linux", goarch: "386"},
 		{goos: "linux", goarch: "arm", variant: "armv7", extraEnv: []string{"GOARM=7"}},
-		// Most routers have no floating point unit, which is what softfloat is
-		// for, and both byte orders are here because the boards are: the
-		// Atheros targets (ath79, ar71xx) are big endian, the MediaTek ones
-		// (ramips, mt76x8) are little endian.
+		// Most routers have no floating point unit, which is why these are
+		// softfloat builds, and both byte orders are here because the boards
+		// are: the Atheros targets (ath79, ar71xx) are big endian, the MediaTek
+		// ones (ramips, mt76x8) are little endian.
 		{goos: "linux", goarch: "mips", variant: "mips-softfloat", extraEnv: []string{"GOMIPS=softfloat"}},
 		{goos: "linux", goarch: "mipsle", variant: "mipsle-softfloat", extraEnv: []string{"GOMIPS=softfloat"}},
 	}
@@ -312,8 +311,8 @@ func taskResources(root string) error {
 	// keeps it out of go.mod, which needs the module mode: the vendor directory
 	// cannot resolve a package that is not a dependency.
 	//
-	// One file per architecture, named rsrc_windows_<arch>.syso, which is also
-	// how the toolchain knows which one belongs to which build. Every Windows
+	// One file per architecture, named rsrc_windows_<arch>.syso; the toolchain
+	// reads that name to tell which one belongs to which build. Every Windows
 	// architecture that is built needs its own, or that build would be the one
 	// without an icon and version information.
 	env := []string{"GOFLAGS=-mod=mod"}
@@ -398,7 +397,7 @@ func quoteArgs(args []string) string {
 }
 
 // describe renders a path relative to the repository when it is inside it, plus
-// its size, which is the interesting part of a release build.
+// the size of the file.
 func describe(root, path string) string {
 	shown := path
 	if rel, err := filepath.Rel(root, path); err == nil {

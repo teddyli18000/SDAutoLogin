@@ -12,9 +12,9 @@
 # tools/build/pack_openwrt.go, and it is part of the name below on purpose.
 # Every file in a package carries a fixed timestamp, so a newer package cannot
 # be told from the one before it by time, and /tmp is not cleared by an upgrade
-# either. A name that changes with the version is what makes the new program
-# unpack itself instead of the copy of the old one being run for as long as the
-# router is up.
+# either. A name that changes with the version makes the new program unpack
+# itself instead of the copy of the old one being run for as long as the router
+# is up.
 version=@VERSION@
 
 # Both paths are written here and in the build task as well.

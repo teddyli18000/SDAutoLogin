@@ -109,20 +109,24 @@ func (a *AppState) Update(next *config.Config) error {
 // LoginTest captures a one shot login attempt, which both the settings page
 // and the "login" command report to the user.
 type LoginTest struct {
-	Before portal.Status
-	Result portal.LoginResult
-	After  portal.Status
+	// Attempt is the attempt that was submitted, so the report can name the
+	// account and the service type it went out with.
+	Attempt config.Attempt
+	Before  portal.Status
+	Result  portal.LoginResult
+	After   portal.Status
 }
 
-// TestLogin submits the configured credentials once. It reports what the
-// portal replied and never logs the session out.
-func (a *AppState) TestLogin() LoginTest {
+// TestLogin submits one attempt of the login list. It reports what the portal
+// replied and never logs the session out.
+func (a *AppState) TestLogin(attempt config.Attempt) LoginTest {
 	cfg := a.Config()
 	client := portal.NewClient(cfg)
 	before := client.QueryStatus()
 	return LoginTest{
-		Before: before,
-		Result: client.Login(before),
-		After:  client.QueryStatus(),
+		Attempt: attempt,
+		Before:  before,
+		Result:  client.Login(before, attempt),
+		After:   client.QueryStatus(),
 	}
 }

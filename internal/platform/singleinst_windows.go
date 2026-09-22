@@ -23,14 +23,14 @@ const (
 
 // instanceMutex and showSettingsEvent are held for the lifetime of the process.
 // The system closes both when it ends, which releases the name and destroys the
-// event once nobody can use it any more.
+// event once it can no longer be used.
 var (
 	instanceMutex     syscall.Handle
 	showSettingsEvent syscall.Handle
 
 	// instanceTaken remembers that this process already owns the name. Asking a
-	// second time would report the name as taken by somebody else, because the
-	// mutex we hold counts as an existing object.
+	// second time would report the name as taken, because the mutex we hold
+	// counts as an existing object.
 	instanceTaken bool
 )
 

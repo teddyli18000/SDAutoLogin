@@ -98,8 +98,8 @@ func debEntries(root string, t target, repo string) ([]pkgEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The changelog goes in compressed, which is how the documentation of a
-	// package is stored.
+	// The changelog goes in compressed, as a package's documentation is
+	// stored.
 	changelog, err := gzipFile(filepath.Join(root, "CHANGELOG.md"))
 	if err != nil {
 		return nil, err
@@ -117,9 +117,8 @@ func debEntries(root string, t target, repo string) ([]pkgEntry, error) {
 }
 
 // debControl is the control file of a deb, the fields dpkg and the archive tools
-// show. There is no Depends line on purpose: the program is statically linked,
-// so it needs nothing from the system beyond the systemd that runs it, which is
-// what the package is for.
+// show. There is no Depends line on purpose: the program is statically linked, so
+// it needs nothing from the system beyond the systemd the package is built for.
 func debControl(version, arch, repo string, entries []pkgEntry) string {
 	return fmt.Sprintf(`Package: %s
 Version: %s-%s
@@ -136,7 +135,7 @@ Description: %s
  .
  The service runs as the %s system user, with its settings and its log in
  /var/lib/%s. An account has to be written down once before the service stays
- up, which is what /usr/share/doc/%s/README.Debian is about.
+ up; see /usr/share/doc/%s/README.Debian.
 `, pkgName, version, pkgRelease, arch, pkgMaintainer, installedSize(entries),
 		pkgSection, repo, pkgSummary, pkgName, pkgName, pkgName)
 }
@@ -149,8 +148,8 @@ func installedSize(entries []pkgEntry) int64 {
 
 // debianCopyright renders the copyright file Debian wants from the licence the
 // repository carries. In that format the licence text is indented by one space,
-// which is what marks it as text rather than as the next field of the header,
-// and an empty line inside it is a single dot.
+// which marks it as text rather than as the next field of the header, and an
+// empty line inside it is a single dot.
 func debianCopyright(repo, license string) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, `Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/

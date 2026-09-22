@@ -28,8 +28,8 @@ const (
 // here. A process that was handed handles, for a pipe or a redirected file, is
 // left alone so its output keeps going where the caller put it.
 //
-// The caller opens the log first, so the warning below reaches the log file even
-// though the console is exactly what is missing.
+// The caller opens the log first, so the warning below still reaches the log
+// file when the console itself is missing.
 func attachConsole() {
 	if validStdHandle(stdOutputHandle) || validStdHandle(stdErrorHandle) {
 		return

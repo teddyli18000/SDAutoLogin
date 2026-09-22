@@ -41,8 +41,8 @@ dependency, so it can be copied to another machine and started by double click.
 - Balloon tip when the session was signed back in, or when signing in failed.
 - Run at startup, one switch per platform (registry, desktop entry or
   LaunchAgent).
-- Detailed per-check logging with rotation, which is what makes a dropped
-  session diagnosable afterwards. The password is never written to the log.
+- Detailed per-check logging with rotation, so a dropped session can be
+  diagnosed afterwards. The password is never written to the log.
 
 ## How it works
 
@@ -50,16 +50,16 @@ The program talks to the same endpoints the portal's own login page uses:
 
 | Step | Request | Purpose |
 | --- | --- | --- |
-| 1 | `GET /` | read `v4ip` from the portal home page, which is the IP the portal sees (after NAT, not the local one) |
+| 1 | `GET /` | read `v4ip` from the portal home page, the IP the portal sees (after NAT, not the local one) |
 | 2 | `GET ?c=Portal&a=online_list` | ask whether that IP is authenticated. This endpoint answers from inside the campus network even while the session is down |
 | 3 | `GET ?c=Portal&a=login` | submit `user_account` and `user_password` with `login_method=1` |
 
 A login is only attempted when step 2 answered that the portal does *not*
 consider the client online. If the portal cannot be reached, or the reply is
-not usable, the state is treated as unknown and no login is attempted, which
-avoids hammering the portal with pointless requests during a network outage.
-After a login the program asks again, so "accepted but still offline" is
-reported as a failure instead of a success.
+not usable, the state is treated as unknown and no login is attempted, so an
+outage does not turn into a stream of pointless requests. After a login the
+program asks again, so "accepted but still offline" is reported as a failure
+instead of a success.
 
 Optionally the program also probes a few public addresses. That result only
 feeds the status display; the decision to sign in is always based on the
@@ -82,7 +82,7 @@ build.cmd
 ./build.sh
 ```
 
-The same tasks are available directly, which is what the other targets need:
+The same tasks can be called directly, as the other targets do:
 
 ```sh
 go run ./tools/build            # list the tasks
@@ -107,7 +107,7 @@ the deb and the ipk, `rpm`, and `bsdtar` for the Arch package. What it cannot
 find it names and counts rather than passing over, and a run that could not check
 a single package fails.
 
-CMake drives the same tasks, if you prefer that:
+CMake drives the same tasks:
 
 ```sh
 cmake -S . -B build -G Ninja
@@ -122,9 +122,9 @@ cmake --install build --prefix /usr/local
 
 CMake compiles nothing itself: the Go toolchain is the compiler, and the task
 runner owns the flags, so the three ways in cannot drift apart. The project
-declares no languages, which means no C compiler is needed; on Windows the
-generator must therefore not depend on a C toolchain either, and Ninja is a good
-choice for that (a single executable, no installer).
+declares no languages, so no C compiler is needed; on Windows the generator must
+therefore not depend on a C toolchain either, and Ninja is a suitable choice (a
+single executable, no installer).
 
 Cross compiling covers Windows and Linux, for `amd64`, `arm64`, `386`, `armv7`,
 `mips` and `mipsle`. The last three put in the file name what `GOARCH` alone does
@@ -140,8 +140,8 @@ Every Linux target is built twice. The second file has `-notray` in its name: it
 leaves the tray out, and with it the D-Bus client and everything else only a tray
 needs, which makes it about a fifth smaller (10.0 MiB to 7.7 MiB for `mipsle`).
 That is the one for a router, where there is no desktop session to put an icon in.
-A start with `--app` is refused there rather than ignored, since the tray is what
-opens a window of its own. The build that keeps the tray is the default one, for a
+A start with `--app` is refused there rather than ignored, since the tray opens a
+window of its own. The build that keeps the tray is the default one, for a
 desktop.
 
 macOS is the exception to all of this: its tray needs cgo, so that build has to be
@@ -149,8 +149,8 @@ made on macOS with the Xcode command line tools installed (`xcode-select --insta
 
 The Windows executable carries an icon, version information and a DPI aware
 application manifest, embedded from `winres/rsrc_windows_<arch>.syso`, one file per
-architecture (`amd64`, `arm64` and `386`). That file name is also how the toolchain
-knows which one belongs to which build. The icon and those files are all generated,
+architecture (`amd64`, `arm64` and `386`). The toolchain uses that file name to
+tell which one belongs to which build. The icon and those files are all generated,
 from the drawing code and from `winres/winres.json`; the `icon` and `resources`
 tasks above regenerate them. All of them are written inside `winres/`, next to the
 files they are made from, so the repository root holds sources only. They are
@@ -188,17 +188,18 @@ service shuts itself down and releases the port; it starts again the next time
 the page is opened.
 
 On a machine with no tray, `run --settings=ADDR` serves the same page on an
-address you choose. That endpoint starts at once and stays up until the program
+address that was chosen. That endpoint starts at once and stays up until the program
 stops, and when ADDR is not a loopback address the page is reachable from the
 network with the token in its address as the only protection, so keep it on a
 trusted network or behind a tunnel.
 
 **General**
 
-- Account: student id, user name or full mail address.
-- Password, and whether it is written to the config file.
-- Service: campus network, China Mobile (`@zgyd`), China Unicom (`@cucc`),
-  China Telecom (`@ctc`).
+- The login list: one entry per account, each with the service types it may be
+  used with, which are the campus network, China Mobile (`@zgyd`), China Unicom
+  (`@cucc`) and China Telecom (`@ctc`). The entries are dragged, or moved with
+  the arrow keys, into the order they are to be tried in; see the section below.
+- Whether the passwords are written to the config file.
 - Interface language.
 - Sign in automatically after a disconnection.
 - Run at startup.
@@ -207,13 +208,47 @@ trusted network or behind a tunnel.
 **Advanced**
 
 - Portal home URL and authentication API URL.
-- Account prefix and suffix, which are combined into the submitted account.
+- Account prefix, which is combined with the account and the service type into
+  the submitted account.
 - Request timeout and the `jsVersion` parameter.
 - Verbose logging.
 
 Changing something marks the page as unsaved; **Save** writes `config.json`,
 restarts the check loop and immediately runs one check so the effect is visible
-right away.
+right away. The test button on an entry waits for the settings to be saved,
+since the program can only be asked about the list it is running with.
+
+## Accounts, and the order they are tried in
+
+The portal allows one session per client address, so several accounts can never
+be online together. The list covers the case where the first account is the one
+that should be used but does not work any more: it is out of credit, its password
+was changed, it was closed. The program then walks the list and signs in with the
+next entry that does work.
+
+```
+1  s1234567   China Mobile, then China Unicom
+2  s7654321   campus network
+3  s0000003   China Telecom                      (disabled)
+```
+
+1. The entries are tried from the top down, and an entry is submitted once per
+   service type it names, in the order it names them: the third line above would
+   try `s1234567@zgyd` and then `s1234567@cucc` before moving on to `s7654321`.
+2. An answer that says the account itself is the problem, a wrong password or a
+   failed authentication, takes that entry out of the running for ten minutes and
+   moves on to the next one. Ten minutes is long enough not to hammer the portal
+   with a password that is wrong, and short enough to pick up a fix; a saved
+   configuration or a manual check also clears it at once.
+3. An answer about the portal rather than the account, a busy portal, a request
+   that timed out, an unreadable reply, keeps the entry and ends the round there,
+   since walking the list on a busy portal would mark every account as broken in
+   one go.
+4. The page marks the entry the session is on, and every entry that is being
+   left alone with the reason and the time left.
+
+A disabled entry takes no part at all, so an entry can be taken out of the
+running without deleting its password.
 
 ## Command line
 
@@ -234,7 +269,10 @@ help           print the usage text
                    executable, for a service or a container
 --no-log           keep the log on the console alone, with no logs/app.log, for
                    a machine with a small flash
---username=NAME    use this account instead of the configured one
+--account=USER:PASSWORD[@SERVICE[+SERVICE...]]
+                   one entry of the login list; repeat the option to write
+                   several, in the order they are to be tried
+--username=NAME    use this account, as the single entry of the list
 --password=SECRET  use this password instead of the configured one
 --isp=SUFFIX       service suffix such as @zgyd, empty for the campus network
 --save             write what was given here into config.json as well
@@ -248,12 +286,27 @@ help           print the usage text
 An option can also be written as `--name value`, but the form above is the one to
 use when the value holds a character the shell would act on, such as the `@` of a
 service suffix. `--app` is the exception: its address is optional and has to be
-written with the `=`, so the bare `--app` is how a desktop starts.
+written with the `=`, so a desktop starts with the bare `--app`.
 
 The options are read on every run and applied to that run only, so a container or
 a service without a terminal can be provisioned without the setup wizard; add
 `--save` to write them to `config.json` as well. `run` reports a missing account
 and exits rather than asking for it, since a service has nobody to ask.
+
+The account options describe the list as a whole rather than adding to it, as a
+script expects:
+
+```sh
+# one account, for a service or a container
+SDAutoLogin run --account=s1234567:SECRET@zgyd --save
+
+# several, in the order they are to be tried; an entry may name more than one
+# service type, and the @ introduces them
+SDAutoLogin run --account=s1234567:SECRET@zgyd+cucc --account=s7654321:OTHER --save
+```
+
+A password that holds an `@` cannot be written in that form, since the `@`
+introduces the service types; `--username` and `--password` take it.
 
 The same executable serves both modes: started without a command it puts the
 tray icon up and keeps running, started with one it does that one thing and
@@ -264,8 +317,7 @@ it in a browser window with no address bar, no tabs and no menus, so it looks
 like an application of its own. Only the Chromium family can do that, so Chrome,
 Edge, Chromium or Brave is started with the window and the rest of its chrome
 left out. When none of them is installed, or the one that was found refuses to
-start, the page goes to the default browser instead and the log says so; a tab is
-worse than a window of its own, but better than nothing happening at all.
+start, the page goes to the default browser instead and the log says so.
 
 On Windows the file is linked as a GUI program, so a double click does not open
 a console window. Started from a terminal it attaches to that terminal, so the
@@ -303,13 +355,15 @@ first run.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `username` | | student id, user name or mail address |
-| `password` | | password, written only when `rememberPassword` is true |
-| `rememberPassword` | `true` | keep the password in the file |
+| `accounts` | `[]` | the login list, in the order the entries are tried in |
+| `accounts[].username` | | student id, user name or mail address |
+| `accounts[].password` | | password, written only when `rememberPassword` is true |
+| `accounts[].disabled` | absent | present and true takes the entry out of the running |
+| `accounts[].isps` | `[""]` | service suffixes such as `@zgyd`, in the order they are tried |
+| `rememberPassword` | `true` | keep the passwords in the file |
 | `portalBaseUrl` | `http://10.9.1.3/` | portal home page, read for the client IP |
 | `eportalUrl` | `http://10.9.1.3:801/eportal/` | Dr.COM eportal root |
 | `accountPrefix` | `,0,` | prefix the portal page uses for a browser login |
-| `accountSuffix` | | ISP suffix such as `@zgyd` |
 | `checkIntervalSeconds` | `15` | how often the session is checked, minimum 5 |
 | `httpTimeoutSeconds` | `6` | request timeout, minimum 2 |
 | `autoLogin` | `true` | sign back in when the session is gone |
@@ -319,6 +373,22 @@ first run.
 | `probeUrls` | see below | addresses used for the reachability probe |
 | `jsVersion` | `3.3.3` | value the portal page sends |
 | `language` | `auto` | `auto`, `zh` or `en` |
+
+```json
+{
+  "accounts": [
+    { "username": "s1234567", "password": "SECRET", "isps": ["@zgyd", "@cucc"] },
+    { "username": "s7654321", "password": "OTHER", "isps": [""] },
+    { "username": "s0000003", "password": "SECRET", "disabled": true, "isps": ["@ctc"] }
+  ],
+  "accountPrefix": ",0,",
+  "checkIntervalSeconds": 15
+}
+```
+
+A file written by an earlier version, with a single `username`, `password` and
+`accountSuffix`, is read as one entry of the list and saved again in the new
+shape, so nothing has to be done by hand.
 
 Default probe addresses: `http://connect.rom.miui.com/generate_204`,
 `http://www.baidu.com`, `http://www.msftconnecttest.com/connecttest.txt`.
@@ -335,12 +405,12 @@ Autostart entries: the registry key
 - `config.json` - settings, written readable by its owner alone
 - `logs/app.log` - log, in a directory of its own, both readable by their owner
   alone, and rotated to `app.log.1` when it exceeds 4 MiB. `--no-log` and the
-  `logToFile` setting leave it out, which is what a machine with a small flash,
-  such as a router, does: the same lines go to the console either way.
+  `logToFile` setting leave it out, as a machine with a small flash, such as a
+  router, does: the same lines go to the console either way.
 
 Both live next to the executable by default, so a build in `dist/` keeps its
 settings and log there, and moving the executable means moving `config.json` with
-it. `--home=DIR` puts them in DIR instead, which is what a service and the
+it. `--home=DIR` puts them in DIR instead, which a service and the
 container below use so that the executable can stay on a read-only `/usr`.
 
 ## Deployment
@@ -354,7 +424,7 @@ with `--settings`.
 ### Packages
 
 `go run ./tools/build packages` writes a package for every distribution this
-program is worth installing on:
+program targets:
 
 | Distribution | Package | Installed with |
 | --- | --- | --- |
@@ -378,17 +448,17 @@ needs nothing at all. The Arch package is the exception, because Go has no zstd
 or xz writer: it is packed with `zstd` when that is installed, and with `xz` or
 `gzip` when it is not, and the task says which of them it used.
 
-Nothing is signed. That is fine for a local install — `dpkg -i`, `rpm -i` and
+Nothing is signed. That is fine for a local install: `dpkg -i`, `rpm -i` and
 `pacman -U` all take a file that is not signed, pacman only complaining when its
-configuration asks for signatures and `LocalFileSigLevel` is not `Optional` — but
-a repository of its own would need a key, and a key is not something a build task
+configuration asks for signatures and `LocalFileSigLevel` is not `Optional`. A
+repository of its own would need a key, and a key is not something a build task
 can invent. What the task writes instead is `SHA256SUMS` next to the packages,
-one line per file in the spelling of the `sha256sum` tool, so that whoever
-downloaded a release can check what they got.
+one line per file in the spelling of the `sha256sum` tool, so that a release that
+was downloaded can be checked against it.
 
 `go run ./tools/build verify` reads every package back with the tool that
-installs it — `dpkg-deb` for the deb and the ipk, `rpm -K` and `rpm -qpl` for the
-rpm, `bsdtar` and the listing inside the package for the Arch one — compares the
+installs it, `dpkg-deb` for the deb and the ipk, `rpm -K` and `rpm -qpl` for the
+rpm, `bsdtar` and the listing inside the package for the Arch one, compares the
 Windows archives with the builds they were made from, and checks that the Scoop
 and winget manifests carry the digest of the archive that is there. It then packs
 everything a second time and fails if a single byte came out differently, since a
@@ -399,11 +469,11 @@ together with `go vet`, `go test` and a `gofmt` check, so a package that would
 not install is caught before it is published rather than after.
 
 Pushing a tag publishes the release: the same run creates it and attaches the
-packages and `SHA256SUMS` to it, which is what the two manifests point at. The
-tag has to be `v` followed by the version in the sources — `v1.0.0` for 1.0.0 —
-and the step refuses to publish when the two disagree, since the manifests would
-then name files that are not there. A release that already exists is taken as it
-is, so a tag pushed twice does not fail the run.
+packages and `SHA256SUMS` to it, which the two manifests point at. The tag has to
+be `v` followed by the version in the sources, `v1.0.0` for 1.0.0, and the step
+refuses to publish when the two disagree, since the manifests would then name
+files that are not there. A release that already exists is taken as it is, so a
+tag pushed twice does not fail the run.
 
 ### Debian and Ubuntu
 
@@ -415,8 +485,8 @@ sudo systemctl restart sdautologin
 ```
 
 The package creates the `sdautologin` user, enables the service and starts it;
-without an account it stops after a few tries, which is what the postinst says
-when it finds no `config.json` yet. `/usr/share/doc/sdautologin/README.Debian`
+without an account it stops after a few tries, as the postinst says when it finds
+no `config.json` yet. `/usr/share/doc/sdautologin/README.Debian`
 has the same steps on the machine. Removing the package leaves the settings and
 the log where they are, and so does purging it: the account in them is not the
 package's to throw away.
@@ -450,14 +520,14 @@ every file against the listing the package carries.
 
 The archive holds the program, the readme and the licence, and nothing else:
 there is no installer, because there is nothing to install. Unpack it where it is
-to stay and start the program; it writes its settings next to itself, which is
-also why the folder is the thing to keep.
+to stay and start the program; it writes its settings next to itself, so that
+folder has to be kept.
 
 `dist/packages/manifests/` holds what the package managers that can install such
 an archive want, `scoop/sdautologin.json` and the three files of the winget
 manifest. Both name the archives of a release as their download, at
-`<project address>/releases/download/v<version>/`, which is where Gitea, the host
-this project is published on, serves the attachments of a release; change
+`<project address>/releases/download/v<version>/`, where Gitea, the host this
+project is published on, serves the attachments of a release; change
 `releaseURL` in `tools/build/pack_win.go` when releases move elsewhere, and
 both follow. The winget command line checks them
 (`winget validate --manifest dist/packages/manifests/winget`), and the Scoop one
@@ -467,8 +537,8 @@ declares the settings and the log as persistent, so an update keeps the account.
 
 Two ready made units are in [packaging/systemd](packaging/systemd), one for a
 system service and one for `systemctl --user`; the user unit opens with its own
-installation steps. The system one is the file the packages install, so doing it
-by hand is doing what they do, only by hand:
+installation steps. The system one is the file the packages install, so the steps
+below are the ones it performs:
 
 ```sh
 install -m 0755 dist/SDAutoLogin-linux-amd64 /usr/bin/SDAutoLogin
@@ -510,8 +580,7 @@ docker run --rm -v sdautologin:/data sdautologin \
 
 `--home=/data` is part of the entry point, so a one-off command such as `status`
 reads the same settings as the service. The container is marked unhealthy when
-`status` reports the session is not up, which is the one thing worth noticing
-about it.
+`status` reports the session is not up.
 
 ### OpenWrt
 
@@ -526,14 +595,13 @@ A router has no systemd, so this is the odd one out among the packages: it
 installs a procd init script at `/etc/init.d/sdautologin` and a UCI configuration
 at `/etc/config/sdautologin`.
 
-Flash is what a router has least of, so the program is installed compressed as
+A router has least flash, so the program is installed compressed as
 `/usr/lib/sdautologin/SDAutoLogin.gz`, and `/usr/bin/SDAutoLogin` is a short
 script that unpacks it into `/tmp` on the first start and runs it from there.
-That is 2.7 MiB of flash instead of 7.7, and 7.7 MiB of memory while it runs,
-which is the easier of the two to spare. The copy in `/tmp` is unpacked once per
-boot and once per upgrade, and the name it is unpacked to carries the version, so
-a new package unpacks its own program rather than running the one the package
-before it left behind.
+That is 2.7 MiB of flash instead of 7.7, against 7.7 MiB of memory while it runs.
+The copy in `/tmp` is unpacked once per boot and once per upgrade, and the name it
+is unpacked to carries the version, so a new package unpacks its own program
+rather than running the one the package before it left behind.
 
 ```sh
 go run ./tools/build openwrt
@@ -553,7 +621,7 @@ uci commit sdautologin
 ```
 
 An option that is left empty is not passed on, and then `config.json` decides,
-which is what the settings page writes. That page can be turned on for a router
+which the settings page writes. That page can be turned on for a router
 with no display, and reached from the network it serves:
 
 ```sh
@@ -620,8 +688,7 @@ log is readable by anyone.
   the log names the account as well: `0600` for the two files, `0700` for the
   directory. A file an earlier version left readable by everyone is tightened the
   next time it is written. The systemd units set `UMask=0077` and the system
-  service keeps its state directory to `0700`, which is the same statement made
-  once more.
+  service keeps its state directory to `0700` as well.
 - The program never calls the logout endpoint, so quitting cannot leave the
   machine offline.
 
@@ -629,7 +696,7 @@ log is readable by anyone.
 
 The code follows the usual Go layout: `cmd/` holds the executable, `internal/`
 holds the packages it is built from. Nothing outside the module can import them,
-which is what keeps the public surface at the command line and the settings page.
+so the public surface is the command line and the settings page.
 
 | Path | Content |
 | --- | --- |

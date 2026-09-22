@@ -1,7 +1,11 @@
 package app
 
 import (
+	"bytes"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,7 +23,7 @@ func (a fakeAddr) String() string  { return a.s }
 func startedServer(t *testing.T, addr string) string {
 	t.Helper()
 
-	state := New(&config.Config{Username: "s1234567", Password: "p@ss"})
+	state := New(&config.Config{Accounts: []config.Account{{Username: "s1234567", Password: "p@ss"}}})
 	server := NewServer(state, addr, nil)
 	t.Cleanup(server.Stop)
 
@@ -84,6 +88,65 @@ func TestURLForPicksAnAddressABrowserCanUse(t *testing.T) {
 		if got := urlFor(fakeAddr{c.bound}, "tok"); got != c.want {
 			t.Errorf("urlFor(%q) = %q, want %q", c.bound, got, c.want)
 		}
+	}
+}
+
+// TestARefusedSaveLeavesTheRunningConfigAlone covers a request that is not
+// accepted: the page posts the whole configuration back, so the running one has
+// to come out of it untouched. Otherwise a password that was typed wrong would
+// take the session down at the same moment the page says the save was refused.
+func TestARefusedSaveLeavesTheRunningConfigAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	// A file in the shape the version with one account wrote, so the test also
+	// covers the upgrade of an installation that is already there.
+	older := `{"username":"s1234567","password":"topsecret","accountSuffix":"@zgyd",` +
+		`"portalBaseUrl":"http://10.9.1.3/","eportalUrl":"http://10.9.1.3:801/eportal/",` +
+		`"accountPrefix":",0,","checkIntervalSeconds":15,"httpTimeoutSeconds":6}`
+	if err := os.WriteFile(path, []byte(older), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	state := New(cfg)
+	server := NewServer(state, "", nil)
+	t.Cleanup(server.Stop)
+	if _, err := server.URL(); err != nil {
+		t.Fatalf("URL: %v", err)
+	}
+
+	// The empty password is the only thing wrong with this request.
+	body := `{"accounts":[{"username":"s1234567","password":"","isps":["@cucc"]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(body)))
+	req.Header.Set("X-Auth-Token", server.token)
+	rec := httptest.NewRecorder()
+	server.handleConfig(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "err.passwordRequired") {
+		t.Errorf("the reply does not name the password: %s", rec.Body.String())
+	}
+
+	live := state.Config().Accounts
+	if len(live) != 1 {
+		t.Fatalf("Accounts = %+v, want the one entry of the file", live)
+	}
+	if live[0].Password != "topsecret" {
+		t.Errorf("the running config was left with password %q", live[0].Password)
+	}
+	if len(live[0].ISPs) != 1 || live[0].ISPs[0] != "@zgyd" {
+		t.Errorf("the running config was left with isps %v", live[0].ISPs)
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stored) != older {
+		t.Errorf("the file was written by a request that was refused:\n%s", stored)
 	}
 }
 

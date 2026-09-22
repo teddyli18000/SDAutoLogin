@@ -1,6 +1,6 @@
 // Package i18n holds every user-visible string and the language selection. The
-// wording is the single source of truth for both the tray and the settings page:
-// the settings page is served the same table as JSON, so the two cannot drift.
+// settings page is served the same table as JSON, so the tray and the page
+// cannot disagree.
 package i18n
 
 import (
@@ -11,7 +11,7 @@ import (
 )
 
 // Lang is the language of the user interface. Log lines and code comments stay
-// English on purpose, so that pasted logs are readable by anyone.
+// English so pasted logs stay readable.
 type Lang string
 
 const (
@@ -26,9 +26,8 @@ type text struct {
 	en string
 }
 
-// uiText is the single source of truth for interface wording. It is also
-// served to the settings page, so the web UI and the tray never drift apart.
-// Placeholders use {0}, {1} and are substituted by both Go and JavaScript.
+// uiText holds every interface string. Placeholders use {0}, {1} and are
+// substituted by both Go and JavaScript.
 var uiText = map[string]text{
 	"app.name": {"校园网自动登录", "Campus Auto Login"},
 

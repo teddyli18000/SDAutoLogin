@@ -55,18 +55,26 @@ func runSetupWizard(cfg *config.Config) {
 	}
 	i18n.SetLang(i18n.Lang(cfg.Language))
 
-	cfg.Username = prompt(in, "account (student id / name / mail)", cfg.Username)
-	cfg.Password = prompt(in, "password", "")
+	// The wizard writes one account, enough for a machine with no display and no
+	// browser to get going. More of them, and the order they are tried in, are
+	// set from the settings page or with a repeated --account.
+	entry := config.Account{}
+	if len(cfg.Accounts) > 0 {
+		entry = cfg.Accounts[0]
+	}
+	entry.Username = prompt(in, "account (student id / name / mail)", entry.Username)
+	entry.Password = prompt(in, "password", "")
 
-	fmt.Println("service type:")
+	fmt.Println("service type (further ones, and their order, are set in the settings page):")
 	for i, op := range config.Operators {
 		fmt.Printf("  %d) %s\n", i+1, op.Name)
 	}
 	if choice := prompt(in, "service type", "1"); choice != "" {
 		if n, err := strconv.Atoi(choice); err == nil && n >= 1 && n <= len(config.Operators) {
-			cfg.AccountSuffix = config.Operators[n-1].Suffix
+			entry.ISPs = []string{config.Operators[n-1].Suffix}
 		}
 	}
+	cfg.Accounts = []config.Account{entry}
 	if v := prompt(in, "check interval in seconds", strconv.Itoa(cfg.CheckIntervalSeconds)); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 5 {
 			cfg.CheckIntervalSeconds = n

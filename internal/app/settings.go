@@ -85,7 +85,7 @@ func (s *Server) URL() (string, error) {
 
 	if onDemand {
 		// The tray opens the page when it is wanted, so the port is released
-		// again once nobody has looked at it for a while.
+		// again once it has gone unused for a while.
 		go s.reapWhenIdle()
 	} else {
 		if host, _, err := net.SplitHostPort(listener.Addr().String()); err == nil && !isLoopback(host) {
@@ -127,7 +127,7 @@ func urlFor(addr net.Addr, token string) string {
 // hostForURL picks the host to put in that address. A listener on every
 // interface has no useful host of its own, so the loopback address is used; an
 // operator reaching the page from elsewhere replaces it with the address of this
-// machine, which is what the log line around it is for.
+// machine, and the log line around the page says so.
 func hostForURL(host string) string {
 	switch host {
 	case "", "0.0.0.0", "::":
@@ -184,8 +184,8 @@ func (s *Server) Stop() {
 	}
 }
 
-// reapWhenIdle releases the port when nobody has looked at the page for a
-// while, so the process does not keep a socket and a UI thread around forever.
+// reapWhenIdle releases the port once the page has gone unused for a while, so
+// the process does not keep a socket and a UI thread around forever.
 func (s *Server) reapWhenIdle() {
 	for {
 		time.Sleep(time.Minute)
@@ -302,8 +302,11 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	next := *s.state.Config()
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&next); err != nil {
+	// The request carries the whole configuration back, so it is decoded onto a
+	// clone: a request that is refused below must not have written anything into
+	// the configuration the program is running with.
+	next := s.state.Config().Clone()
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(next); err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{
 			"ok":     false,
 			"errors": map[string]string{"_": "err.badRequest"},
@@ -315,7 +318,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next.ProbeURLs = config.CompactProbes(next.ProbeURLs)
-	if err := s.state.Update(&next); err != nil {
+	if err := s.state.Update(next); err != nil {
 		logging.Log.Error("saving settings from the page: %v", err)
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{
 			"ok":     false,
@@ -340,6 +343,9 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Action string `json:"action"`
 		Value  bool   `json:"value"`
+		// Index names the entry of the login list an action is about, used by
+		// "test this account".
+		Index int `json:"index"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "err.badRequest"})
@@ -353,10 +359,17 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": true})
 
 	case "testLogin":
-		logging.Log.Info("login self test requested from the settings page")
-		test := s.state.TestLogin()
+		attempt, ok := s.attemptAt(req.Index)
+		if !ok {
+			writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "err.noUsableEntry"})
+			return
+		}
+		logging.Log.Info("login self test requested from the settings page: %s (entry %d)",
+			attempt.Entry(), attempt.Index+1)
+		test := s.state.TestLogin(attempt)
 		writeJSON(w, map[string]any{
 			"ok":     true,
+			"index":  attempt.Index,
 			"before": statusPayload(snapshotFromStatus(test.Before)),
 			"result": test.Result,
 			"after":  statusPayload(snapshotFromStatus(test.After)),
@@ -399,6 +412,18 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "err.unknownAction"})
 	}
+}
+
+// attemptAt is the first attempt of the entry at index. An entry that is
+// disabled or has no password is not one that can be submitted, and saying so is
+// better than sending whatever happens to be in it.
+func (s *Server) attemptAt(index int) (config.Attempt, bool) {
+	for _, a := range s.state.Config().Attempts() {
+		if a.Index == index {
+			return a, true
+		}
+	}
+	return config.Attempt{}, false
 }
 
 // tailLog returns the last n lines of the log file, oldest first.

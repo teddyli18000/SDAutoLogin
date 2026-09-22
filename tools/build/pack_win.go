@@ -2,9 +2,9 @@
 // wherever they land, and the manifests that let Scoop and winget install one.
 //
 // There is no installer here on purpose. The program is a single file that needs
-// nothing else, so an archive is what a desktop wants, and both of those package
-// managers can install from an archive; an .msi would need a toolchain of its own
-// to build, and would install the same one file.
+// nothing else, so an archive serves a desktop, and both of those package managers
+// can install one; an .msi would need a toolchain of its own to build, and would
+// install the same one file.
 
 package main
 
@@ -38,8 +38,8 @@ type windowsBuild struct {
 	target
 	// archive is the file name of the zip in the release.
 	archive string
-	// digest is the SHA-256 of that zip, in upper case, which is how winget
-	// writes it and how Scoop accepts it.
+	// digest is the SHA-256 of that zip, in upper case, as winget writes it and
+	// Scoop accepts it.
 	digest string
 	// scoop and winget are what the two managers call this architecture.
 	scoop, winget string
@@ -86,7 +86,7 @@ func taskWindows(root string) error {
 
 // windowsZip is the archive of one Windows build: the program, the licence and
 // the readme, all at the top of the archive, so that unpacking it is the whole
-// installation and so that a manifest can name the program directly.
+// installation and a manifest can name the program directly.
 func windowsZip(root string, t target) ([]byte, error) {
 	exe, err := readBinary(filepath.Join(root, distDir, t.name()))
 	if err != nil {
@@ -125,11 +125,10 @@ func windowsZip(root string, t target) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// releaseURL is where the archive of a release is published. It is the one thing
-// a manifest needs that cannot be worked out from the build, so it is derived
-// here from the address the program carries and the layout the release host uses:
-// this project is published on Gitea, which serves the attachment of a release
-// as
+// releaseURL is where the archive of a release is published. A manifest needs an
+// address that cannot be worked out from the build, so it is derived here from the
+// address the program carries and the layout the release host uses: this project
+// is published on Gitea, which serves the attachment of a release as
 //
 //	<address>/releases/download/<tag>/<file>
 //
@@ -155,8 +154,8 @@ type scoopManifest struct {
 	Homepage     string               `json:"homepage"`
 	License      string               `json:"license"`
 	Architecture map[string]scoopArch `json:"architecture"`
-	// Bin puts the program on the path, which is what its command line mode is
-	// for, and the shortcut is what a desktop uses.
+	// Bin puts the program on the path, for its command line mode, and the
+	// shortcut is for a desktop.
 	Bin       []string   `json:"bin"`
 	Shortcuts [][]string `json:"shortcuts"`
 	// Persist keeps the settings and the log across an update, since the

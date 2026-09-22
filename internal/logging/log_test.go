@@ -99,7 +99,7 @@ func TestASecondInitReplacesTheFirst(t *testing.T) {
 	first := filepath.Join(t.TempDir(), "logs")
 	second := filepath.Join(t.TempDir(), "logs")
 	// Windows will not let the temporary directory go while the file in it is
-	// open, which is what closing the log at the end is for.
+	// open, hence closing the log at the end.
 	defer Log.CloseFile()
 
 	Log.Init(first, true)

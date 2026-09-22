@@ -51,8 +51,8 @@ func main() {
 	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
 		os.Exit(runCommand(rest, appDir, opts))
 	}
-	// The shortcuts take the same account options the commands do, which is what
-	// lets a script configure a machine without a terminal.
+	// The shortcuts take the same account options the commands do, so a script can
+	// configure a machine without a terminal.
 	for _, a := range rest {
 		switch a {
 		case "help", "-h", "--help", "-help":
@@ -91,8 +91,8 @@ func runGUI(appDir string, opts options) {
 	}
 	cfg, ok := loadForCLI(appDir, opts)
 	if !ok {
-		// The settings page is exactly how a broken configuration is fixed, so
-		// the program starts on the defaults instead of refusing to run.
+		// A broken configuration can be fixed from the settings page, so the
+		// program starts on the defaults instead of refusing to run.
 		logging.Log.Warn("starting on the defaults, the settings page can correct the configuration")
 	}
 	logging.Log.Debug("config loaded from %s: %s", cfg.Path(), cfg.Summary())
@@ -101,9 +101,8 @@ func runGUI(appDir string, opts options) {
 	if !cfg.Configured() {
 		logging.Log.Warn("no account configured yet, opening the settings page")
 	}
-	// --app turns the settings page into a window of its own. Without it the
-	// page stays what it has always been: a tab in the default browser, opened
-	// when the tray is clicked.
+	// --app turns the settings page into a window of its own. Without it the page
+	// stays a tab in the default browser, opened when the tray is clicked.
 	trayOpts := tray.Options{AppWindow: opts.app != nil}
 	if opts.app != nil {
 		trayOpts.SettingsAddr = *opts.app
@@ -135,7 +134,7 @@ func resolveAppDir(home *string) string {
 }
 
 // runHeadless keeps checking in the background with no tray. stop, when not nil,
-// ends it early, which is how the settings page quits a background run.
+// ends it early; the settings page quits a background run this way.
 func runHeadless(state *app.AppState, stop <-chan struct{}) {
 	cfg := state.Config()
 	if !cfg.Configured() {

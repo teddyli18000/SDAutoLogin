@@ -2,7 +2,7 @@
 
 # Enable the service, so it comes up with the router from now on, and start it.
 # Until the account is set the program has nothing to sign in with, and procd
-# gives up after a few tries, which is what the lines below are for.
+# gives up after a few tries, so the lines below print what to set.
 
 [ -n "${IPKG_INSTROOT}" ] || {
 	/etc/init.d/sdautologin enable
