@@ -15,6 +15,14 @@ import (
 // maxLogSize is the size at which app.log is rotated into app.log.1.
 const maxLogSize = 4 << 20
 
+// The modes the log is made with. The log names the account and the addresses it
+// was signed in from, which is nobody else's business on a machine that several
+// people use, and it sits in a directory of its own for the same reason.
+const (
+	logDirMode  = 0o700
+	logFileMode = 0o600
+)
+
 // Logger appends timestamped lines to stderr and, unless it was told not to,
 // to logs/app.log. DEBUG lines are only written when verbose mode is on, see
 // SetVerbose.
@@ -52,7 +60,7 @@ func (l *Logger) Init(dir string, toFile bool) {
 	if !toFile {
 		return
 	}
-	_ = os.MkdirAll(dir, 0o755)
+	_ = os.MkdirAll(dir, logDirMode)
 	l.dir = dir
 	l.openLocked()
 }
@@ -77,10 +85,14 @@ func (l *Logger) SetVerbose(on bool) { l.verbose.Store(on) }
 func (l *Logger) Verbose() bool { return l.verbose.Load() }
 
 func (l *Logger) openLocked() {
-	f, err := os.OpenFile(filepath.Join(l.dir, "app.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	name := filepath.Join(l.dir, "app.log")
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, logFileMode)
 	if err != nil {
 		return
 	}
+	// OpenFile only applies the mode when it creates the file, so a file an
+	// earlier version left readable by everyone is tightened here as well.
+	_ = os.Chmod(name, logFileMode)
 	l.file = f
 	if st, err := f.Stat(); err == nil {
 		l.size = st.Size()

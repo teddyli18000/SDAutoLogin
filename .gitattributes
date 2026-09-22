@@ -1,6 +1,10 @@
-# keep line endings stable across the platforms this tool builds on
-* text=auto
-*.go text
+# keep line endings stable across the platforms this tool builds on: the sources
+# are stored and checked out with LF everywhere, so which system a file was
+# written on is not what decides whether the next one sees a whole file as
+# changed. The one exception is the Windows command scripts, which cmd.exe wants
+# in its own spelling, and the generated resources below.
+* text=auto eol=lf
+*.go text eol=lf
 *.sh text eol=lf
 *.cmd text eol=crlf
 

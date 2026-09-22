@@ -80,6 +80,7 @@ go run ./tools/build build      # 当前平台
 go run ./tools/build console    # 控制台版本，供脚本/服务使用
 go run ./tools/build all        # Windows 与 Linux，下面列出的所有目标
 go run ./tools/build packages   # 下面所有安装包，输出到 dist/packages/
+go run ./tools/build verify     # 用各格式自己的工具校验安装包，然后再打一遍
 go run ./tools/build windows    # Windows 压缩包及其安装清单
 go run ./tools/build deb        # Debian 系安装包
 go run ./tools/build rpm        # RPM 系安装包
@@ -91,6 +92,10 @@ go run ./tools/build resources  # 重新生成 Windows 资源文件
 go run ./tools/build clean
 ```
 
+`verify` 要用到各格式自己的工具，因此是 Linux 上的任务：读 deb 与 ipk 的
+`dpkg-deb`、读 rpm 的 `rpm`，以及读 Arch 包的 `bsdtar`。找不到的工具会被点名并计入
+「未校验」，而不是被悄悄放过；一个包都没能校验的这一次运行会直接失败。
+
 如果你习惯 CMake，它也驱动同一批任务：
 
 ```sh
@@ -100,6 +105,7 @@ cmake --build build --target check       # go vet 与 go test
 cmake --build build --target SDAutoLogin-console
 cmake --build build --target all-platforms
 cmake --build build --target packages
+cmake --build build --target verify
 cmake --install build --prefix /usr/local
 ```
 
@@ -293,10 +299,10 @@ SDAutoLogin status --json | jq -r .state
 
 ## 文件位置
 
-- `config.json` - 设置
-- `logs/app.log` - 日志，超过 4 MiB 时轮转为 `app.log.1`。`--no-log` 与
-  `logToFile` 设置可以让它不生成，flash 很小的机器（例如路由器）就是这么做的：
-  同样的日志行无论如何都会输出到控制台。
+- `config.json` - 设置，仅本人可读
+- `logs/app.log` - 日志，放在自己的目录里，两者都仅本人可读；超过 4 MiB 时轮转为
+  `app.log.1`。`--no-log` 与 `logToFile` 设置可以让它不生成，flash 很小的机器
+  （例如路由器）就是这么做的：同样的日志行无论如何都会输出到控制台。
 
 默认情况下两者都在可执行文件旁边，所以在 `dist/` 里编译出来的程序，它的配置和
 日志也在 `dist/` 里；移动可执行文件时记得把 `config.json` 一起移动。
@@ -334,6 +340,23 @@ unit、声明 `sdautologin` 用户的那个文件，以及许可证和文档。�
 这些包都没有签名。本地安装不成问题——`dpkg -i`、`rpm -i` 与 `pacman -U` 都接受
 未签名的文件，pacman 只有在配置要求签名、而 `LocalFileSigLevel` 不是 `Optional` 时
 才会拒绝；但要做成自己的仓库就需要一把密钥，而密钥不是构建任务能凭空造出来的。
+任务写在包旁边的是 `SHA256SUMS`：按 `sha256sum` 工具的格式一行一个文件，下载了
+发布产物的人可以拿它核对自己拿到的东西。
+
+`go run ./tools/build verify` 会用各个格式自己的工具把包读回来——deb 和 ipk 用
+`dpkg-deb`，rpm 用 `rpm -K` 与 `rpm -qpl`，Arch 包用 `bsdtar` 和它自己携带的那份
+文件清单——并把 Windows 压缩包与它所依据的编译产物逐字节比对，再确认 Scoop 与
+winget 清单里的摘要指向的是当前这个压缩包。最后它会把所有包再打一遍，只要有一个
+字节不同就报错：同一个版本打两次，本来就必须是同一个发布产物。
+
+以上这些在每次 push 时都由
+[.gitea/workflows/ci.yml](.gitea/workflows/ci.yml) 跑一遍，连同 `go vet`、`go test`
+与 `gofmt` 检查，所以装不上的包会在发布之前被发现，而不是发布之后。
+
+打标签推送时会发布 release：同一次运行会创建它，并把各个包连同 `SHA256SUMS`
+作为附件挂上去，两个安装清单指向的正是那里。标签必须是 `v` 加上源码里的版本号
+——1.0.0 对应 `v1.0.0`；两者对不上时这一步会拒绝发布，否则清单会指向并不存在的
+文件。已经存在的 release 会直接沿用，因此同一条标签推两次不会让运行失败。
 
 ### Debian 与 Ubuntu
 
@@ -380,7 +403,7 @@ sudo systemctl restart sdautologin
 `dist/packages/manifests/` 里放的是两个能安装这种压缩包的包管理器所要的东西，即
 `scoop/sdautologin.json` 与 winget 清单的三个文件。两者都把发布产物写成下载地址
 `<项目地址>/releases/download/v<版本>/`，这正是本项目所在的 Gitea 存放发布附件的
-路径；如果发布挪到别处，改 `tools/build/pack_windows.go` 里的 `releaseURL`，两个
+路径；如果发布挪到别处，改 `tools/build/pack_win.go` 里的 `releaseURL`，两个
 清单都会跟着变。winget 命令行本身就能校验它们
 （`winget validate --manifest dist/packages/manifests/winget`）；Scoop 清单把设置和
 日志声明为持久化，因此升级不会丢账号。
@@ -520,7 +543,10 @@ make menuconfig          # Network -> sdautologin
 
 - 设置服务只监听 `127.0.0.1`，每次运行使用随机令牌鉴权，空闲后自动关闭。
 - 无人值守登录必须能拿到密码，因此除非关闭 `rememberPassword`，密码会以明文
-  保存在 `config.json` 中。请确保该文件仅本人可读。
+  保存在 `config.json` 中。该文件按"仅本人可读"写入，日志也一样（日志里同样会
+  出现账号），并且日志住在自己的目录里：两个文件 `0600`，目录 `0700`。旧版本留下
+  的、所有人都能读的文件会在下次写入时被收紧。systemd 的 unit 再声明一遍同样的
+  事：两个 unit 都设 `UMask=0077`，系统服务还把 state 目录定为 `0700`。
 - 程序从不调用注销接口，因此退出程序不会导致断网。
 
 ## 项目结构
@@ -546,6 +572,7 @@ make menuconfig          # Network -> sdautologin
 | `tools/build/` | 任务运行器，脚本与 CMake 目标都由它执行 |
 | `packaging/systemd/` | systemd unit，一份系统服务、一份 `systemctl --user` |
 | `packaging/openwrt/` | OpenWrt 包，以及它的 procd 启动脚本和 UCI 配置 |
+| `.gitea/workflows/` | push 时由 Gitea Actions 执行的内容：测试、打好的包，以及对包的校验 |
 | `Dockerfile` | 容器镜像，用 vendor 目录里的源码编译 |
 | `CMakeLists.txt` | 任务运行器的 CMake 前端 |
 | `dist/` | 编译结果，以及在 `dist/` 中运行时的设置与日志 |

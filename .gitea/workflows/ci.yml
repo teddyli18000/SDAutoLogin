@@ -1,0 +1,131 @@
+# Continuous integration, run by Gitea Actions.
+#
+# The two jobs answer the two questions a change has to answer: does the program
+# still build and pass its tests, and do the packages still come out right. The
+# second one installs the tools of the formats and then runs the same "packages"
+# and "verify" tasks a release is cut with, so what is checked here is what would
+# be published, and not something that merely looks like it.
+#
+# Both jobs run inside the Go image rather than on whatever the runner happens to
+# have, because the toolchain version is part of what is being checked and the
+# image is a Debian with git and dpkg in it already.
+name: CI
+
+# The token of the run is allowed to write to the repository because the last
+# step of the packaging job writes a release. That step runs when a tag was
+# pushed and never otherwise, and everything before it only reads.
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: golang:1.26
+    steps:
+      - uses: actions/checkout@v4
+
+      # gofmt reports what it would change and still exits 0, so the list is
+      # what decides.
+      - name: the sources are formatted
+        run: |
+          unformatted=$(gofmt -l cmd internal tools)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would change these files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: vet and test
+        run: go run ./tools/build test
+
+  packages:
+    runs-on: ubuntu-latest
+    container: golang:1.26
+    steps:
+      - uses: actions/checkout@v4
+
+      # What the packaging and the checking need beyond the Go toolchain: an
+      # rpm, a bsdtar to read the Arch package with, and one of the two
+      # compressors that package wants, which the standard library cannot write.
+      # dpkg-deb, which reads the deb and the ipk, is in the base image.
+      - name: install the tools of the formats
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends rpm libarchive-tools xz-utils zstd
+
+      - name: pack every format
+        run: go run ./tools/build packages
+
+      # This is the check that matters: every package is read back with the tool
+      # that installs it, and everything is then packed a second time to see
+      # whether a release built twice is the same release.
+      - name: check every package
+        run: go run ./tools/build verify
+
+      - name: keep what was packed
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: dist/packages
+
+      - name: the tools to publish with
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          apt-get install -y --no-install-recommends curl jq
+
+      # A tag is what makes a release, and it has to name the version that is
+      # inside the packages: the two manifests the packaging writes point at
+      # <address>/releases/download/v<version>/<file>, so a tag that disagrees
+      # with the build would publish files that nothing points at. The check
+      # below is the cheap version of that; the version living in a single place
+      # in the sources is what would make it unnecessary.
+      - name: publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SERVER: ${{ github.server_url }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          version=${TAG#v}
+          if [ ! -f "dist/packages/sdautologin_${version}-1_amd64.deb" ]; then
+            echo "there is no package for $version:"
+            echo "the tag and the version in the sources disagree, so the release would point at nothing"
+            exit 1
+          fi
+
+          api="$SERVER/api/v1/repos/$REPO/releases"
+          auth="Authorization: token $TOKEN"
+
+          # The release of this tag, or a new one. Pushing a tag twice, or
+          # creating the release by hand first, must not fail the run.
+          id=$(curl -sS -H "$auth" "$api/tags/$TAG" | jq -r '.id // empty')
+          if [ -z "$id" ]; then
+            id=$(curl -sS -X POST \
+              -H "$auth" -H "Content-Type: application/json" \
+              -d "$(jq -n --arg tag "$TAG" \
+                    '{tag_name: $tag, name: $tag, draft: false, prerelease: false,
+                      body: "See CHANGELOG.md in the repository for what changed."}')" \
+              "$api" | jq -r '.id // empty')
+          fi
+          if [ -z "$id" ]; then
+            echo "no release of $TAG could be reached or created:"
+            echo "check that the token of this run may write to the repository"
+            exit 1
+          fi
+
+          # The packages and SHA256SUMS as the attachments of the release,
+          # which is where the two manifests say they are.
+          for file in dist/packages/*; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file")
+            curl -sS -H "$auth" -F "attachment=@$file" "$api/$id/assets?name=$name" \
+              | jq -r '"  " + (.name // .message)'
+          done

@@ -125,6 +125,12 @@ func (c *Config) normalize() {
 	}
 }
 
+// configFileMode is the mode config.json is written with. The file holds the
+// password in clear text when it is remembered, so it belongs to its owner and
+// to nobody else: the program runs as that user, and a machine that several
+// people use is not one where a campus account is everybody's.
+const configFileMode = 0o600
+
 // Save writes config.json, omitting the password when it is not remembered.
 func (c *Config) Save() error {
 	c.normalize()
@@ -132,7 +138,12 @@ func (c *Config) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.path, append(data, '\n'), 0o644)
+	if err := os.WriteFile(c.path, append(data, '\n'), configFileMode); err != nil {
+		return err
+	}
+	// WriteFile only applies the mode when it creates the file, so a file an
+	// earlier version left readable by everyone is tightened here as well.
+	return os.Chmod(c.path, configFileMode)
 }
 
 func (c *Config) marshal() ([]byte, error) {

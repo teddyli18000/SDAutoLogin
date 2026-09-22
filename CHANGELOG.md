@@ -175,9 +175,74 @@ large binary that runs as a service, so the packaging for it was looked at twice
   stops it for the same reason, and the postinst of the package that follows
   starts it again.
 
+### Secrets on disk
+
+The account has to be on disk for the program to sign in unattended, and it was
+written in a file that anyone who could read it could use.
+
+- `config.json` is written `0600`, and so is the log in its own `0700` directory:
+  the log names the account and the addresses it was signed in from as well. A
+  file an earlier version left readable by everyone is tightened the next time it
+  is written, which is what brings an installation that is already there in line
+  without anyone having to do anything.
+- The system service keeps its state directory to `0700`
+  (`StateDirectoryMode=0700`), both units set `UMask=0077`, and the container
+  image makes `/data` `0700`. The program sets the modes itself and the units say
+  the same thing once more, so neither of them is what the file ends up depending
+  on being there.
+- The settings page, the tray and the command line all run as the user the
+  password belongs to, so nothing about the program needed the file to be readable
+  by anybody else.
+
+### Continuous integration
+
+Nothing checked a change before it was merged, and the packages were only ever
+looked at by hand, once.
+
+- `.gitea/workflows/ci.yml` runs on every push and pull request. One job checks
+  the sources — `gofmt`, `go vet`, `go test` — and the other packs every format
+  and then checks what it packed. Both run inside the `golang` image, so the
+  toolchain is the one the module asks for rather than whatever the runner
+  happens to have, and the second one installs the tools of the formats before it
+  starts.
+- `go run ./tools/build verify` is what that second job runs, and it is the
+  automated form of the checks the formats were written against: every package is
+  read back with the tool that installs it (`dpkg-deb` for the deb and the ipk,
+  `rpm -K` and `rpm -qpl` for the rpm, `bsdtar` and the listing inside the package
+  for the Arch one), the Windows archives are compared with the builds they were
+  made from, and the Scoop and winget manifests with the archives they name.
+  Everything is then packed a second time, and a single byte that comes out
+  differently fails the task, since a release built twice has to be the same
+  release. What the expected contents are is written down in the task rather than
+  asked of the code that packs them, because a check that asks the thing it checks
+  what it wrote cannot catch a file that was never written at all.
+- A tool that is not installed is named and counted as unchecked rather than
+  passed over, and a run that could not check a single package fails: reporting
+  success on the strength of having looked at nothing is worse than saying what
+  could not be looked at. On a machine with none of those tools, `verify` says so.
+- `SHA256SUMS` is written next to the packages by the packaging itself, one line
+  per file in the spelling of the `sha256sum` tool. Nothing is signed, so this is
+  what somebody who downloaded a release checks what they got against, and the
+  packages and the file are kept as an artifact of the CI run.
+- Pushing a tag publishes the release: the same run creates it over the Gitea API
+  and attaches the packages and `SHA256SUMS`, which is where the two manifests
+  say they can be downloaded from. A tag that does not name the version inside
+  the packages is refused instead of published, since the manifests would then
+  name files that are not there, and a release that already exists is taken as it
+  is so that a tag pushed twice does not fail the run.
+- The Windows packaging lived in a file called `pack_windows.go`, which the
+  toolchain reads as "compile this on Windows only": the task could not run on
+  Linux at all, and Linux is where both CI and a release build pack. The file is
+  `pack_win.go` now, and the whole set packs and verifies there.
+- The line endings of every text file are pinned in `.gitattributes` rather than
+  only those under `packaging/`: the packaging refuses a payload file that has
+  Windows line endings, and which of the two a checkout produces is the last thing
+  that should depend on the platform it was checked out on. `*.cmd` keeps CRLF,
+  where cmd.exe reads it line by line.
+
 ### Tests
 
-82 cases, up from 52.
+84 cases, up from 52.
 
 - `internal/app` (4) — the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use, and
@@ -188,9 +253,13 @@ large binary that runs as a service, so the packaging for it was looked at twice
   the command line, the way each status is named, the set of JSON fields, that
   `--no-log` is applied to the configuration, and an empty answer staying empty
   instead of becoming the dash the text form prints.
-- `internal/logging` (3) — a log that writes to a file and one that only writes to
-  the console, with the path it reports saying which it is, and a second start
-  replacing the first rather than leaving a file behind.
+- `internal/config` (15) — the settings file and its defaults, a file written by
+  an older version, the validation of every field, and the mode the file is saved
+  with.
+- `internal/logging` (4) — a log that writes to a file and one that only writes to
+  the console, with the path it reports saying which it is, a second start
+  replacing the first rather than leaving a file behind, and the modes the file
+  and its directory are made with.
 - `internal/platform` (3) — the command each system is started with, the order
   the browsers are preferred in, and the places each system looks in.
 

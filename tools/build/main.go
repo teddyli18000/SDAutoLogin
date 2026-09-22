@@ -49,13 +49,14 @@ type task struct {
 }
 
 // taskOrder keeps the listing stable, a map is not ordered.
-var taskOrder = []string{"build", "console", "all", "packages", "windows", "openwrt", "deb", "rpm", "pacman", "icon", "resources", "test", "run", "clean"}
+var taskOrder = []string{"build", "console", "all", "packages", "verify", "windows", "openwrt", "deb", "rpm", "pacman", "icon", "resources", "test", "run", "clean"}
 
 var tasks = map[string]task{
 	"build":     {"build for this platform into dist/", taskBuild},
 	"console":   {"build the console variant of this platform into dist/", taskConsole},
 	"all":       {"cross compile the Windows and Linux builds into dist/", taskAll},
 	"packages":  {"pack every format into dist/packages/", taskPackages},
+	"verify":    {"check every package with its own tool, and pack again", taskVerify},
 	"windows":   {"pack the Windows builds and their install manifests", taskWindows},
 	"openwrt":   {"pack the MIPS builds for OpenWrt into dist/packages/", taskOpenwrt},
 	"deb":       {"pack the Debian packages into dist/packages/", taskDeb},
@@ -91,7 +92,9 @@ func taskPackages(root string) error {
 			return err
 		}
 	}
-	return nil
+	// The digests of everything that was just written go next to it, as the one
+	// file that says what a release contains.
+	return writeChecksums(root)
 }
 
 func main() {

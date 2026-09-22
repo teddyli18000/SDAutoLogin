@@ -90,6 +90,7 @@ go run ./tools/build build      # this platform
 go run ./tools/build console    # console build, for scripts and services
 go run ./tools/build all        # Windows and Linux, every target below
 go run ./tools/build packages   # every package below, into dist/packages/
+go run ./tools/build verify     # check the packages with the tools of their formats, then pack them again
 go run ./tools/build windows    # the Windows archives and their manifests
 go run ./tools/build deb        # the Debian packages
 go run ./tools/build rpm        # the RPM packages
@@ -101,6 +102,11 @@ go run ./tools/build resources  # regenerate the Windows resource file
 go run ./tools/build clean
 ```
 
+`verify` needs the tools of the formats, so it is a Linux task: `dpkg-deb` for
+the deb and the ipk, `rpm`, and `bsdtar` for the Arch package. What it cannot
+find it names and counts rather than passing over, and a run that could not check
+a single package fails.
+
 CMake drives the same tasks, if you prefer that:
 
 ```sh
@@ -110,6 +116,7 @@ cmake --build build --target check       # go vet and go test
 cmake --build build --target SDAutoLogin-console
 cmake --build build --target all-platforms
 cmake --build build --target packages
+cmake --build build --target verify
 cmake --install build --prefix /usr/local
 ```
 
@@ -325,10 +332,11 @@ Autostart entries: the registry key
 
 ## Files
 
-- `config.json` - settings
-- `logs/app.log` - log, rotated to `app.log.1` when it exceeds 4 MiB. `--no-log`
-  and the `logToFile` setting leave it out, which is what a machine with a small
-  flash, such as a router, does: the same lines go to the console either way.
+- `config.json` - settings, written readable by its owner alone
+- `logs/app.log` - log, in a directory of its own, both readable by their owner
+  alone, and rotated to `app.log.1` when it exceeds 4 MiB. `--no-log` and the
+  `logToFile` setting leave it out, which is what a machine with a small flash,
+  such as a router, does: the same lines go to the console either way.
 
 Both live next to the executable by default, so a build in `dist/` keeps its
 settings and log there, and moving the executable means moving `config.json` with
@@ -374,7 +382,28 @@ Nothing is signed. That is fine for a local install — `dpkg -i`, `rpm -i` and
 `pacman -U` all take a file that is not signed, pacman only complaining when its
 configuration asks for signatures and `LocalFileSigLevel` is not `Optional` — but
 a repository of its own would need a key, and a key is not something a build task
-can invent.
+can invent. What the task writes instead is `SHA256SUMS` next to the packages,
+one line per file in the spelling of the `sha256sum` tool, so that whoever
+downloaded a release can check what they got.
+
+`go run ./tools/build verify` reads every package back with the tool that
+installs it — `dpkg-deb` for the deb and the ipk, `rpm -K` and `rpm -qpl` for the
+rpm, `bsdtar` and the listing inside the package for the Arch one — compares the
+Windows archives with the builds they were made from, and checks that the Scoop
+and winget manifests carry the digest of the archive that is there. It then packs
+everything a second time and fails if a single byte came out differently, since a
+release built twice has to be the same release.
+
+All of this runs on every push in [.gitea/workflows/ci.yml](.gitea/workflows/ci.yml),
+together with `go vet`, `go test` and a `gofmt` check, so a package that would
+not install is caught before it is published rather than after.
+
+Pushing a tag publishes the release: the same run creates it and attaches the
+packages and `SHA256SUMS` to it, which is what the two manifests point at. The
+tag has to be `v` followed by the version in the sources — `v1.0.0` for 1.0.0 —
+and the step refuses to publish when the two disagree, since the manifests would
+then name files that are not there. A release that already exists is taken as it
+is, so a tag pushed twice does not fail the run.
 
 ### Debian and Ubuntu
 
@@ -429,7 +458,7 @@ an archive want, `scoop/sdautologin.json` and the three files of the winget
 manifest. Both name the archives of a release as their download, at
 `<project address>/releases/download/v<version>/`, which is where Gitea, the host
 this project is published on, serves the attachments of a release; change
-`releaseURL` in `tools/build/pack_windows.go` when releases move elsewhere, and
+`releaseURL` in `tools/build/pack_win.go` when releases move elsewhere, and
 both follow. The winget command line checks them
 (`winget validate --manifest dist/packages/manifests/winget`), and the Scoop one
 declares the settings and the log as persistent, so an update keeps the account.
@@ -586,8 +615,13 @@ log is readable by anyone.
 - The settings service listens on `127.0.0.1` only, requires a per-run random
   token, and shuts down when idle.
 - The password has to be available to sign in unattended, so it is stored in
-  `config.json` in clear text unless `rememberPassword` is turned off. Keep the
-  file readable by your own user only.
+  `config.json` in clear text unless `rememberPassword` is turned off. The file is
+  written readable by its owner alone, and so is the log in its directory, since
+  the log names the account as well: `0600` for the two files, `0700` for the
+  directory. A file an earlier version left readable by everyone is tightened the
+  next time it is written. The systemd units set `UMask=0077` and the system
+  service keeps its state directory to `0700`, which is the same statement made
+  once more.
 - The program never calls the logout endpoint, so quitting cannot leave the
   machine offline.
 
@@ -615,6 +649,7 @@ which is what keeps the public surface at the command line and the settings page
 | `tools/build/` | task runner, used by the scripts and the CMake targets |
 | `packaging/systemd/` | systemd units, for a system service and for `systemctl --user` |
 | `packaging/openwrt/` | the OpenWrt package, its procd init script and its UCI configuration |
+| `.gitea/workflows/` | what Gitea Actions runs on a push: the tests, the packages and the checks on them |
 | `Dockerfile` | container image, built from the vendored sources |
 | `CMakeLists.txt` | CMake front end for the task runner |
 | `dist/` | build results, plus the settings and log of a build started from there |

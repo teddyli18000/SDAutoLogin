@@ -30,12 +30,13 @@ RUN CGO_ENABLED=0 go run ./tools/build build
 FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates tzdata \
- && install -d -o 65534 -g 65534 -m 0755 /data
+ && install -d -o 65534 -g 65534 -m 0700 /data
 
 COPY --from=build /src/dist/SDAutoLogin /usr/local/bin/SDAutoLogin
 
-# config.json and logs/ live in /data, owned by the account the program runs as.
-# A named volume inherits that ownership, a bind mount does not: a host
+# config.json and logs/ live in /data, owned by the account the program runs as,
+# and the directory belongs to that account alone: the settings in it are an
+# account. A named volume inherits that ownership, a bind mount does not: a host
 # directory has to be chowned to 65534:65534 first.
 VOLUME ["/data"]
 USER 65534:65534

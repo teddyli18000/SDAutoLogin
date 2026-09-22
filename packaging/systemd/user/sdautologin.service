@@ -33,6 +33,11 @@ ExecStart=%h/.local/bin/SDAutoLogin run --home=%h/.local/share/sdautologin
 Restart=on-failure
 RestartSec=15
 
+# config.json holds the password and the log the account, and both are made
+# readable by their owner alone; the umask is the same statement a second time,
+# for whatever else the program may write.
+UMask=0077
+
 NoNewPrivileges=yes
 RestrictAddressFamilies=AF_INET AF_INET6
 RestrictNamespaces=yes

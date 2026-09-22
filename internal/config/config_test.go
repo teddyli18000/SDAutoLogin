@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -246,6 +247,52 @@ func TestSaveOmitsThePasswordWhenItIsNotRemembered(t *testing.T) {
 	if stored["password"] != "" {
 		t.Errorf("stored password = %v, want an empty string", stored["password"])
 	}
+}
+
+func TestSaveKeepsTheFileToItsOwner(t *testing.T) {
+	// The password is in the file in clear text, so the file belongs to the user
+	// the program runs as and to nobody else. Windows has no permission bits of
+	// its own: Go reports 0666 for a writable file there whatever the ACL says.
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are a Unix thing")
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Username = "s1234567"
+	cfg.Password = "topsecret"
+
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if got := fileMode(t, path); got != 0o600 {
+		t.Errorf("config.json is %#o, want 0600", got)
+	}
+
+	// A file an earlier version left readable by everyone is tightened when it
+	// is written again.
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if got := fileMode(t, path); got != 0o600 {
+		t.Errorf("a file that was readable by everyone is %#o after Save, want 0600", got)
+	}
+}
+
+// fileMode is the permission bits of a file.
+func fileMode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return info.Mode().Perm()
 }
 
 func TestSaveRoundTrips(t *testing.T) {

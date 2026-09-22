@@ -30,13 +30,19 @@ Type=simple
 User=sdautologin
 Group=sdautologin
 # config.json and logs/ live here, not next to the binary, so the binary can
-# stay on a read-only /usr.
+# stay on a read-only /usr. The directory is the owner's alone, since what is in
+# it is an account.
 StateDirectory=sdautologin
+StateDirectoryMode=0700
 ExecStart=/usr/bin/SDAutoLogin run --home=/var/lib/sdautologin
 Restart=on-failure
 RestartSec=15
 
 # The program needs nothing but a network connection, so the rest is cut off.
+# The umask is the last line of defence for what it writes: config.json holds
+# the password and the log holds the account, and both are made readable by
+# their owner alone either way.
+UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes

@@ -416,6 +416,43 @@ func writePackage(root, name string, data []byte) error {
 	return nil
 }
 
+// checksumsFile is the list of digests written next to the packages, in the
+// spelling the sha256sum tool reads and writes: the digest, two spaces and the
+// name. It is what somebody who downloaded a release checks what they got
+// against, and it is the one part of a release that is worth having even when
+// nothing is signed.
+const checksumsFile = "SHA256SUMS"
+
+// writeChecksums writes the digest of every package into SHA256SUMS. The order
+// is the one the file names sort in, which is what makes the file itself come out
+// the same on every run.
+func writeChecksums(root string) error {
+	dir := filepath.Join(root, distDir, pkgDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+
+	var listing strings.Builder
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == checksumsFile {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(&listing, "%s  %s\n", sha256Hex(data), e.Name())
+	}
+
+	out := filepath.Join(dir, checksumsFile)
+	if err := os.WriteFile(out, []byte(listing.String()), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("  -> %s\n", describe(root, out))
+	return nil
+}
+
 // installedBytes is the size of what a package installs. Some formats want it in
 // bytes and others in KiB.
 func installedBytes(entries []pkgEntry) int64 {
