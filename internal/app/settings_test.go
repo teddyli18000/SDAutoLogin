@@ -3,11 +3,13 @@ package app
 import (
 	"bytes"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"sdautologin/internal/config"
 )
@@ -19,8 +21,9 @@ type fakeAddr struct{ s string }
 func (a fakeAddr) Network() string { return "tcp" }
 func (a fakeAddr) String() string  { return a.s }
 
-// startedServer returns a server listening on addr and the address it reports.
-func startedServer(t *testing.T, addr string) string {
+// startedServer returns a server listening on addr and the address it hands to
+// a browser, which carries the token the session is opened with.
+func startedServer(t *testing.T, addr string) (*Server, string) {
 	t.Helper()
 
 	state := New(&config.Config{Accounts: []config.Account{{Username: "s1234567", Password: "p@ss"}}})
@@ -31,11 +34,29 @@ func startedServer(t *testing.T, addr string) string {
 	if err != nil {
 		t.Fatalf("URL: %v", err)
 	}
-	return url
+	return server, url
+}
+
+// browser is a client that keeps cookies, which is what the browser does between
+// the address it was opened with and the page it is left on.
+func browser(t *testing.T) *http.Client {
+	t.Helper()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Client{Jar: jar}
+}
+
+// pageAddress is the address of the server without the token in it, which is
+// what the page is served at.
+func pageAddress(url string) string {
+	return url[:strings.Index(url, "/?")]
 }
 
 func TestServerServesThePageOnTheAddressItWasGiven(t *testing.T) {
-	url := startedServer(t, "127.0.0.1:0")
+	_, url := startedServer(t, "127.0.0.1:0")
 
 	if !strings.HasPrefix(url, "http://127.0.0.1:") {
 		t.Errorf("url = %q, want a loopback address", url)
@@ -46,27 +67,254 @@ func TestServerServesThePageOnTheAddressItWasGiven(t *testing.T) {
 }
 
 func TestServerRefusesARequestWithoutTheToken(t *testing.T) {
-	// The token is all that stands between the page and any other program that
-	// can reach the address, so it has to be required.
-	url := startedServer(t, "127.0.0.1:0")
-	base := url[:strings.Index(url, "/?")]
+	// The session cookie is all that stands between the page and any other
+	// program that can reach the address, so it has to be required.
+	_, url := startedServer(t, "127.0.0.1:0")
 
-	allowed, err := http.Get(url)
+	allowed, err := browser(t).Get(url)
 	if err != nil {
-		t.Fatalf("get with the token: %v", err)
+		t.Fatalf("get the address the tray handed out: %v", err)
 	}
 	defer allowed.Body.Close()
 	if allowed.StatusCode != http.StatusOK {
-		t.Errorf("with the token: status %d, want 200", allowed.StatusCode)
+		t.Errorf("opening the address: status %d, want 200", allowed.StatusCode)
 	}
 
-	refused, err := http.Get(base + "/api/status")
+	refused, err := http.Get(pageAddress(url) + "/api/status")
 	if err != nil {
-		t.Fatalf("get without the token: %v", err)
+		t.Fatalf("get without the cookie: %v", err)
 	}
 	defer refused.Body.Close()
 	if refused.StatusCode != http.StatusForbidden {
-		t.Errorf("without the token: status %d, want 403", refused.StatusCode)
+		t.Errorf("without the cookie: status %d, want 403", refused.StatusCode)
+	}
+}
+
+// TestTheAddressIsExchangedForASessionCookie covers what happens to the token
+// the tray hands out. The address bar, the history and the Referer of anything
+// the page links to are all the same string, so the token is taken out of it as
+// soon as the page is served, and what the page goes on using is another value.
+func TestTheAddressIsExchangedForASessionCookie(t *testing.T) {
+	server, url := startedServer(t, "127.0.0.1:0")
+
+	client := browser(t)
+	// The redirect is left alone, so the reply that carries the cookie can be
+	// read rather than the page it leads to.
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := client.Get(url)
+	if err != nil {
+		t.Fatalf("get the address: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d, want a redirect to the page without the token", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Location"); got != "/" {
+		t.Errorf("Location = %q, want /", got)
+	}
+
+	cookies := resp.Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookies = %v, want exactly one", cookies)
+	}
+	cookie := cookies[0]
+	if cookie.Name != sessionCookie {
+		t.Errorf("cookie name = %q, want %q", cookie.Name, sessionCookie)
+	}
+	if cookie.Path != "/" {
+		t.Errorf("cookie path = %q, want /", cookie.Path)
+	}
+	if cookie.SameSite != http.SameSiteStrictMode {
+		t.Errorf("cookie SameSite = %v, want Strict, which keeps it out of a request from another site", cookie.SameSite)
+	}
+	if cookie.Value != server.session {
+		t.Errorf("cookie value = %q, want the token the page goes on using", cookie.Value)
+	}
+	if cookie.Value == server.entry {
+		t.Error("the address and the session carry the same token, so an address that was seen stays a way in")
+	}
+}
+
+func TestTheTokenInAnAddressIsNotAcceptedOnTheApi(t *testing.T) {
+	// Only the first navigation the browser makes on its own can put the token
+	// in an address, so nothing else reads it from there. What a caller would
+	// otherwise copy out of a log or a history is not a way to the settings.
+	server, url := startedServer(t, "127.0.0.1:0")
+	base := pageAddress(url)
+
+	for _, c := range []struct{ name, token string }{
+		{"the live session token", server.session},
+		{"the token of the address", server.entry},
+	} {
+		resp, err := http.Get(base + "/api/status?token=" + c.token)
+		if err != nil {
+			t.Fatalf("get with %s in the address: %v", c.name, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s in the address: status %d, want 403", c.name, resp.StatusCode)
+		}
+	}
+}
+
+func TestAWriteNeedsTheHeaderAsWellAsTheCookie(t *testing.T) {
+	// A page from another site cannot set a custom header without this server
+	// agreeing to a cross site request, so a write that carries the cookie alone
+	// is refused, which is the second thing it has to get past.
+	server, url := startedServer(t, "127.0.0.1:0")
+	base := pageAddress(url)
+
+	for _, c := range []struct {
+		name   string
+		header bool
+		want   int
+	}{
+		{"with the cookie alone", false, http.StatusForbidden},
+		{"with the header as well", true, http.StatusOK},
+	} {
+		req, err := http.NewRequest(http.MethodPost, base+"/api/action",
+			strings.NewReader(`{"action":"check"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
+		if c.header {
+			req.Header.Set("X-Auth-Token", server.session)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != c.want {
+			t.Errorf("%s: status %d, want %d", c.name, resp.StatusCode, c.want)
+		}
+	}
+}
+
+// TestTheServerBoundsEveryPhaseOfARequest holds the server to a deadline on
+// every step of a request. A form the page sends arrives in one piece, so a
+// caller that sends one byte and then stops is not someone to wait for.
+func TestTheServerBoundsEveryPhaseOfARequest(t *testing.T) {
+	server := NewServer(New(&config.Config{}), "", nil)
+	t.Cleanup(server.Stop)
+	if _, err := server.URL(); err != nil {
+		t.Fatalf("URL: %v", err)
+	}
+
+	for _, c := range []struct {
+		name string
+		d    time.Duration
+	}{
+		{"reading the request header", server.srv.ReadHeaderTimeout},
+		{"reading the request", server.srv.ReadTimeout},
+		{"writing the reply", server.srv.WriteTimeout},
+		{"keeping an idle connection", server.srv.IdleTimeout},
+	} {
+		if c.d <= 0 {
+			t.Errorf("%s has no deadline", c.name)
+		}
+	}
+}
+
+func TestTheReplyDeadlineFollowsTheRequestTimeout(t *testing.T) {
+	// A handler may wait for the portal on each request it makes, so the reply
+	// deadline has to sit above what the configuration allows, or the page would
+	// be told the request failed while the program was still waiting for it.
+	short := writeTimeout(&config.Config{HTTPTimeoutSeconds: 2})
+	if short < settingsMinWriteTimeout {
+		t.Errorf("writeTimeout(2s) = %v, want at least %v", short, settingsMinWriteTimeout)
+	}
+
+	long := writeTimeout(&config.Config{HTTPTimeoutSeconds: 120})
+	if long < 120*time.Second*settingsPortalRequests {
+		t.Errorf("writeTimeout(120s) = %v, too short for %d requests of 120s",
+			long, settingsPortalRequests)
+	}
+	if long <= short {
+		t.Errorf("writeTimeout(120s) = %v, want more than the one for 2s (%v)", long, short)
+	}
+}
+
+func TestEveryAnswerCarriesTheSecurityHeaders(t *testing.T) {
+	// The page is opened with the token in its address, so an answer must keep
+	// that address from travelling out in a Referer, must not let another page
+	// frame it, and must name what it may load rather than trust its own markup.
+	// The refusal is the answer a caller without the token reads, so it carries
+	// them too.
+	_, url := startedServer(t, "127.0.0.1:0")
+
+	// One client that has been through the exchange and holds the cookie, since
+	// the page is only served to one of those.
+	opened := browser(t)
+	if resp, err := opened.Get(url); err != nil {
+		t.Fatalf("open the address: %v", err)
+	} else {
+		resp.Body.Close()
+	}
+
+	for _, c := range []struct {
+		name   string
+		client *http.Client
+		target string
+	}{
+		{"the exchange", http.DefaultClient, url},
+		{"the page", opened, pageAddress(url)},
+		{"a refusal", http.DefaultClient, pageAddress(url) + "/api/status"},
+	} {
+		resp, err := c.client.Get(c.target)
+		if err != nil {
+			t.Fatalf("get %s: %v", c.name, err)
+		}
+		resp.Body.Close()
+
+		want := map[string]string{
+			"Content-Security-Policy": contentSecurityPolicy,
+			"X-Content-Type-Options":  "nosniff",
+			"X-Frame-Options":         "DENY",
+			"Referrer-Policy":         "no-referrer",
+		}
+		for header, value := range want {
+			if got := resp.Header.Get(header); got != value {
+				t.Errorf("%s: %s = %q, want %q", c.name, header, got, value)
+			}
+		}
+	}
+
+	// The rule the policy is built on: the page has no inline script and no
+	// inline style, so allowing either would only leave an injected one a place
+	// to run.
+	if strings.Contains(contentSecurityPolicy, "unsafe-inline") {
+		t.Errorf("the policy allows inline code: %s", contentSecurityPolicy)
+	}
+}
+
+func TestAMissingTokenIsOneNothingMatches(t *testing.T) {
+	// The comparison is a constant time one and an empty pair of them matches,
+	// so a token that was never made has to be refused before the comparison
+	// runs: a server that was never started must not accept a caller who sends
+	// no token at all.
+	if tokenEqual("", "") {
+		t.Error("an empty token matched a token that was never made")
+	}
+	if tokenEqual("anything", "") {
+		t.Error("a value matched a token that was never made")
+	}
+	if !tokenEqual("tok", "tok") {
+		t.Error("equal tokens did not match")
+	}
+	if tokenEqual("tok", "token") {
+		t.Error("tokens of different lengths matched")
+	}
+
+	server := NewServer(New(&config.Config{}), "", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: ""})
+	if server.authorised(req) {
+		t.Error("a server that was never started authorised a request")
 	}
 }
 
@@ -120,7 +368,8 @@ func TestARefusedSaveLeavesTheRunningConfigAlone(t *testing.T) {
 	// The empty password is the only thing wrong with this request.
 	body := `{"accounts":[{"username":"s1234567","password":"","isps":["@cucc"]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(body)))
-	req.Header.Set("X-Auth-Token", server.token)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
+	req.Header.Set("X-Auth-Token", server.session)
 	rec := httptest.NewRecorder()
 	server.handleConfig(rec, req)
 

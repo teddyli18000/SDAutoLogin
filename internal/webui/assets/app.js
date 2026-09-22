@@ -1,6 +1,19 @@
 "use strict";
 
-const token = new URLSearchParams(location.search).get("token") || "";
+/* The address the page was opened with carried a token, and the server
+   exchanged it for this cookie before serving the page, so what is left in the
+   address bar carries nothing. The page repeats the cookie in a header of its
+   own on every request; a request that changes something is only accepted with
+   both. */
+const TOKEN_COOKIE = "sdauth";
+
+function readToken() {
+  const prefix = TOKEN_COOKIE + "=";
+  const found = document.cookie.split("; ").find((part) => part.startsWith(prefix));
+  return found ? found.slice(prefix.length) : "";
+}
+
+const token = readToken();
 
 const state = {
   i18n: {},
@@ -26,10 +39,9 @@ async function api(path, options) {
   if (opts.body) {
     opts.headers["Content-Type"] = "application/json";
   }
-  const sep = path.includes("?") ? "&" : "?";
   let resp;
   try {
-    resp = await fetch(path + sep + "token=" + encodeURIComponent(token), opts);
+    resp = await fetch(path, opts);
   } catch (err) {
     /* The program quit, or the idle service shut itself down. Callers must
        still get an answer instead of an exception. */

@@ -294,16 +294,52 @@ fall back on.
   was checking with, so a password that had been typed wrong took the session
   down at the same moment the page said the save had not been accepted.
 
+### The settings service
+
+The page is reachable by anything that can reach its address, and the token in
+that address is all that stands in front of it, so the service was held to what
+that implies.
+
+- Every phase of a request has a deadline now: reading the header, reading the
+  request, writing the reply, and keeping an idle connection. The reply deadline
+  is counted from the configured request timeout rather than pinned to a value,
+  because a handler that talks to the portal waits that long on each request it
+  makes, and a deadline below that would cut off a reply the program was still
+  working on.
+- The token is compared in a time that does not depend on how many bytes of one
+  match the other, so it cannot be read out a byte at a time by timing the
+  answers.
+- Every answer carries the security headers, the refusals included, since a
+  caller without the token reads one of those. They name what the page may load
+  rather than leaving it to the page's own markup, stop the browser from
+  guessing a type it was not given, refuse to be framed by another page, and
+  keep the address out of the Referer of anything the page links to.
+- The token leaves the address as soon as the page is served. A navigation is the
+  one request a browser makes on its own, and the one request that cannot carry a
+  header, so the address the tray hands out carries the token; the server
+  exchanges it for a cookie and sends the browser to the same page without it, so
+  the address bar, the history and the Referer of anything the page links to carry
+  no token at all. That cookie is what every later request is checked against, and
+  a request that changes something has to repeat the value in a header as well,
+  which a page from another site cannot set.
+
 ### Tests
 
-107 cases, up from 52.
+114 cases, up from 52.
 
-- `internal/app` (7): the settings server serves on the address it was given,
+- `internal/app` (14): the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use,
   knows what counts as loopback, and leaves the running configuration and the
   file it was read from untouched when a save is refused. The login self test is
   covered on both sides of its rule: it submits one attempt while the portal
-  reports the client offline, and nothing while it reports it online.
+  reports the client offline, and nothing while it reports it online. The service
+  itself is held to a deadline on every phase of a request, to a reply deadline
+  that follows the configured request timeout, to the security headers on the
+  page and on a refusal, and to refusing the empty token of a server that was
+  never started, which an unwary constant time comparison would read as a match.
+  The address it hands out is exchanged for a cookie that carries another value,
+  an address with the token in it is refused on the API, and a write has to repeat
+  the cookie in a header.
 - `cmd/SDAutoLogin` (24): both forms of every option, the address that is
   optional for `--app`, which mode refuses which option, that `--app` is refused in
   a build without a tray, help and version answering regardless of what else is on

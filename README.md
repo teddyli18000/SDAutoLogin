@@ -631,8 +631,8 @@ uci commit sdautologin
 ```
 
 Then open `http://10.9.1.3:8088/`, or whatever address the router answers on.
-With an address that is not loopback the token in the URL is the only
-protection, so keep it on a trusted network or reach it over a tunnel.
+With an address that is not loopback the token in the address handed out is the
+only protection, so keep it on a trusted network or reach it over a tunnel.
 
 `/etc/config/sdautologin` is declared as a configuration file, so an upgrade
 keeps the account that is in it, and `config.json` lives in `/etc/sdautologin`,
@@ -681,7 +681,16 @@ log is readable by anyone.
 ## Security notes
 
 - The settings service listens on `127.0.0.1` only, requires a per-run random
-  token, and shuts down when idle.
+  token, and shuts down when idle. Every phase of a request has a deadline, the
+  token is compared in a time that does not depend on how much of it matched, and
+  every answer carries the security headers, the refusals included.
+- That token travels in the address the tray hands out, since a navigation is the
+  one request a browser makes on its own and the one request that cannot carry a
+  header. It is exchanged for a session cookie before the page is served, and the
+  browser is sent to the same page without it, so the address bar, the history and
+  the `Referer` of anything the page links to carry no token. Every request after
+  that is checked against the cookie, and a request that changes something has to
+  repeat it in a header.
 - The password has to be available to sign in unattended, so it is stored in
   `config.json` in clear text unless `rememberPassword` is turned off. The file is
   written readable by its owner alone, and so is the log in its directory, since

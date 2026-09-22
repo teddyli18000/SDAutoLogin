@@ -2,6 +2,7 @@ package app
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -23,22 +24,64 @@ import (
 
 const (
 	settingsIdleTimeout = 15 * time.Minute
-	logTailLines        = 200
+	// settingsReadTimeout bounds reading a request. The forms the page sends are
+	// small, so a caller that is still sending one after this long has stopped
+	// meaning to.
+	settingsReadTimeout = 30 * time.Second
+	// settingsMinWriteTimeout is the shortest deadline a reply may have, for a
+	// configuration that names no request timeout at all.
+	settingsMinWriteTimeout = 30 * time.Second
+	// settingsPortalRequests is how many requests to the portal the longest
+	// handler makes: reading the session state is two of them, and the login test
+	// reads it, submits one login and reads it again.
+	settingsPortalRequests = 6
+	logTailLines           = 200
+	// sessionCookie is the cookie the page's session is carried in after the
+	// address it was opened with has been exchanged for it.
+	sessionCookie = "sdauth"
 )
 
-// Server serves the settings page. Every request carries a token that is
-// generated when the server starts, so a program that has not been handed the
-// address cannot read or change the configuration by accident.
+// writeTimeout is the deadline for writing one reply. It is counted from the
+// configured request timeout rather than pinned, because a handler that talks to
+// the portal waits that long on each request it makes: a fixed deadline would
+// cut a reply off while the program was still waiting for the portal to answer.
+func writeTimeout(cfg *config.Config) time.Duration {
+	d := time.Duration(cfg.HTTPTimeoutSeconds) * settingsPortalRequests * time.Second
+	if d < settingsMinWriteTimeout {
+		return settingsMinWriteTimeout
+	}
+	return d
+}
+
+// contentSecurityPolicy lets the page load its own script, stylesheet and
+// images and make its own requests, and nothing else. It has no inline script
+// and no inline style, so neither has to be allowed for, which leaves an
+// injected one nowhere to run.
+const contentSecurityPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; " +
+	"img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// Server serves the settings page. The address it is opened with carries a
+// token, which is exchanged for a session cookie before the page is served, so
+// a program that was not handed that address cannot read or change the
+// configuration by accident, and the page does not keep the token in view.
 type Server struct {
 	state  *AppState
 	onQuit func()
 	// addr is where to listen, empty for loopback on a port the system picks.
 	addr string
 
-	mu      sync.Mutex
-	srv     *http.Server
-	url     string
-	token   string
+	mu  sync.Mutex
+	srv *http.Server
+	url string
+	// entry is the token the address handed to a browser carries. The browser
+	// cannot put it in a header, since the first request is one it makes on its
+	// own, so it arrives in the address and is exchanged for a cookie before the
+	// page is served. Only that cookie is checked afterwards.
+	entry string
+	// session is the value of that cookie, and is made once per run. It is what a
+	// request is checked against, so the token in an address is not the one the
+	// page keeps using, and nothing the page is left showing carries it.
+	session string
 	lastHit atomic.Int64
 }
 
@@ -65,7 +108,11 @@ func (s *Server) URL() (string, error) {
 		addr = "127.0.0.1:0"
 	}
 
-	token, err := randomToken()
+	entry, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	session, err := randomToken()
 	if err != nil {
 		return "", err
 	}
@@ -77,9 +124,12 @@ func (s *Server) URL() (string, error) {
 	srv := &http.Server{
 		Handler:           s.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       settingsReadTimeout,
+		WriteTimeout:      writeTimeout(s.state.Config()),
+		IdleTimeout:       2 * time.Minute,
 	}
-	s.token = token
-	s.url = urlFor(listener.Addr(), token)
+	s.entry, s.session = entry, session
+	s.url = urlFor(listener.Addr(), entry)
 	s.srv = srv
 	s.lastHit.Store(time.Now().UnixNano())
 
@@ -176,7 +226,7 @@ func (s *Server) open(opener func(string) error) (string, error) {
 func (s *Server) Stop() {
 	s.mu.Lock()
 	srv := s.srv
-	s.srv, s.url, s.token = nil, "", ""
+	s.srv, s.url, s.entry, s.session = nil, "", "", ""
 	s.mu.Unlock()
 	if srv != nil {
 		_ = srv.Close()
@@ -212,7 +262,8 @@ func randomToken() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func (s *Server) routes() *http.ServeMux {
+// routes wires the handlers and puts the security headers in front of them.
+func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(webui.Assets()))))
@@ -220,24 +271,58 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/action", s.handleAction)
-	return mux
+	return s.withHeaders(mux)
 }
 
-// authorised accepts the token from the query string, which the browser uses
-// on first load, or from a header, which the page uses afterwards. Requiring a
-// custom header for writes also makes cross site requests impossible.
+// withHeaders puts the response headers on before the handler runs, on every
+// answer including the refusals, since a caller without the token reads one of
+// those. The page is opened with the token in its address, so it must not let
+// that address travel out in a Referer and must not be framed by another page;
+// what it may load is named rather than left to the page's own markup.
+func (s *Server) withHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// authorised reports whether a request may go through. The session cookie is
+// what authenticates it, and a request that changes something has to carry the
+// same value in a header as well: a page from another site cannot set a custom
+// header without this server agreeing to a cross site request, and it does not.
 func (s *Server) authorised(r *http.Request) bool {
 	s.lastHit.Store(time.Now().UnixNano())
+	cookie, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return false
+	}
 	s.mu.Lock()
-	want := s.token
+	session := s.session
 	s.mu.Unlock()
+	if !tokenEqual(cookie.Value, session) {
+		return false
+	}
+	if r.Method == http.MethodGet {
+		return true
+	}
+	return tokenEqual(r.Header.Get("X-Auth-Token"), session)
+}
+
+// tokenEqual compares two tokens in a time that does not depend on how many
+// bytes of one match the other, so the token cannot be read out a byte at a
+// time by timing the answers. A token that was never made matches nothing, not
+// even another empty string, which the comparison on its own would call a
+// match. A length that does not match is answered at once, which gives nothing
+// away: every token this program makes is the same length.
+func tokenEqual(got, want string) bool {
 	if want == "" {
 		return false
 	}
-	if got := r.Header.Get("X-Auth-Token"); got == want {
-		return true
-	}
-	return r.URL.Query().Get("token") == want
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -245,11 +330,42 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// The address the page was opened with carries a token, because the first
+	// request of a navigation is one the browser makes on its own and cannot put
+	// anything in a header. That token buys the session cookie here, and the
+	// browser is sent to the same page without it: what it is left showing, its
+	// history and the Referer of anything it links to carry no token at all.
+	s.mu.Lock()
+	entry := s.entry
+	s.mu.Unlock()
+	if tokenEqual(r.URL.Query().Get("token"), entry) {
+		s.startSession(w)
+		return
+	}
 	if !s.authorised(r) {
 		http.Error(w, "invalid or missing token", http.StatusForbidden)
 		return
 	}
 	serveAsset(w, r, "index.html", "text/html; charset=utf-8")
+}
+
+// startSession hands the browser the cookie the rest of the session is checked
+// against, and sends it to the page again without the token it arrived with.
+func (s *Server) startSession(w http.ResponseWriter) {
+	s.mu.Lock()
+	session := s.session
+	s.mu.Unlock()
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    session,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		// Not Secure, and not HttpOnly: the server speaks plain http on a
+		// loopback address, so a browser would drop a Secure cookie, and the page
+		// reads this one to repeat it in the header of the requests it makes.
+	})
+	w.Header().Set("Location", "/")
+	w.WriteHeader(http.StatusSeeOther)
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
