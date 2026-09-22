@@ -34,7 +34,7 @@ var webText = map[string]text{
 	"acct.test":          {"测试", "Test"},
 	"acct.testing":       {"测试中…", "Testing..."},
 	"acct.test.dirty":    {"保存后才能测试", "Save first, then test"},
-	"acct.testOk":        {"登录成功", "accepted"},
+	"acct.testOk":        {"登录成功", "login accepted"},
 	"acct.testFail":      {"被拒绝：{0}", "refused: {0}"},
 	"acct.empty": {
 		"还没有账号，请添加一个。",
@@ -80,7 +80,7 @@ var webText = map[string]text{
 	"field.httpTimeout": {"请求超时（秒）", "Request timeout (seconds)"},
 	"field.jsVersion":   {"jsVersion 参数", "jsVersion parameter"},
 	"field.verboseLog":  {"详细日志（记录每次检测的诊断信息）", "Verbose logging (per-check diagnostics)"},
-	"advanced.note":     {"除非门户地址有变动，否则无需修改。", "Nothing here needs changing unless the portal moved."},
+	"advanced.note":     {"除非门户地址有变动，否则无需修改。", "Nothing here needs changing unless the portal address changed."},
 
 	"status.state":      {"状态", "State"},
 	"status.clientIp":   {"客户端 IP", "Client IP"},
@@ -121,7 +121,7 @@ var webText = map[string]text{
 
 	"msg.saved":        {"已保存，并立即重新检测了一次。", "Saved, and one check was run immediately."},
 	"msg.autostart":    {"开机自启设置已更新。", "The startup setting has been updated."},
-	"msg.stale":        {"设置页已失效，请从托盘重新打开。", "This page is no longer connected, open it again from the tray."},
+	"msg.stale":        {"设置页已失效，请从托盘重新打开。", "This page is no longer valid, open it again from the tray."},
 	"msg.saving":       {"正在保存…", "Saving..."},
 	"msg.testRunning":  {"正在测试…", "Testing..."},
 	"msg.testAccepted": {"登录成功。", "Login accepted."},
@@ -141,8 +141,8 @@ var webText = map[string]text{
 	"wizard.finish": {"完成并开始自动登录", "Finish and start auto login"},
 
 	"err.accountsRequired": {"至少需要一个账号", "At least one account is required"},
-	"err.accountRequired":  {"请填写账号", "Account is required"},
-	"err.passwordRequired": {"请填写密码", "Password is required"},
+	"err.accountRequired":  {"账号不能为空", "Account is required"},
+	"err.passwordRequired": {"密码不能为空", "Password is required"},
 	"err.noUsableEntry":    {"这个账号没有填写密码，或者已被停用", "This account has no password, or is disabled"},
 	"err.intervalTooSmall": {"检测间隔至少 5 秒", "The interval must be at least 5 seconds"},
 	"err.timeoutTooSmall":  {"请求超时至少 2 秒", "The timeout must be at least 2 seconds"},
