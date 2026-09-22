@@ -1,6 +1,6 @@
 // Package brand draws the application mark. It only uses the standard image
 // packages, so both the running program and the build time icon generator can
-// produce the very same artwork.
+// produce the same artwork.
 package brand
 
 import (

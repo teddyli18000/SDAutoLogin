@@ -209,8 +209,8 @@ func TestReadingAnOlderFileLeavesItAlone(t *testing.T) {
 		t.Errorf("reading rewrote the file:\n got %s\nwant %s", stored, older)
 	}
 
-	// Saving is the point of no return: the file is then in one shape rather
-	// than half in each.
+	// Saving is what rewrites it: the file is then in one shape rather than half
+	// in each.
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}

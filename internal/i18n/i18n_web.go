@@ -76,7 +76,7 @@ var webText = map[string]text{
 	"field.apiEndpoint":   {"认证接口地址", "Authentication API URL"},
 	"field.accountPrefix": {"账号前缀", "Account prefix"},
 	"field.accountPrefix.hint": {"桌面浏览器登录固定为 “,0,”。",
-		"Fixed to “,0,” for a desktop browser login."},
+		"Fixed to \",0,\" for a desktop browser login."},
 	"field.httpTimeout": {"请求超时（秒）", "Request timeout (seconds)"},
 	"field.jsVersion":   {"jsVersion 参数", "jsVersion parameter"},
 	"field.verboseLog":  {"详细日志（记录每次检测的诊断信息）", "Verbose logging (per-check diagnostics)"},

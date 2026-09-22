@@ -13,7 +13,7 @@
 #   docker run -d ... -p 8088:8088 sdautologin run --settings=0.0.0.0:8088
 #
 # Binding the page to 0.0.0.0 makes it reachable from the network, so only do
-# that on one you trust: it holds the account in clear text.
+# that on a trusted network: it holds the account in clear text.
 
 # The build goes through the same task runner the scripts and the CMake targets
 # use, so the container gets exactly the flags a local build gets. The

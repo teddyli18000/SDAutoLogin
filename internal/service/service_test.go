@@ -235,7 +235,7 @@ func TestTickReportsARejectedLogin(t *testing.T) {
 
 func TestTickMovesOnToTheNextAccount(t *testing.T) {
 	// The first account is refused for a reason of its own, so the second one is
-	// tried in the same round, which is the point of the list.
+	// tried in the same round.
 	sp := &stubPortal{
 		online:      false,
 		afterLogin:  boolPtr(true),

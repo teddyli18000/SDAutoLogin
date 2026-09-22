@@ -161,7 +161,7 @@ func pacmanMtree(files []pkgEntry) []byte {
 
 // pacmanInstall is the file pacman reads the functions to run from: the same work
 // the scriptlets of the other formats do. The functions are called by name, and
-// the ones that are not there are simply not called.
+// the ones that are not there are not called.
 const pacmanInstall = `# The user the service runs as comes from the file this package installs, which
 # nothing reads on its own: the trigger systemd ships only covers its own users.
 post_install() {

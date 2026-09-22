@@ -29,8 +29,8 @@ var (
 	showSettingsEvent syscall.Handle
 
 	// instanceTaken remembers that this process already owns the name. Asking a
-	// second time would report the name as taken, because the mutex we hold
-	// counts as an existing object.
+	// second time would report the name as taken, because the mutex this process
+	// holds counts as an existing object.
 	instanceTaken bool
 )
 
@@ -44,10 +44,10 @@ func AcquireSingleInstance(requestSettings bool) bool {
 	}
 
 	// The event is created before the mutex on purpose. A second copy can only
-	// discover us by finding the mutex, and it can only find the mutex once we
-	// created it, so at that point the event is guaranteed to exist and to be
-	// held by us. The other order would let a quick second copy signal an event
-	// that we have not created yet, and the request would be lost with it.
+	// find this process by finding the mutex, and it can only find the mutex once
+	// it exists, so by that point the event is guaranteed to exist as well. The
+	// other order would let a quick second copy signal an event that has not been
+	// created yet, and the request would be lost with it.
 	if ev, _, err := procCreateEventW.Call(0, 1, 0, uintptr(unsafe.Pointer(UTF16Ptr(showSettingsEventName)))); ev != 0 {
 		showSettingsEvent = syscall.Handle(ev)
 	} else {

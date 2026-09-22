@@ -56,7 +56,7 @@ answer the setup wizard on them, so the program had no way in on those machines.
 
 - `--app[=ADDR]` opens the settings page in a browser window with no address bar,
   no tabs and no menus, so it looks like an application of its own while staying
-  the very same page the browser opens on its own: no second copy of the form to
+  the same page the browser opens on its own: no second copy of the form to
   keep in step, and no toolkit brought in for one window. The address is
   optional, and the option belongs to the tray mode, which is the one mode with a
   window.

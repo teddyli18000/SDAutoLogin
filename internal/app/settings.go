@@ -110,7 +110,7 @@ func (s *Server) URL() (string, error) {
 }
 
 // urlFor builds the address to hand to a browser out of the address the server
-// actually bound.
+// bound.
 func urlFor(addr net.Addr, token string) string {
 	host, port, err := net.SplitHostPort(addr.String())
 	if err != nil {

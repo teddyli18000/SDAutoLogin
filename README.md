@@ -591,9 +591,8 @@ The two MIPS builds are packaged, one for each byte order:
 | `sdautologin_<version>-1_mips_24kc.ipk` | big endian boards, such as the Atheros ones (ath79) |
 | `sdautologin_<version>-1_mipsel_24kc.ipk` | little endian boards, such as the MediaTek ones (ramips, mt76x8) |
 
-A router has no systemd, so this is the odd one out among the packages: it
-installs a procd init script at `/etc/init.d/sdautologin` and a UCI configuration
-at `/etc/config/sdautologin`.
+A router has no systemd, so this package installs a procd init script at
+`/etc/init.d/sdautologin` and a UCI configuration at `/etc/config/sdautologin`.
 
 A router has least flash, so the program is installed compressed as
 `/usr/lib/sdautologin/SDAutoLogin.gz`, and `/usr/bin/SDAutoLogin` is a short

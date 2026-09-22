@@ -88,7 +88,7 @@ func appBrowserCandidates(goos string, getenv func(string) string) []string {
 		}
 	default:
 		// The names the distributions put on PATH, in the order they are worth
-		// trying. Any of them can be missing, which is why this is a list.
+		// trying. A name that is missing is skipped.
 		return []string{
 			"google-chrome",
 			"google-chrome-stable",

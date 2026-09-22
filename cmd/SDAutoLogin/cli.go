@@ -26,7 +26,7 @@ Usage:
   SDAutoLogin [command] [options]
 
 Without a command the tray icon starts and the settings page is served on
-loopback for your browser.
+loopback.
 
 Commands:
   run            run in the background, no tray

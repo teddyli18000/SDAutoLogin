@@ -167,7 +167,7 @@ Windows 可执行文件内含图标、版本信息和 DPI 感知清单，由
 其他本机程序无法读取或修改配置。15 分钟没有请求后服务自动关闭并释放端口，
 下次打开设置页时会再次启动。
 
-没有托盘的机器上，可以用 `run --settings=ADDR` 让同一份设置页监听你指定的地址。
+没有托盘的机器上，可以用 `run --settings=ADDR` 让同一份设置页监听指定的地址。
 该端点立即启动，并一直保留到程序退出；当 ADDR 不是回环地址时，网页可从网络访问，
 此时地址里的一次性令牌是唯一保护，请只放在可信网络内或置于隧道之后。
 
@@ -518,7 +518,7 @@ docker run --rm -v sdautologin:/data sdautologin \
 | `sdautologin_<version>-1_mips_24kc.ipk` | 大端板子，比如 Atheros 系（ath79） |
 | `sdautologin_<version>-1_mipsel_24kc.ipk` | 小端板子，比如 MediaTek 系（ramips、mt76x8） |
 
-路由器上没有 systemd，所以这是几个安装包里的例外：它装的是 procd 启动脚本
+路由器上没有 systemd，因此这个包装的是 procd 启动脚本
 `/etc/init.d/sdautologin` 和 UCI 配置 `/etc/config/sdautologin`。
 
 路由器最缺的是 flash，所以程序是以压缩形式装到
