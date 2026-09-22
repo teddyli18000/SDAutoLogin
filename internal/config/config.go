@@ -39,9 +39,14 @@ type Config struct {
 	CheckInternet        bool `json:"checkInternet"`
 	// VerboseLog writes per-check diagnostics, which is what makes a dropped
 	// session diagnosable after the fact.
-	VerboseLog bool     `json:"verboseLog"`
-	ProbeURLs  []string `json:"probeUrls"`
-	JsVersion  string   `json:"jsVersion"`
+	VerboseLog bool `json:"verboseLog"`
+	// LogToFile writes the log to logs/app.log as well as to the console. It is
+	// the switch a machine with a small flash turns off, since what the program
+	// writes to the console is already collected by its service manager, and the
+	// rotating file is the same text on the flash a second time.
+	LogToFile bool     `json:"logToFile"`
+	ProbeURLs []string `json:"probeUrls"`
+	JsVersion string   `json:"jsVersion"`
 	// Language selects the interface language: auto, zh or en.
 	Language string `json:"language"`
 
@@ -59,6 +64,7 @@ func defaultConfig() *Config {
 		RememberPassword:     true,
 		CheckInternet:        true,
 		VerboseLog:           true,
+		LogToFile:            true,
 		Language:             string(i18n.LangAuto),
 		ProbeURLs: []string{
 			"http://connect.rom.miui.com/generate_204",
@@ -174,10 +180,10 @@ func (c *Config) Account() string {
 // included, so this is safe to print.
 func (c *Config) Summary() string {
 	return fmt.Sprintf(
-		"account=%q isp=%q prefix=%q suffix=%q interval=%ds timeout=%ds autoLogin=%v checkInternet=%v verboseLog=%v rememberPassword=%v language=%q portal=%s eportal=%s",
+		"account=%q isp=%q prefix=%q suffix=%q interval=%ds timeout=%ds autoLogin=%v checkInternet=%v verboseLog=%v logToFile=%v rememberPassword=%v language=%q portal=%s eportal=%s",
 		c.Username, c.OperatorName(), c.AccountPrefix, c.AccountSuffix,
 		c.CheckIntervalSeconds, c.HTTPTimeoutSeconds, c.AutoLogin, c.CheckInternet,
-		c.VerboseLog, c.RememberPassword, c.Language, c.PortalBaseURL, c.EportalURL)
+		c.VerboseLog, c.LogToFile, c.RememberPassword, c.Language, c.PortalBaseURL, c.EportalURL)
 }
 
 // Validate returns a field name to message key map, where the keys are looked

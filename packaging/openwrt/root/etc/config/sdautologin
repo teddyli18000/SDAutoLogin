@@ -1,0 +1,20 @@
+config sdautologin 'main'
+	# The account the router signs in with. Leave an option empty to let
+	# config.json decide instead, which is what the settings page writes: setting
+	# the account here overrides that file on every start.
+	option username ''
+	option password ''
+	# Service suffix such as @zgyd, empty being the campus network itself.
+	option isp ''
+
+	# Address to serve the settings page on, so a router with no display can be
+	# configured from a browser. Empty leaves the page off.
+	#   option settings '0.0.0.0:8088'
+	option settings ''
+
+	# Whether the program keeps logs/app.log next to its settings. It is off by
+	# default because /etc is on the flash here: the same lines already go to the
+	# console, which procd hands to the system log, and that one lives in memory.
+	# "logread" shows them. Turn this on to keep a file, which costs up to 8 MiB
+	# of flash once the log has grown.
+	option log_file '0'

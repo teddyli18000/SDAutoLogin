@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# Stop the service before the binary goes away. An upgrade stops it here as well,
+# and the postinst of the new version starts it again.
+
+if [ -d /run/systemd/system ]; then
+	deb-systemd-invoke stop sdautologin.service >/dev/null || true
+fi

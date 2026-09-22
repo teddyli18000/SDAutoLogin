@@ -87,18 +87,110 @@ needs somebody to answer it, so the program had no way in on those machines.
   needs out of the binary, which is about a fifth of it. A router has no desktop
   session to put an icon in, and that build refuses `--app` instead of ignoring it.
 
+### Packages
+
+The program could only be installed by copying a file into place. Every system
+that matters has a way of saying "install this", so the task runner now makes the
+packages for them:
+
+- `go run ./tools/build packages` writes a Debian package, an rpm, an Arch
+  package and an OpenWrt one into `dist/packages/`, one file per architecture
+  each, and the Windows builds as archives next to the manifests that Scoop and
+  winget read.
+- Every one of them installs the same thing in the layout of its distribution:
+  the build without the tray, the systemd unit from `packaging/systemd`, the
+  `sysusers.d` file that declares the `sdautologin` user, and the licence and the
+  documents. The settings and the log go to `/var/lib/sdautologin`, which is what
+  that unit was already written for. A package is for a service, so it gets the
+  build without the tray; a desktop has the archive.
+- Each of them asks systemd for that user, enables the unit and starts it. This
+  is the work `dh_installsystemd` generates, and it is needed because nothing
+  reads a `sysusers.d` file on its own: the trigger systemd ships only covers the
+  users of systemd itself. All of them say so when there is no `config.json` yet,
+  a service with no account stopping after a few tries.
+- Debian and OpenWrt share the code that writes their container, an ipk being a
+  deb with a different control file in it. The OpenWrt one adds a procd init
+  script and a UCI configuration instead of a unit, and declares the last of those
+  as a configuration file, so an upgrade keeps the account in it. The rpm is
+  written tag by tag, since its header is a tagged binary structure rather than an
+  archive, with a cpio archive in a gzip stream for a payload. The Arch package is
+  the one that needed something from outside the standard library after all: Go
+  writes gzip and neither zstd nor xz, so the task packs with `zstd` when it is
+  installed, then `xz`, and otherwise falls back to gzip and says which it used.
+- The architecture name of the running OpenWrt package follows the boards:
+  `mips_24kc` for the big endian ones and `mipsel_24kc` for the little endian
+  ones, and no other format is made for MIPS, since no distribution in those
+  families runs on it.
+- Everything inside a package carries a fixed date rather than the time of the
+  build, so packing the same build twice gives the same file. Nothing is signed:
+  a local install does not ask for a signature, and a repository would need a key
+  that a build task cannot invent.
+- The payload of a package is checked for Windows line endings while it is
+  packed, and the packaging fails if one has them: a shell script whose shebang
+  ends in a carriage return does not run at all, and the platform the sources were
+  checked out on is the last thing that should decide this. The repository pins
+  the line endings of everything under `packaging/` for the same reason.
+- Each format was written against the tool that reads it rather than against the
+  documentation: `dpkg` installs the deb, creates the user and starts the service,
+  `rpm -K` verifies all four digests and `rpm -i` unpacks it, `pacman -Qkk` checks
+  the installed files against the listing the package carries, `opkg` would, and
+  the winget command line validates its manifests. Five things were found that way
+  and fixed: an rpm signature header whose region tag was the one of the other
+  header, a pacman archive whose members were named absolutely where that format
+  names them relative to the root, an Arch size field written in KiB where pacman
+  reads bytes, and, in a later pass with the same tools, an rpm and an Arch package
+  that named no directory at all: both left every directory they had made behind,
+  empty, since a package manager takes away only what it was told about.
+
+### Routers
+
+A router has a few megabytes of flash and no desktop, and the program is a single
+large binary that runs as a service, so the packaging for it was looked at twice.
+
+- The OpenWrt package installs the program gzipped and a wrapper unpacks it into
+  memory on the first start: 2.7 MiB of flash instead of 7.7, at the cost of the
+  running copy living in `/tmp`, which is memory too. The name it is unpacked to
+  carries the version on purpose: everything inside a package has a fixed
+  timestamp, and `/tmp` is not cleared by an upgrade either, so a name that
+  changes with the version is what makes a new package unpack its own program
+  rather than the previous one being run until the router is rebooted. The
+  program is packed at the best gzip level for the few percent that saves.
+- The log file is off by default on OpenWrt, where `/etc` is on the flash. The
+  same lines already go to the console, which procd hands to `logd`, the in-memory
+  ring `logread` reads back, so the rotating file was that text written a second
+  time, up to eight megabytes of it. `--no-log` turns the file off anywhere, the
+  `logToFile` setting is what it sets, and the init script passes it from the
+  `log_file` UCI option.
+- `packaging/openwrt/Makefile` is an OpenWrt package for a firmware image, for a
+  router that should carry the program from the start rather than installing it
+  afterwards. It installs the program as it is: a squashfs compresses what it
+  holds better than gzip does, 1.9 MiB against 2.7 for this program, so
+  compressing it there would add a megabyte to the image and cost it its place in
+  the read only filesystem.
+- Removing the package stops the service first, in the .ipk and in the image
+  package both. It is this program that needs it: the router runs it out of
+  `/tmp`, unpacked from the archive in `/usr/lib`, so a process left behind by a
+  removal would be one nothing could reach again, neither the init script that has
+  just been deleted nor the program that was taken out from under it. An upgrade
+  stops it for the same reason, and the postinst of the package that follows
+  starts it again.
+
 ### Tests
 
-78 cases, up from 52.
+82 cases, up from 52.
 
 - `internal/app` (4) — the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use, and
   knows what counts as loopback.
-- `cmd/SDAutoLogin` (19) — both forms of every option, the address that is
+- `cmd/SDAutoLogin` (20) — both forms of every option, the address that is
   optional for `--app`, which mode refuses which option, that `--app` is refused in
   a build without a tray, help and version answering regardless of what else is on
-  the command line, the way each status is named, the set of JSON fields, and an
-  empty answer staying empty instead of becoming the dash the text form prints.
+  the command line, the way each status is named, the set of JSON fields, that
+  `--no-log` is applied to the configuration, and an empty answer staying empty
+  instead of becoming the dash the text form prints.
+- `internal/logging` (3) — a log that writes to a file and one that only writes to
+  the console, with the path it reports saying which it is, and a second start
+  replacing the first rather than leaving a file behind.
 - `internal/platform` (3) — the command each system is started with, the order
   the browsers are preferred in, and the places each system looks in.
 

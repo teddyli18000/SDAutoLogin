@@ -27,7 +27,7 @@ func TestLoadConfigCreatesAFileWithDefaults(t *testing.T) {
 	if cfg.CheckIntervalSeconds != 15 || cfg.HTTPTimeoutSeconds != 6 {
 		t.Errorf("unexpected timeouts: interval=%d timeout=%d", cfg.CheckIntervalSeconds, cfg.HTTPTimeoutSeconds)
 	}
-	if !cfg.AutoLogin || !cfg.CheckInternet || !cfg.VerboseLog || !cfg.RememberPassword {
+	if !cfg.AutoLogin || !cfg.CheckInternet || !cfg.VerboseLog || !cfg.RememberPassword || !cfg.LogToFile {
 		t.Errorf("every boolean default is meant to be on: %+v", cfg)
 	}
 	if len(cfg.ProbeURLs) != 3 {

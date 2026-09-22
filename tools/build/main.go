@@ -19,6 +19,9 @@ import (
 )
 
 const (
+	// progName is what the program is called, which is the name of every file
+	// the build writes and of every package it makes.
+	progName = "SDAutoLogin"
 	// mainPkg is the entry point package. Everything else is a library under
 	// internal/, so the build has to name it explicitly.
 	mainPkg = "./cmd/SDAutoLogin"
@@ -33,6 +36,11 @@ const (
 	resConfig = "winres/winres.json"
 	// winresVersion is pinned so regenerating the resources is reproducible.
 	winresVersion = "github.com/tc-hib/go-winres@v0.3.3"
+
+	// notrayTag is the build tag of the builds that leave the tray out, which
+	// is the one every package is built from: there is no desktop session on a
+	// router, in a container or on a server to put an icon in.
+	notrayTag = "notray"
 )
 
 type task struct {
@@ -41,17 +49,49 @@ type task struct {
 }
 
 // taskOrder keeps the listing stable, a map is not ordered.
-var taskOrder = []string{"build", "console", "all", "icon", "resources", "test", "run", "clean"}
+var taskOrder = []string{"build", "console", "all", "packages", "windows", "openwrt", "deb", "rpm", "pacman", "icon", "resources", "test", "run", "clean"}
 
 var tasks = map[string]task{
 	"build":     {"build for this platform into dist/", taskBuild},
 	"console":   {"build the console variant of this platform into dist/", taskConsole},
 	"all":       {"cross compile the Windows and Linux builds into dist/", taskAll},
+	"packages":  {"pack every format into dist/packages/", taskPackages},
+	"windows":   {"pack the Windows builds and their install manifests", taskWindows},
+	"openwrt":   {"pack the MIPS builds for OpenWrt into dist/packages/", taskOpenwrt},
+	"deb":       {"pack the Debian packages into dist/packages/", taskDeb},
+	"rpm":       {"pack the RPM packages into dist/packages/", taskRpm},
+	"pacman":    {"pack the Arch packages into dist/packages/", taskPacman},
 	"icon":      {"redraw winres/icon.ico from the drawing code", taskIcon},
 	"resources": {"regenerate the Windows resource file with go-winres", taskResources},
 	"test":      {"run go vet and go test", taskTest},
 	"run":       {"build and start the program", taskRun},
 	"clean":     {"remove the built executables, keeping settings and logs", taskClean},
+}
+
+// taskPackages is every format this repository publishes, which is what a release
+// needs. Each format builds the binaries it wants for itself, and the ones that
+// another format already built come out of the cache of the toolchain.
+//
+// The list is spelled out rather than read from the task map, which would be a
+// cycle: the map holds this function.
+func taskPackages(root string) error {
+	formats := []struct {
+		name string
+		run  func(string) error
+	}{
+		{"windows", taskWindows},
+		{"openwrt", taskOpenwrt},
+		{"deb", taskDeb},
+		{"rpm", taskRpm},
+		{"pacman", taskPacman},
+	}
+	for _, f := range formats {
+		fmt.Printf("-- %s\n", f.name)
+		if err := f.run(root); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func main() {
@@ -91,6 +131,7 @@ func usage() {
 	}
 	fmt.Print("\nPaths:\n" +
 		"  output   " + distDir + "/\n" +
+		"  packages " + distDir + "/" + pkgDir + "/\n" +
 		"  icon     " + iconPath + "\n" +
 		"  resource " + resPrefix + "_<platform>.syso\n")
 }
@@ -117,7 +158,7 @@ func repoRoot() (string, error) {
 // appName is the file name of the executable for a target system, where suffix
 // distinguishes the variants of one platform.
 func appName(goos, suffix string) string {
-	name := "SDAutoLogin" + suffix
+	name := progName + suffix
 	if goos == "windows" {
 		name += ".exe"
 	}
@@ -141,10 +182,11 @@ type target struct {
 	// variant is how the file name spells the architecture, for the targets
 	// where GOARCH is not precise enough to be read on its own.
 	variant string
-	// env is what goes into the environment on top of GOOS and GOARCH, for the
-	// same reason: arm does not say which instruction set it is for, and mips
-	// does not say whether the board has a floating point unit.
-	env []string
+	// extraEnv is what goes into the environment on top of GOOS and GOARCH, for
+	// the targets where GOARCH is not the whole story: arm does not say which
+	// instruction set it is for, and mips does not say whether the board has a
+	// floating point unit.
+	extraEnv []string
 	// tags are the build tags to build with, empty for none.
 	tags string
 }
@@ -157,50 +199,73 @@ func (t target) archName() string {
 	return t.goarch
 }
 
-// taskAll builds the binaries worth publishing: the Windows one to double click,
-// the Linux one for a server, which also serves the command line, and the small
-// ones that a router or an embedded board has room for. Every Linux build is
-// made twice: the second one leaves the tray out, for the machines that have no
-// desktop session to put an icon in. A router never had a use for one, and the
-// tray is by far the largest thing the binary can do without.
+// name is the file name this target is built to, inside dist/.
+func (t target) name() string {
+	return appName(t.goos, "-"+t.goos+"-"+t.archName())
+}
+
+// env is the environment this target is built in, on top of the process one.
+func (t target) env() []string {
+	return append([]string{"GOOS=" + t.goos, "GOARCH=" + t.goarch, "CGO_ENABLED=0"}, t.extraEnv...)
+}
+
+// buildArgs are what go build needs for this target beyond the arguments
+// buildFor always passes.
+func (t target) buildArgs() []string {
+	if t.tags == "" {
+		return nil
+	}
+	return []string{"-tags", t.tags}
+}
+
+// buildTarget builds one target into dist/.
+func buildTarget(root string, t target) error {
+	return buildFor(root, t.goos, t.goarch, t.name(), true, t.env(), t.buildArgs()...)
+}
+
+// targets is every build worth publishing: the Windows one to double click, the
+// Linux one for a server, which also serves the command line, and the small ones
+// that a router or an embedded board has room for. The 64 bit builds come first
+// in each group, the small machine ones last.
 //
-// The 64 bit builds come first in each group, the small machine ones last.
-func taskAll(root string) error {
-	targets := []target{
+// Every Linux build is made twice: the second one leaves the tray out, for the
+// machines that have no desktop session to put an icon in. A router never had a
+// use for one, and the tray is by far the largest thing the binary can do
+// without.
+func targets() []target {
+	base := []target{
 		{goos: "windows", goarch: "amd64"},
 		{goos: "windows", goarch: "arm64"},
 		{goos: "windows", goarch: "386"},
 		{goos: "linux", goarch: "amd64"},
 		{goos: "linux", goarch: "arm64"},
 		{goos: "linux", goarch: "386"},
-		{goos: "linux", goarch: "arm", variant: "armv7", env: []string{"GOARM=7"}},
+		{goos: "linux", goarch: "arm", variant: "armv7", extraEnv: []string{"GOARM=7"}},
 		// Most routers have no floating point unit, which is what softfloat is
 		// for, and both byte orders are here because the boards are: the
 		// Atheros targets (ath79, ar71xx) are big endian, the MediaTek ones
 		// (ramips, mt76x8) are little endian.
-		{goos: "linux", goarch: "mips", variant: "mips-softfloat", env: []string{"GOMIPS=softfloat"}},
-		{goos: "linux", goarch: "mipsle", variant: "mipsle-softfloat", env: []string{"GOMIPS=softfloat"}},
+		{goos: "linux", goarch: "mips", variant: "mips-softfloat", extraEnv: []string{"GOMIPS=softfloat"}},
+		{goos: "linux", goarch: "mipsle", variant: "mipsle-softfloat", extraEnv: []string{"GOMIPS=softfloat"}},
 	}
 
-	withoutTray := make([]target, 0, len(targets))
-	for _, t := range targets {
+	all := make([]target, 0, 2*len(base))
+	all = append(all, base...)
+	for _, t := range base {
 		if t.goos != "linux" {
 			continue
 		}
 		t.variant = t.archName() + "-notray"
-		t.tags = "notray"
-		withoutTray = append(withoutTray, t)
+		t.tags = notrayTag
+		all = append(all, t)
 	}
-	targets = append(targets, withoutTray...)
+	return all
+}
 
-	for _, t := range targets {
-		env := append([]string{"GOOS=" + t.goos, "GOARCH=" + t.goarch, "CGO_ENABLED=0"}, t.env...)
-		name := appName(t.goos, "-"+t.goos+"-"+t.archName())
-		var args []string
-		if t.tags != "" {
-			args = append(args, "-tags", t.tags)
-		}
-		if err := buildFor(root, t.goos, t.goarch, name, true, env, args...); err != nil {
+// taskAll builds every target of the matrix into dist/.
+func taskAll(root string) error {
+	for _, t := range targets() {
+		if err := buildTarget(root, t); err != nil {
 			return err
 		}
 	}
@@ -291,6 +356,17 @@ func taskClean(root string) error {
 		removed++
 	}
 	fmt.Printf("  removed %d executable(s) from %s\n", removed, describe(root, dir))
+
+	// The packages are made from those executables, so they go with them: one
+	// left behind would be the previous build in a new one's clothes.
+	packages := filepath.Join(dir, pkgDir)
+	if _, err := os.Stat(packages); err == nil {
+		shown := describe(root, packages)
+		if err := os.RemoveAll(packages); err != nil {
+			return err
+		}
+		fmt.Printf("  removed %s\n", shown)
+	}
 	return nil
 }
 

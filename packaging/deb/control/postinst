@@ -1,0 +1,27 @@
+#!/bin/sh
+
+# The system user the service runs as is declared in
+# /usr/lib/sysusers.d/sdautologin.conf, but nothing reads that file on its own:
+# the trigger systemd ships only covers the users of systemd itself, so a package
+# that wants one asks for it here. This is what dh_installsysusers generates.
+if [ "$1" = configure ] && [ -x /usr/bin/systemd-sysusers ]; then
+	systemd-sysusers ${DPKG_ROOT:+--root="$DPKG_ROOT"} sdautologin.conf
+fi
+
+if [ -d /run/systemd/system ]; then
+	systemctl --system daemon-reload >/dev/null || true
+	# Removing the package masks the unit, so installing it again has to take
+	# that mask off before it enables it.
+	deb-systemd-helper unmask sdautologin.service >/dev/null || true
+	deb-systemd-helper enable sdautologin.service >/dev/null || true
+	# Restart rather than start, so that an upgrade replaces the instance that
+	# is still running out of the file that was just overwritten.
+	deb-systemd-invoke restart sdautologin.service >/dev/null || true
+fi
+
+# Without an account the program has nothing to sign in with and the service
+# gives up after a few tries, which is not something a package can fill in.
+if [ ! -f /var/lib/sdautologin/config.json ]; then
+	echo "sdautologin has no account yet, so the service will keep stopping."
+	echo "See /usr/share/doc/sdautologin/README.Debian for how to give it one."
+fi

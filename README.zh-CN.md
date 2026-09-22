@@ -79,6 +79,12 @@ go run ./tools/build            # 列出所有任务
 go run ./tools/build build      # 当前平台
 go run ./tools/build console    # 控制台版本，供脚本/服务使用
 go run ./tools/build all        # Windows 与 Linux，下面列出的所有目标
+go run ./tools/build packages   # 下面所有安装包，输出到 dist/packages/
+go run ./tools/build windows    # Windows 压缩包及其安装清单
+go run ./tools/build deb        # Debian 系安装包
+go run ./tools/build rpm        # RPM 系安装包
+go run ./tools/build pacman     # Arch 安装包
+go run ./tools/build openwrt    # OpenWrt 安装包，给路由器用
 go run ./tools/build test       # go vet 与 go test
 go run ./tools/build icon       # 按绘图代码重绘图标
 go run ./tools/build resources  # 重新生成 Windows 资源文件
@@ -93,6 +99,7 @@ cmake --build build                      # 编译主程序
 cmake --build build --target check       # go vet 与 go test
 cmake --build build --target SDAutoLogin-console
 cmake --build build --target all-platforms
+cmake --build build --target packages
 cmake --install build --prefix /usr/local
 ```
 
@@ -196,6 +203,8 @@ help           打印用法
 
 --home=DIR         把 config.json 和 logs/ 放在 DIR 而不是可执行文件旁边，
                    供服务与容器使用
+--no-log           日志只留在控制台，不写 logs/app.log，供 flash 很小的机器
+                   使用
 --username=NAME    用该账号替代配置中的账号
 --password=SECRET  用该密码替代配置中的密码
 --isp=SUFFIX       运营商后缀，例如 @zgyd；留空表示校园网本身
@@ -267,6 +276,7 @@ SDAutoLogin status --json | jq -r .state
 | `autoLogin` | `true` | 掉线后自动登录 |
 | `checkInternet` | `true` | 是否同时探测外网 |
 | `verboseLog` | `true` | 记录每次检测的诊断信息 |
+| `logToFile` | `true` | 是否同时写 `logs/app.log`，见 `--no-log` |
 | `probeUrls` | 见下 | 连通性检测地址 |
 | `jsVersion` | `3.3.3` | 门户页面提交的参数 |
 | `language` | `auto` | `auto`、`zh` 或 `en` |
@@ -284,7 +294,9 @@ SDAutoLogin status --json | jq -r .state
 ## 文件位置
 
 - `config.json` - 设置
-- `logs/app.log` - 日志，超过 4 MiB 时轮转为 `app.log.1`
+- `logs/app.log` - 日志，超过 4 MiB 时轮转为 `app.log.1`。`--no-log` 与
+  `logToFile` 设置可以让它不生成，flash 很小的机器（例如路由器）就是这么做的：
+  同样的日志行无论如何都会输出到控制台。
 
 默认情况下两者都在可执行文件旁边，所以在 `dist/` 里编译出来的程序，它的配置和
 日志也在 `dist/` 里；移动可执行文件时记得把 `config.json` 一起移动。
@@ -297,19 +309,95 @@ SDAutoLogin status --json | jq -r .state
 退出。它在没有账号时会拒绝启动，因此账号要先写一次——可以在命令行上用 `--save`
 一次性写入，也可以在启动时加上 `--settings`，再从设置页里填写。
 
+### 安装包
+
+`go run ./tools/build packages` 会为每个值得安装本程序的发行版各打一个包：
+
+| 发行版 | 安装包 | 安装方式 |
+| --- | --- | --- |
+| Debian、Ubuntu | `sdautologin_1.0.0-1_amd64.deb` | `apt install ./...` |
+| Fedora、RHEL、openSUSE | `sdautologin-1.0.0-1.x86_64.rpm` | `dnf install` 或 `rpm -i` |
+| Arch | `sdautologin-1.0.0-1-x86_64.pkg.tar.zst` | `pacman -U` |
+| OpenWrt | `sdautologin_1.0.0-1_mipsel_24kc.ipk` | `opkg install` |
+| Windows | `SDAutoLogin-1.0.0-windows-amd64.zip` | 解压即用 |
+
+每个包装的东西是一样的，只是按各家的规矩摆放：无托盘那份程序、运行它的 systemd
+unit、声明 `sdautologin` 用户的那个文件，以及许可证和文档。设置与日志都在
+`/var/lib/sdautologin`；服务由安装包启用；每个包都得先给一个账号，否则服务起不来
+——服务面前没有人能回答配置向导。OpenWrt 是唯一的例外，那里既没有 systemd 也没有
+`/var/lib`，细节见它自己那一节。
+
+这些包由构建任务自己写出，只用标准库：机器上不需要任何打包工具链，ipk 和 deb 更是
+什么都不需要。Arch 包是唯一的例外，因为 Go 没有 zstd 或 xz 的写入器：装了 `zstd`
+就用它，否则用 `xz` 或 `gzip`，任务会说明用的是哪一个。
+
+这些包都没有签名。本地安装不成问题——`dpkg -i`、`rpm -i` 与 `pacman -U` 都接受
+未签名的文件，pacman 只有在配置要求签名、而 `LocalFileSigLevel` 不是 `Optional` 时
+才会拒绝；但要做成自己的仓库就需要一把密钥，而密钥不是构建任务能凭空造出来的。
+
+### Debian 与 Ubuntu
+
+```sh
+sudo apt install ./dist/packages/sdautologin_1.0.0-1_amd64.deb
+sudo -u sdautologin /usr/bin/SDAutoLogin --home=/var/lib/sdautologin \
+     --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+sudo systemctl restart sdautologin
+```
+
+安装包会建好 `sdautologin` 用户、启用并启动服务；没有账号时它重试几次就会停下，
+postinst 在发现还没有 `config.json` 时也会这么说。机器上的
+`/usr/share/doc/sdautologin/README.Debian` 写的是同样的步骤。卸载会留下设置和日志，
+purge 也一样：里面的账号不是安装包有权扔掉的。
+
+### Fedora、RHEL 与 openSUSE
+
+```sh
+sudo rpm -i dist/packages/sdautologin-1.0.0-1.x86_64.rpm
+sudo -u sdautologin /usr/bin/SDAutoLogin --home=/var/lib/sdautologin \
+     --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+sudo systemctl restart sdautologin
+```
+
+`rpm -K` 校验包内各项摘要，`rpm -qi` 显示头部里写的描述，`rpm -e sdautologin` 卸载
+时不会动 `/var/lib/sdautologin`。
+
+### Arch
+
+```sh
+sudo pacman -U dist/packages/sdautologin-1.0.0-1-x86_64.pkg.tar.zst
+sudo -u sdautologin /usr/bin/SDAutoLogin --home=/var/lib/sdautologin \
+     --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+sudo systemctl restart sdautologin
+```
+
+`pacman -Qi` 与 `pacman -Qkk` 都能用，后者会拿包内那份清单逐个校验已安装的文件。
+
+### Windows
+
+压缩包里只有程序、README 和许可证：没有安装程序，因为本来也没什么可安装的。解压到
+打算长期放置的目录，双击运行即可；设置会写在程序旁边，所以这个目录就是要留住的东西。
+
+`dist/packages/manifests/` 里放的是两个能安装这种压缩包的包管理器所要的东西，即
+`scoop/sdautologin.json` 与 winget 清单的三个文件。两者都把发布产物写成下载地址
+`<项目地址>/releases/download/v<版本>/`，这正是本项目所在的 Gitea 存放发布附件的
+路径；如果发布挪到别处，改 `tools/build/pack_windows.go` 里的 `releaseURL`，两个
+清单都会跟着变。winget 命令行本身就能校验它们
+（`winget validate --manifest dist/packages/manifests/winget`）；Scoop 清单把设置和
+日志声明为持久化，因此升级不会丢账号。
+
 ### systemd
 
 [packaging/systemd](packaging/systemd) 里有两份现成的 unit，一份是系统服务，一份
-供 `systemctl --user` 使用。每个文件开头就是安装命令、写账号的步骤和查看日志的
-命令。以服务器为例，简版如下：
+供 `systemctl --user` 使用；用户级那份开头就是它自己的安装步骤。系统级那份正是安装
+包里放的文件，所以手工安装无非是把安装包做的事手做一遍：
 
 ```sh
-install -m 0755 dist/SDAutoLogin-linux-amd64 /usr/local/bin/SDAutoLogin
+install -m 0755 dist/SDAutoLogin-linux-amd64 /usr/bin/SDAutoLogin
 useradd --system --create-home --home-dir /var/lib/sdautologin \
         --shell /usr/sbin/nologin sdautologin
-install -m 0644 packaging/systemd/system/sdautologin.service \
-        /etc/systemd/system/sdautologin.service
-sudo -u sdautologin /usr/local/bin/SDAutoLogin --home=/var/lib/sdautologin \
+install -D -m 0644 packaging/systemd/system/sdautologin.service \
+        /usr/lib/systemd/system/sdautologin.service
+sudo -u sdautologin /usr/bin/SDAutoLogin --home=/var/lib/sdautologin \
      --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
 systemctl daemon-reload
 systemctl enable --now sdautologin
@@ -343,6 +431,85 @@ docker run --rm -v sdautologin:/data sdautologin \
 `--home=/data` 写在入口点里，因此 `status` 之类的一次性命令读取的是同一份设置。
 当 `status` 报告会话不在线时，容器会被标记为 unhealthy——这正是这个程序唯一值得
 关注的事情。
+
+### OpenWrt
+
+两个 MIPS 构建各打成一份安装包，每种字节序一个：
+
+| 安装包 | 适用 |
+| --- | --- |
+| `sdautologin_<version>-1_mips_24kc.ipk` | 大端板子，比如 Atheros 系（ath79） |
+| `sdautologin_<version>-1_mipsel_24kc.ipk` | 小端板子，比如 MediaTek 系（ramips、mt76x8） |
+
+路由器上没有 systemd，所以这是几个安装包里的例外：它装的是 procd 启动脚本
+`/etc/init.d/sdautologin` 和 UCI 配置 `/etc/config/sdautologin`。
+
+路由器最缺的是 flash，所以程序是以压缩形式装到
+`/usr/lib/sdautologin/SDAutoLogin.gz` 的，而 `/usr/bin/SDAutoLogin` 是一个短小的
+包装脚本，首次启动时把它解到 `/tmp` 再从那里运行。这样 flash 占用从 7.7 MiB 降到
+2.7 MiB，代价是运行时占用 7.7 MiB 内存，而内存是这两者里更容易让出来的。`/tmp`
+里的那份每次开机、每次升级各解一次，而且解出来的文件名里带着版本号，所以新包会解出
+自己的程序，而不是继续运行上一个包留在内存里的那份。
+
+```sh
+go run ./tools/build openwrt
+scp dist/packages/sdautologin_*_mipsel_24kc.ipk root@router:/tmp/
+ssh root@router opkg install /tmp/sdautologin_*_mipsel_24kc.ipk
+```
+
+安装时会启用该服务，此后随路由器一起启动。接着写账号：
+
+```sh
+uci set sdautologin.main.username=s1234567
+uci set sdautologin.main.password=SECRET
+uci set sdautologin.main.isp=@zgyd
+uci commit sdautologin
+/etc/init.d/sdautologin restart
+```
+
+留空的选项不会被传下去，此时由 `config.json` 决定——设置页写的就是它。没有显示器
+的路由器可以把设置页打开，从它所服务的网络里访问：
+
+```sh
+uci set sdautologin.main.settings=0.0.0.0:8088
+uci commit sdautologin
+/etc/init.d/sdautologin restart
+```
+
+然后打开 `http://10.9.1.3:8088/`，或者路由器实际的地址。地址不是回环时，URL 里的
+令牌是唯一的保护，因此请只在可信网络里开着，或者用隧道访问。
+
+`/etc/config/sdautologin` 已声明为配置文件，升级时会保留里面写好的账号；`config.json`
+放在 overlay 上的 `/etc/sdautologin`，重启和升级都不会丢。
+
+日志文件在这里默认关闭，因为 `/etc` 就在 flash 上：同样的日志行程序本来就会写到
+控制台，procd 把它们交给 `logd`，用 `logread -e SDAutoLogin` 从内存里读回。想要留下
+文件可以打开它，代价是日志长满后最多占八个 MiB 的 flash：
+
+```sh
+uci set sdautologin.main.log_file=1
+uci commit sdautologin
+/etc/init.d/sdautologin restart
+```
+
+#### 编进固件镜像
+
+路由器也可以出厂就带着这个程序，而不是事后安装。`packaging/openwrt/Makefile` 就是
+为此准备的 OpenWrt 包，它需要的 Go 构建系统来自 packages 源：
+
+```sh
+cd $OPENWRT
+./scripts/feeds update packages
+./scripts/feeds install golang
+mkdir -p package/sdautologin
+cp -r /path/to/SDAutoLogin/packaging/openwrt/. package/sdautologin/
+make menuconfig          # Network -> sdautologin
+```
+
+它装的是未压缩的程序，因为在那里压缩省不下东西：squashfs 会压缩它保存的所有内容，
+而且压得比 gzip 更好（本程序 1.9 MiB 对 2.7 MiB）。不压缩也让程序保持为只读文件
+系统里的一个文件，而不是内存里的一份拷贝。启动脚本和 UCI 配置与上面那个安装包装的
+是同两个文件。
 
 ## 界面语言
 
@@ -378,6 +545,7 @@ docker run --rm -v sdautologin:/data sdautologin \
 | `tools/icogen/` | 图标生成器 |
 | `tools/build/` | 任务运行器，脚本与 CMake 目标都由它执行 |
 | `packaging/systemd/` | systemd unit，一份系统服务、一份 `systemctl --user` |
+| `packaging/openwrt/` | OpenWrt 包，以及它的 procd 启动脚本和 UCI 配置 |
 | `Dockerfile` | 容器镜像，用 vendor 目录里的源码编译 |
 | `CMakeLists.txt` | 任务运行器的 CMake 前端 |
 | `dist/` | 编译结果，以及在 `dist/` 中运行时的设置与日志 |

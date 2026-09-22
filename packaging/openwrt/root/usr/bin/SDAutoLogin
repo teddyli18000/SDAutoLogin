@@ -1,0 +1,41 @@
+#!/bin/sh
+
+# SDAutoLogin, kept compressed on the flash and unpacked into memory when it is
+# needed.
+#
+# A router has little flash and a fair amount of memory, and this program is one
+# large binary, so the package installs it gzipped: about 2.8 MiB of flash
+# instead of 8. The copy under /tmp, which is a temporary filesystem in memory,
+# is unpacked on the first start after a boot and again after an upgrade.
+
+# The version is written here by the build task that makes the package,
+# tools/build/pack_openwrt.go, and it is part of the name below on purpose.
+# Every file in a package carries a fixed timestamp, so a newer package cannot
+# be told from the one before it by time, and /tmp is not cleared by an upgrade
+# either. A name that changes with the version is what makes the new program
+# unpack itself instead of the copy of the old one being run for as long as the
+# router is up.
+version=@VERSION@
+
+# Both paths are written here and in the build task as well.
+archive=/usr/lib/sdautologin/SDAutoLogin.gz
+unpacked=/tmp/sdautologin/SDAutoLogin-$version
+
+if [ ! -x "$unpacked" ]; then
+	# What an earlier version left in memory is of no use now, so it goes
+	# before the room is taken by another copy.
+	rm -f /tmp/sdautologin/SDAutoLogin-*
+	# Unpacking goes to a name of our own that is moved into place afterwards,
+	# so that a second start cannot run half of a binary.
+	mkdir -p "$(dirname "$unpacked")" || exit 1
+	partial="$unpacked.$$"
+	if ! gunzip -c "$archive" > "$partial"; then
+		echo "SDAutoLogin: cannot unpack $archive, is there room in /tmp?" >&2
+		rm -f "$partial"
+		exit 1
+	fi
+	chmod 0755 "$partial" || exit 1
+	mv "$partial" "$unpacked" || exit 1
+fi
+
+exec "$unpacked" "$@"

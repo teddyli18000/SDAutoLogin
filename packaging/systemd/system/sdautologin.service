@@ -1,23 +1,15 @@
 # SDAutoLogin as a system service, for a server or a machine with no display.
 #
-# Install:
-#   install -m 0755 dist/SDAutoLogin-linux-amd64 /usr/local/bin/SDAutoLogin
-#   useradd --system --create-home --home-dir /var/lib/sdautologin \
-#           --shell /usr/sbin/nologin sdautologin
-#   install -m 0644 packaging/systemd/system/sdautologin.service \
-#           /etc/systemd/system/sdautologin.service
+# The account has to be written down once before the service stays up, since a
+# service has nobody to answer the setup wizard:
 #
-# The account has to be written down once before the service can run, since a
-# service has nobody to answer the setup wizard. Either pass it on the command
-# line, which is what a provisioning script does:
-#
-#   sudo -u sdautologin /usr/local/bin/SDAutoLogin --home=/var/lib/sdautologin \
+#   sudo -u sdautologin /usr/bin/SDAutoLogin --home=/var/lib/sdautologin \
 #        --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
 #
-# or add --settings=127.0.0.1:8088 to ExecStart below and reach the page
-# through an SSH tunnel: ssh -L 8088:127.0.0.1:8088 the-server, then open
-# http://127.0.0.1:8088/ . Bind to 0.0.0.0 only on a network you trust, the
-# page holds the account in clear text.
+# or add --settings=127.0.0.1:8088 to ExecStart below and reach the page through
+# an SSH tunnel: ssh -L 8088:127.0.0.1:8088 the-server, then open
+# http://127.0.0.1:8088/ . Bind to 0.0.0.0 only on a network you trust, the page
+# holds the account in clear text.
 #
 # Then:
 #   systemctl daemon-reload
@@ -40,7 +32,7 @@ Group=sdautologin
 # config.json and logs/ live here, not next to the binary, so the binary can
 # stay on a read-only /usr.
 StateDirectory=sdautologin
-ExecStart=/usr/local/bin/SDAutoLogin run --home=/var/lib/sdautologin
+ExecStart=/usr/bin/SDAutoLogin run --home=/var/lib/sdautologin
 Restart=on-failure
 RestartSec=15
 

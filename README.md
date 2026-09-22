@@ -89,6 +89,12 @@ go run ./tools/build            # list the tasks
 go run ./tools/build build      # this platform
 go run ./tools/build console    # console build, for scripts and services
 go run ./tools/build all        # Windows and Linux, every target below
+go run ./tools/build packages   # every package below, into dist/packages/
+go run ./tools/build windows    # the Windows archives and their manifests
+go run ./tools/build deb        # the Debian packages
+go run ./tools/build rpm        # the RPM packages
+go run ./tools/build pacman     # the Arch packages
+go run ./tools/build openwrt    # the OpenWrt packages, for a router
 go run ./tools/build test       # go vet and go test
 go run ./tools/build icon       # redraw the icon from the drawing code
 go run ./tools/build resources  # regenerate the Windows resource file
@@ -103,6 +109,7 @@ cmake --build build                      # builds the program
 cmake --build build --target check       # go vet and go test
 cmake --build build --target SDAutoLogin-console
 cmake --build build --target all-platforms
+cmake --build build --target packages
 cmake --install build --prefix /usr/local
 ```
 
@@ -218,6 +225,8 @@ help           print the usage text
 
 --home=DIR         keep config.json and logs/ in DIR instead of next to the
                    executable, for a service or a container
+--no-log           keep the log on the console alone, with no logs/app.log, for
+                   a machine with a small flash
 --username=NAME    use this account instead of the configured one
 --password=SECRET  use this password instead of the configured one
 --isp=SUFFIX       service suffix such as @zgyd, empty for the campus network
@@ -299,6 +308,7 @@ first run.
 | `autoLogin` | `true` | sign back in when the session is gone |
 | `checkInternet` | `true` | also probe the probe addresses |
 | `verboseLog` | `true` | write per-check diagnostics |
+| `logToFile` | `true` | also write `logs/app.log`, see `--no-log` |
 | `probeUrls` | see below | addresses used for the reachability probe |
 | `jsVersion` | `3.3.3` | value the portal page sends |
 | `language` | `auto` | `auto`, `zh` or `en` |
@@ -316,7 +326,9 @@ Autostart entries: the registry key
 ## Files
 
 - `config.json` - settings
-- `logs/app.log` - log, rotated to `app.log.1` when it exceeds 4 MiB
+- `logs/app.log` - log, rotated to `app.log.1` when it exceeds 4 MiB. `--no-log`
+  and the `logToFile` setting leave it out, which is what a machine with a small
+  flash, such as a router, does: the same lines go to the console either way.
 
 Both live next to the executable by default, so a build in `dist/` keeps its
 settings and log there, and moving the executable means moving `config.json` with
@@ -331,20 +343,111 @@ account, so the account is written down once first, either by passing it on the
 command line with `--save`, or from the settings page when the service is started
 with `--settings`.
 
+### Packages
+
+`go run ./tools/build packages` writes a package for every distribution this
+program is worth installing on:
+
+| Distribution | Package | Installed with |
+| --- | --- | --- |
+| Debian, Ubuntu | `sdautologin_1.0.0-1_amd64.deb` | `apt install ./...` |
+| Fedora, RHEL, openSUSE | `sdautologin-1.0.0-1.x86_64.rpm` | `dnf install` or `rpm -i` |
+| Arch | `sdautologin-1.0.0-1-x86_64.pkg.tar.zst` | `pacman -U` |
+| OpenWrt | `sdautologin_1.0.0-1_mipsel_24kc.ipk` | `opkg install` |
+| Windows | `SDAutoLogin-1.0.0-windows-amd64.zip` | unpack it |
+
+Each one holds the same thing in the layout of its distribution: the program,
+built without the tray; the systemd unit that runs it; the file that declares the
+`sdautologin` user it runs as; and the licence and the documents. The settings and
+the log live in `/var/lib/sdautologin`, the service is enabled by the package, and
+every one of them has to be given an account before it stays up, since a service
+has nobody to answer the setup wizard. OpenWrt is the one that differs, having no
+systemd and no `/var/lib`: its section below has the details.
+
+The packages are written by the build task itself, with the standard library
+alone: none of them needs a packaging toolchain installed, and an ipk or a deb
+needs nothing at all. The Arch package is the exception, because Go has no zstd
+or xz writer: it is packed with `zstd` when that is installed, and with `xz` or
+`gzip` when it is not, and the task says which of them it used.
+
+Nothing is signed. That is fine for a local install — `dpkg -i`, `rpm -i` and
+`pacman -U` all take a file that is not signed, pacman only complaining when its
+configuration asks for signatures and `LocalFileSigLevel` is not `Optional` — but
+a repository of its own would need a key, and a key is not something a build task
+can invent.
+
+### Debian and Ubuntu
+
+```sh
+sudo apt install ./dist/packages/sdautologin_1.0.0-1_amd64.deb
+sudo -u sdautologin /usr/bin/SDAutoLogin --home=/var/lib/sdautologin \
+     --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+sudo systemctl restart sdautologin
+```
+
+The package creates the `sdautologin` user, enables the service and starts it;
+without an account it stops after a few tries, which is what the postinst says
+when it finds no `config.json` yet. `/usr/share/doc/sdautologin/README.Debian`
+has the same steps on the machine. Removing the package leaves the settings and
+the log where they are, and so does purging it: the account in them is not the
+package's to throw away.
+
+### Fedora, RHEL and openSUSE
+
+```sh
+sudo rpm -i dist/packages/sdautologin-1.0.0-1.x86_64.rpm
+sudo -u sdautologin /usr/bin/SDAutoLogin --home=/var/lib/sdautologin \
+     --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+sudo systemctl restart sdautologin
+```
+
+`rpm -K` checks the digests of the package, `rpm -qi` shows what the header says
+about it, and `rpm -e sdautologin` removes it, leaving `/var/lib/sdautologin`
+alone.
+
+### Arch
+
+```sh
+sudo pacman -U dist/packages/sdautologin-1.0.0-1-x86_64.pkg.tar.zst
+sudo -u sdautologin /usr/bin/SDAutoLogin --home=/var/lib/sdautologin \
+     --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+sudo systemctl restart sdautologin
+```
+
+`pacman -Qi` and `pacman -Qkk` work on what it installs, the second one checking
+every file against the listing the package carries.
+
+### Windows
+
+The archive holds the program, the readme and the licence, and nothing else:
+there is no installer, because there is nothing to install. Unpack it where it is
+to stay and start the program; it writes its settings next to itself, which is
+also why the folder is the thing to keep.
+
+`dist/packages/manifests/` holds what the package managers that can install such
+an archive want, `scoop/sdautologin.json` and the three files of the winget
+manifest. Both name the archives of a release as their download, at
+`<project address>/releases/download/v<version>/`, which is where Gitea, the host
+this project is published on, serves the attachments of a release; change
+`releaseURL` in `tools/build/pack_windows.go` when releases move elsewhere, and
+both follow. The winget command line checks them
+(`winget validate --manifest dist/packages/manifests/winget`), and the Scoop one
+declares the settings and the log as persistent, so an update keeps the account.
+
 ### systemd
 
 Two ready made units are in [packaging/systemd](packaging/systemd), one for a
-system service and one for `systemctl --user`. Each file starts with the
-installation commands, the provisioning step and the commands to follow the log.
-The short version, for a server:
+system service and one for `systemctl --user`; the user unit opens with its own
+installation steps. The system one is the file the packages install, so doing it
+by hand is doing what they do, only by hand:
 
 ```sh
-install -m 0755 dist/SDAutoLogin-linux-amd64 /usr/local/bin/SDAutoLogin
+install -m 0755 dist/SDAutoLogin-linux-amd64 /usr/bin/SDAutoLogin
 useradd --system --create-home --home-dir /var/lib/sdautologin \
         --shell /usr/sbin/nologin sdautologin
-install -m 0644 packaging/systemd/system/sdautologin.service \
-        /etc/systemd/system/sdautologin.service
-sudo -u sdautologin /usr/local/bin/SDAutoLogin --home=/var/lib/sdautologin \
+install -D -m 0644 packaging/systemd/system/sdautologin.service \
+        /usr/lib/systemd/system/sdautologin.service
+sudo -u sdautologin /usr/bin/SDAutoLogin --home=/var/lib/sdautologin \
      --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
 systemctl daemon-reload
 systemctl enable --now sdautologin
@@ -380,6 +483,96 @@ docker run --rm -v sdautologin:/data sdautologin \
 reads the same settings as the service. The container is marked unhealthy when
 `status` reports the session is not up, which is the one thing worth noticing
 about it.
+
+### OpenWrt
+
+The two MIPS builds are packaged, one for each byte order:
+
+| Package | For |
+| --- | --- |
+| `sdautologin_<version>-1_mips_24kc.ipk` | big endian boards, such as the Atheros ones (ath79) |
+| `sdautologin_<version>-1_mipsel_24kc.ipk` | little endian boards, such as the MediaTek ones (ramips, mt76x8) |
+
+A router has no systemd, so this is the odd one out among the packages: it
+installs a procd init script at `/etc/init.d/sdautologin` and a UCI configuration
+at `/etc/config/sdautologin`.
+
+Flash is what a router has least of, so the program is installed compressed as
+`/usr/lib/sdautologin/SDAutoLogin.gz`, and `/usr/bin/SDAutoLogin` is a short
+script that unpacks it into `/tmp` on the first start and runs it from there.
+That is 2.7 MiB of flash instead of 7.7, and 7.7 MiB of memory while it runs,
+which is the easier of the two to spare. The copy in `/tmp` is unpacked once per
+boot and once per upgrade, and the name it is unpacked to carries the version, so
+a new package unpacks its own program rather than running the one the package
+before it left behind.
+
+```sh
+go run ./tools/build openwrt
+scp dist/packages/sdautologin_*_mipsel_24kc.ipk root@router:/tmp/
+ssh root@router opkg install /tmp/sdautologin_*_mipsel_24kc.ipk
+```
+
+Installing enables the service, so it comes up with the router from then on.
+Give it the account:
+
+```sh
+uci set sdautologin.main.username=s1234567
+uci set sdautologin.main.password=SECRET
+uci set sdautologin.main.isp=@zgyd
+uci commit sdautologin
+/etc/init.d/sdautologin restart
+```
+
+An option that is left empty is not passed on, and then `config.json` decides,
+which is what the settings page writes. That page can be turned on for a router
+with no display, and reached from the network it serves:
+
+```sh
+uci set sdautologin.main.settings=0.0.0.0:8088
+uci commit sdautologin
+/etc/init.d/sdautologin restart
+```
+
+Then open `http://10.9.1.3:8088/`, or whatever address the router answers on.
+With an address that is not loopback the token in the URL is the only
+protection, so keep it on a trusted network or reach it over a tunnel.
+
+`/etc/config/sdautologin` is declared as a configuration file, so an upgrade
+keeps the account that is in it, and `config.json` lives in `/etc/sdautologin`,
+which is on the overlay and survives a reboot and an upgrade.
+
+The log file is off by default here, since `/etc` is on the flash: the program
+writes the same lines to the console, procd hands them to `logd`, and `logread -e
+SDAutoLogin` reads them back out of memory. Turn it on for a file, which costs up
+to eight megabytes of flash once the log has grown to its limit:
+
+```sh
+uci set sdautologin.main.log_file=1
+uci commit sdautologin
+/etc/init.d/sdautologin restart
+```
+
+#### Building it into an image
+
+A router can also carry the program from the start, rather than installing it
+afterwards. `packaging/openwrt/Makefile` is an OpenWrt package for that, and the
+Go build system it needs comes from the packages feed:
+
+```sh
+cd $OPENWRT
+./scripts/feeds update packages
+./scripts/feeds install golang
+mkdir -p package/sdautologin
+cp -r /path/to/SDAutoLogin/packaging/openwrt/. package/sdautologin/
+make menuconfig          # Network -> sdautologin
+```
+
+It installs the program uncompressed, since compressing it there would not save
+anything: a squashfs compresses everything it holds and does that better than
+gzip does (1.9 MiB against 2.7 for this program). Leaving it alone also keeps it
+a file in the read only filesystem, rather than a copy of it in memory. The init
+script and the UCI configuration are the same two files the package above
+installs.
 
 ## Interface language
 
@@ -421,6 +614,7 @@ which is what keeps the public surface at the command line and the settings page
 | `tools/icogen/` | icon generator |
 | `tools/build/` | task runner, used by the scripts and the CMake targets |
 | `packaging/systemd/` | systemd units, for a system service and for `systemctl --user` |
+| `packaging/openwrt/` | the OpenWrt package, its procd init script and its UCI configuration |
 | `Dockerfile` | container image, built from the vendored sources |
 | `CMakeLists.txt` | CMake front end for the task runner |
 | `dist/` | build results, plus the settings and log of a build started from there |

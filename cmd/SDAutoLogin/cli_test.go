@@ -135,6 +135,33 @@ func TestParseOptionsTakesTheOptionsThatHaveNoValue(t *testing.T) {
 	}
 }
 
+func TestParseOptionsSilencesTheLogFile(t *testing.T) {
+	// --no-log takes no value, belongs to no command in particular, and is what a
+	// machine with a small flash passes on every start.
+	opts, rest, err := parseOptions([]string{"run", "--home=/etc/sdautologin", "--no-log"})
+	if err != nil {
+		t.Fatalf("parseOptions: %v", err)
+	}
+	if !opts.noLog {
+		t.Error("--no-log was not recorded")
+	}
+	if len(rest) != 1 || rest[0] != "run" {
+		t.Errorf("rest = %v, want the command left alone", rest)
+	}
+	if !opts.given() {
+		t.Error("--no-log is a value that was given, so --save writes it down")
+	}
+	if opts.accountGiven() {
+		t.Error("--no-log is not an account value, so the reminder about --save is not for it")
+	}
+
+	cfg := &config.Config{LogToFile: true}
+	opts.applyTo(cfg)
+	if cfg.LogToFile {
+		t.Error("--no-log did not turn the log file off")
+	}
+}
+
 func TestParseOptionsKeepsAnExplicitlyEmptyValue(t *testing.T) {
 	// An empty suffix is how the campus network itself is asked for: it has no
 	// operator suffix, and leaving the option out would keep the configured one.
@@ -295,6 +322,9 @@ func TestCheckOnlyAcceptsAnOptionInTheModeItBelongsTo(t *testing.T) {
 		{options{settings: &addr}, "daemon"},
 		{options{json: true}, "status"},
 		{options{}, "run"},
+		// Every command may be told to keep the log on the console alone.
+		{options{noLog: true}, "run"},
+		{options{noLog: true}, "status"},
 		// Asking what the program does is always answered, whatever else was
 		// written next to it.
 		{options{app: &addr}, "help"},

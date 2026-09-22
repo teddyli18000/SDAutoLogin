@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# Stop the service before the files go, which is what opkg runs this for.
+#
+# It matters more here than it does elsewhere: the program runs out of /tmp,
+# unpacked from the archive in /usr/lib, so a process left behind by a removal
+# would be one that nothing on the router can reach any more, neither the init
+# script that has just been deleted nor the program that was taken out from
+# under it. An upgrade stops it for the same reason, and the postinst of the new
+# package starts it again.
+#
+# IPKG_INSTROOT is set while a package is installed into an image being built
+# rather than into the running system, and there is no service to stop then.
+
+[ -n "${IPKG_INSTROOT}" ] || /etc/init.d/sdautologin stop

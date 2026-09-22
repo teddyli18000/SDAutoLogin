@@ -1,0 +1,40 @@
+SDAutoLogin on Debian and Ubuntu
+================================
+
+What the package installs
+-------------------------
+
+  /usr/bin/SDAutoLogin                       the program, built without a tray
+  /lib/systemd/system/sdautologin.service    the service that runs it
+  /usr/lib/sysusers.d/sdautologin.conf       the user it runs as
+
+The service starts with the machine, checks the campus session every few seconds
+and signs back in whenever it was dropped. It never signs the session out, and it
+has no tray icon: this package is for a machine that is reached over SSH or has
+no desktop at all. For a desktop, use the archive from the project page instead.
+
+Giving it an account
+--------------------
+
+A service has nobody to answer the setup wizard, so the account is written down
+once. The program reads /var/lib/sdautologin/config.json, and the line below
+writes that file:
+
+  sudo -u sdautologin SDAutoLogin --home=/var/lib/sdautologin \
+       --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+  sudo systemctl restart sdautologin
+
+Leave the service suffix out for the campus network itself. Where the settings
+page is easier than the command line, add --settings=127.0.0.1:8088 to the
+ExecStart line of the unit ("systemctl edit sdautologin"), reach it through an
+SSH tunnel, and write the account there.
+
+Settings and log
+----------------
+
+  /var/lib/sdautologin/config.json      the settings, the password only when it
+                                        was asked to keep it
+  /var/lib/sdautologin/logs/app.log     the log, rotated when it passes 4 MiB
+
+Both stay where they are when the package is removed or purged, since the account
+in them is not the package's to throw away.

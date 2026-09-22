@@ -27,8 +27,10 @@ func main() {
 	opts, rest, err := parseOptions(args)
 	appDir := resolveAppDir(opts.home)
 	// The log is opened before the console is attached, so a console that
-	// cannot be attached is recorded instead of being lost.
-	logging.Log.Init(filepath.Join(appDir, "logs"))
+	// cannot be attached is recorded instead of being lost. --no-log is known
+	// here, before the configuration is read, so a run that asks for no log file
+	// does not create one.
+	logging.Log.Init(filepath.Join(appDir, "logs"), !opts.noLog)
 	if len(args) > 0 {
 		// Arguments mean a command was asked for, so a terminal is waiting for
 		// the answer. See attachConsole.

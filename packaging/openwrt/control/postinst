@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# Enable the service, so it comes up with the router from now on, and start it.
+# Until the account is set the program has nothing to sign in with, and procd
+# gives up after a few tries, which is what the lines below are for.
+
+[ -n "${IPKG_INSTROOT}" ] || {
+	/etc/init.d/sdautologin enable
+	/etc/init.d/sdautologin start
+	echo "Set the account, then start the service again:"
+	echo "  uci set sdautologin.main.username=NAME"
+	echo "  uci set sdautologin.main.password=SECRET"
+	echo "  uci commit sdautologin"
+	echo "  /etc/init.d/sdautologin restart"
+}

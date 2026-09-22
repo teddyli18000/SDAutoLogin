@@ -55,6 +55,7 @@ endfunction()
 go_task(SDAutoLogin-console console)
 
 go_task(all-platforms all)
+go_task(packages packages)
 go_task(icon icon)
 go_task(resources resources)
 go_task(check test)

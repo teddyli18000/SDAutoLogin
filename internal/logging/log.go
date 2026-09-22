@@ -15,8 +15,9 @@ import (
 // maxLogSize is the size at which app.log is rotated into app.log.1.
 const maxLogSize = 4 << 20
 
-// Logger appends timestamped lines to stderr and logs/app.log. DEBUG lines are
-// only written when verbose mode is on, see SetVerbose.
+// Logger appends timestamped lines to stderr and, unless it was told not to,
+// to logs/app.log. DEBUG lines are only written when verbose mode is on, see
+// SetVerbose.
 //
 // The console copy goes to stderr rather than stdout so that what a command
 // prints on stdout is only its result, which is what lets a script read the
@@ -31,12 +32,42 @@ type Logger struct {
 
 var Log = &Logger{}
 
-func (l *Logger) Init(dir string) {
+// Init opens the log. dir is where app.log lives, and toFile false keeps the log
+// on the console alone, which is what a machine with a small flash wants: its
+// syslog already keeps whatever the program writes to stderr, and a rotating file
+// on top of that is the same text written to the flash twice.
+func (l *Logger) Init(dir string, toFile bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.dir = dir
+	// A second Init replaces the first one, so whatever was open is closed
+	// rather than left behind.
+	if l.file != nil {
+		_ = l.file.Close()
+		l.file = nil
+	}
+	// The directory is only remembered when there is a file to open in it: Path
+	// tells the tray and the settings page whether there is a log file to show,
+	// and a directory nothing was written into would answer that there is one.
+	l.dir = ""
+	if !toFile {
+		return
+	}
 	_ = os.MkdirAll(dir, 0o755)
+	l.dir = dir
 	l.openLocked()
+}
+
+// CloseFile stops writing the log to its file. The console copy keeps going: the
+// file is the copy that can be turned off, since a machine that has no room for
+// it usually has a service manager keeping the console output anyway.
+func (l *Logger) CloseFile() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.file != nil {
+		_ = l.file.Close()
+		l.file = nil
+	}
+	l.dir = ""
 }
 
 // SetVerbose enables or disables DEBUG output.

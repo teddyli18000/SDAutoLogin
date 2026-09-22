@@ -4,6 +4,12 @@
 *.sh text eol=lf
 *.cmd text eol=crlf
 
+# the files under packaging/ are read from the working copy and installed on the
+# target, where a carriage return at the end of a line is not what it looks like:
+# a shell script whose shebang ends in one does not run at all. Some of them have
+# no extension for a rule to match, so the whole directory is pinned.
+packaging/** text eol=lf
+
 # the generated Windows resources are binaries: store them byte for byte, do not
 # let git guess and touch their line endings
 *.syso binary

@@ -42,6 +42,11 @@ Global option:
   --home=DIR          keep config.json and logs/ in DIR instead of next to the
                       executable, which is what a service or a container uses to
                       point them at a writable directory
+  --no-log            keep the log on the console alone instead of also writing
+                      logs/app.log, which is what a machine with a small flash
+                      wants: its syslog already keeps what the program writes to
+                      the console, and the file would be the same text on the
+                      flash a second time
 
 Options, for the commands that read the account:
   --username=NAME     use this account instead of the configured one
@@ -103,6 +108,9 @@ type options struct {
 	save bool
 	// json prints the status report as JSON instead of text.
 	json bool
+	// noLog keeps the log on the console alone, for the machines that have no
+	// room for it on the flash.
+	noLog bool
 }
 
 // knownOption reports whether arg is one of the options this program defines.
@@ -111,7 +119,8 @@ type options struct {
 func knownOption(arg string) bool {
 	name, _, _ := strings.Cut(arg, "=")
 	switch name {
-	case "--home", "--username", "--password", "--isp", "--settings", "--app", "--save", "--json":
+	case "--home", "--username", "--password", "--isp", "--settings", "--app",
+		"--save", "--json", "--no-log":
 		return true
 	}
 	return false
@@ -168,6 +177,8 @@ func (o *options) set(name, value string) bool {
 		o.save = true
 	case "--json":
 		o.json = true
+	case "--no-log":
+		o.noLog = true
 	default:
 		return false
 	}
@@ -208,6 +219,14 @@ func parseOptions(args []string) (options, []string, error) {
 
 // given reports whether anything was overridden on the command line.
 func (o options) given() bool {
+	return o.accountGiven() || o.noLog
+}
+
+// accountGiven reports whether one of the account options was used, which is when
+// the reminder about --save is worth printing: that reminder is about a secret
+// used for one run only, while --no-log is a switch whose whole point is to be
+// passed on every start.
+func (o options) accountGiven() bool {
 	return o.username != nil || o.password != nil || o.isp != nil
 }
 
@@ -222,6 +241,9 @@ func (o options) applyTo(cfg *config.Config) {
 	}
 	if o.isp != nil {
 		cfg.AccountSuffix = *o.isp
+	}
+	if o.noLog {
+		cfg.LogToFile = false
 	}
 }
 
@@ -313,13 +335,19 @@ func loadForCLI(appDir string, opts options) (*config.Config, bool) {
 				return cfg, false
 			}
 			fmt.Fprintf(os.Stderr, "config updated: %s\n", cfg.Path())
-		} else {
+		} else if opts.accountGiven() {
 			fmt.Fprintln(os.Stderr, "note: the values given on the command line are used for this run only, add --save to write them to the config file")
 		}
 	}
 
 	i18n.SetLang(i18n.Lang(cfg.Language))
 	logging.Log.SetVerbose(cfg.VerboseLog)
+	if !cfg.LogToFile {
+		// The log file was opened before the configuration could be read, since
+		// a failure to read it has to be logged as well, so it is closed here
+		// when the configuration says it is not wanted.
+		logging.Log.CloseFile()
+	}
 	return cfg, true
 }
 

@@ -1,0 +1,492 @@
+// The packaging half of the task runner: the formats this repository publishes,
+// and the pieces they share.
+//
+// An ipk and a deb are the same container, a plain ar archive of a version
+// marker and two tar archives, so that layout is written once, here, and the two
+// formats only describe what goes into it. The rpm and the pacman format are
+// their own thing and live in their own files next to this one.
+
+package main
+
+import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+)
+
+const (
+	// pkgDir is where the packages are written, inside distDir.
+	pkgDir = "packages"
+	// pkgName is the name the packages carry. It is lower case, which is how
+	// OpenWrt and the Debian archive want it, and it is also the name of the
+	// UCI configuration and of the init script in the OpenWrt package.
+	pkgName = "sdautologin"
+	// pkgRelease is the revision of the packaging, bumped when only the files
+	// around the binary change. Every one of these formats spells a version
+	// "upstream-revision", the upstream half being the constant in internal/app.
+	pkgRelease = "1"
+	// pkgMaintainer is who the packages name as their packager, and where a
+	// Debian package sends a bug report.
+	pkgMaintainer = "Zhiqiang Lan <zqlan@suda.edu.cn>"
+	// pkgSummary is the one line every format shows as the description. Each
+	// format adds its own long description below it.
+	pkgSummary = "Campus network auto login"
+	// pkgCopyright is who the licence belongs to, which the Debian copyright
+	// file has to name.
+	pkgCopyright = "2026 Zhiqiang Lan"
+	// pkgSection is how Debian and OpenWrt classify the package.
+	pkgSection = "net"
+	// unitFile is the systemd unit every package installs: the same file the
+	// README tells an administrator to copy by hand, since one file used twice
+	// is one file that cannot drift.
+	unitFile = "packaging/systemd/system/sdautologin.service"
+	// sysusersFile declares the system user the service runs as, so that no
+	// maintainer script has to run adduser. systemd reads the directory it is
+	// installed into, and there is nothing distribution specific about the file.
+	sysusersFile = "packaging/systemd/sysusers.d/" + pkgName + ".conf"
+	// unitTarget and sysusersConf are where the two go on the target, which is
+	// the same place for the Debian and the rpm family.
+	unitTarget   = "/usr/lib/systemd/system/" + pkgName + ".service"
+	sysusersConf = "/usr/lib/sysusers.d/" + pkgName + ".conf"
+	// docDir, licensePath and changelogPath are where Debian, the rpm family and
+	// Arch all look for the documentation and the licence of a package.
+	docDir        = "/usr/share/doc/" + pkgName
+	licensePath   = "/usr/share/licenses/" + pkgName + "/LICENSE"
+	changelogPath = docDir + "/CHANGELOG.md"
+)
+
+// systemdFiles is what a package for a distribution that boots with systemd
+// installs: the program, the unit that runs it, the file that declares the user
+// it runs as, the licence and the two documents. The paths are named the way
+// they are on the target, which is what the rpm and the pacman formats write;
+// the Debian layout adds the leading dot of its own archives.
+func systemdFiles(root, binary string) ([]pkgEntry, error) {
+	bin, err := readBinary(binary)
+	if err != nil {
+		return nil, err
+	}
+	// The unit and the file that declares the user are read by systemd on the
+	// target, so they are the two that are checked for Windows line endings.
+	unit, err := readText(filepath.Join(root, unitFile))
+	if err != nil {
+		return nil, err
+	}
+	sysusers, err := readText(filepath.Join(root, sysusersFile))
+	if err != nil {
+		return nil, err
+	}
+	license, err := readBinary(filepath.Join(root, "LICENSE"))
+	if err != nil {
+		return nil, err
+	}
+	readme, err := readBinary(filepath.Join(root, "README.md"))
+	if err != nil {
+		return nil, err
+	}
+	changelog, err := readBinary(filepath.Join(root, "CHANGELOG.md"))
+	if err != nil {
+		return nil, err
+	}
+
+	return []pkgEntry{
+		{name: "/usr/bin/SDAutoLogin", mode: 0o755, data: bin},
+		{name: unitTarget, mode: 0o644, data: unit},
+		{name: sysusersConf, mode: 0o644, data: sysusers},
+		{name: licensePath, mode: 0o644, data: license},
+		{name: docDir + "/README.md", mode: 0o644, data: readme},
+		{name: changelogPath, mode: 0o644, data: changelog},
+	}, nil
+}
+
+// pkgEpoch is the timestamp written on everything inside a package. It is a
+// fixed time rather than the time of the build, so packing the same build twice
+// gives the same file.
+var pkgEpoch = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// pkgEntry is one file of an archive, held in memory: a package is small enough
+// that nothing has to be streamed.
+type pkgEntry struct {
+	name string
+	mode int64
+	dir  bool
+	data []byte
+}
+
+// binaryEntry reads one of the files that is installed as it is, the binary
+// itself being the one that matters: its bytes are its own business.
+func binaryEntry(source, target string, mode int64) (pkgEntry, error) {
+	data, err := readBinary(source)
+	if err != nil {
+		return pkgEntry{}, err
+	}
+	return pkgEntry{name: target, mode: mode, data: data}, nil
+}
+
+// textEntry reads one of the files that is installed and then read on the
+// target, refusing one that has Windows line endings.
+func textEntry(source, target string, mode int64) (pkgEntry, error) {
+	data, err := readText(source)
+	if err != nil {
+		return pkgEntry{}, err
+	}
+	return pkgEntry{name: target, mode: mode, data: data}, nil
+}
+
+// readBinary reads a file whose bytes are its own business.
+func readBinary(source string) ([]byte, error) {
+	return os.ReadFile(source)
+}
+
+// readText reads a file that a program on the target will read, refusing one
+// that has Windows line endings: a shell script whose shebang ends in a carriage
+// return does not run at all, and the platform the sources were checked out on is
+// the last thing that should decide that, so it is checked instead of assumed.
+func readText(source string) ([]byte, error) {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return nil, err
+	}
+	if bytes.Contains(data, []byte("\r\n")) {
+		return nil, fmt.Errorf("%s has Windows line endings, which would break on the target", source)
+	}
+	return data, nil
+}
+
+// compression is how a tar archive inside a package is packed.
+type compression string
+
+const (
+	// compressGzip is the only one the standard library can write.
+	compressGzip compression = "gz"
+	// compressXz and compressZstd go through the tools of those names, since
+	// the standard library has neither. pacman accepts both, its own default
+	// being zstd these days and xz before that.
+	compressXz   compression = "xz"
+	compressZstd compression = "zst"
+)
+
+// ext is the file name ending an archive with this compression carries.
+func (c compression) ext() string { return "tar." + string(c) }
+
+// tarPack packs entries into a tar archive with the named compression, writing
+// the directories the files live in as entries of their own. A Debian package
+// and an Arch one both carry them, and a package manager takes away only the
+// directories it was told about: an archive that names none leaves every one of
+// them behind, empty.
+func tarPack(entries []pkgEntry, c compression) ([]byte, error) {
+	return tarData(entries, c)
+}
+
+// tarData packs entries into a tar archive and compresses it afterwards. Doing it
+// in that order keeps the compression in one place, and an archive small enough
+// to fit in memory does not need a streaming writer.
+func tarData(entries []pkgEntry, c compression) ([]byte, error) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	seen := map[string]bool{}
+	for _, e := range entries {
+		for _, d := range parentDirs(e.name) {
+			if seen[d] {
+				continue
+			}
+			seen[d] = true
+			if err := writeTarEntry(tw, pkgEntry{name: d, mode: 0o755, dir: true}); err != nil {
+				return nil, err
+			}
+		}
+		if err := writeTarEntry(tw, e); err != nil {
+			return nil, err
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return nil, err
+	}
+
+	switch c {
+	case compressGzip:
+		var out bytes.Buffer
+		gz := gzip.NewWriter(&out)
+		if _, err := gz.Write(buf.Bytes()); err != nil {
+			return nil, err
+		}
+		if err := gz.Close(); err != nil {
+			return nil, err
+		}
+		return out.Bytes(), nil
+	case compressXz:
+		return compressWith("xz", []string{"-z", "-c", "-9", "-T1"}, buf.Bytes())
+	case compressZstd:
+		return compressWith("zstd", []string{"-z", "-c", "-19", "-T1"}, buf.Bytes())
+	default:
+		return nil, fmt.Errorf("no compressor for %q", c)
+	}
+}
+
+// compressWith runs an external compressor over an archive. The standard library
+// can write gzip and nothing else, and a missing tool is named in the error,
+// because a packaging run is the wrong place for a bare "executable file not
+// found": whoever reads it has to know what to install.
+func compressWith(tool string, args []string, data []byte) ([]byte, error) {
+	path, err := exec.LookPath(tool)
+	if err != nil {
+		return nil, fmt.Errorf("%s is needed to write this package and is not installed", tool)
+	}
+	cmd := exec.Command(path, args...)
+	cmd.Stdin = bytes.NewReader(data)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = os.Stderr
+	fmt.Printf("  %s %s\n", tool, quoteArgs(args))
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("%s: %w", tool, err)
+	}
+	return out.Bytes(), nil
+}
+
+// writeTarEntry writes one tar header, and the contents when there are any.
+func writeTarEntry(tw *tar.Writer, e pkgEntry) error {
+	hdr := &tar.Header{Name: e.name, Mode: e.mode, ModTime: pkgEpoch}
+	if e.dir {
+		hdr.Typeflag = tar.TypeDir
+	} else {
+		hdr.Typeflag = tar.TypeReg
+		hdr.Size = int64(len(e.data))
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	if e.dir {
+		return nil
+	}
+	_, err := tw.Write(e.data)
+	return err
+}
+
+// parentDirs is the directories leading to a file, from the top down, each with
+// a trailing slash.
+func parentDirs(name string) []string {
+	var dirs []string
+	for i := 1; i < len(name); i++ {
+		if name[i] == '/' {
+			dirs = append(dirs, name[:i+1])
+		}
+	}
+	return dirs
+}
+
+// arMember is one member of an ar archive.
+type arMember struct {
+	name string
+	data []byte
+}
+
+// writeAr writes an ar archive, which is what an ipk and a deb both are. The
+// members carry their name padded with spaces and an odd sized one is followed
+// by a newline, which is the format dpkg-deb writes and dpkg and opkg read.
+func writeAr(w io.Writer, members []arMember) error {
+	if _, err := io.WriteString(w, "!<arch>\n"); err != nil {
+		return err
+	}
+	for _, m := range members {
+		hdr := fmt.Sprintf("%-16s%-12d%-6d%-6d%-8s%-10d`\n",
+			m.name, pkgEpoch.Unix(), 0, 0, "100644", len(m.data))
+		if _, err := io.WriteString(w, hdr); err != nil {
+			return err
+		}
+		if _, err := w.Write(m.data); err != nil {
+			return err
+		}
+		if len(m.data)%2 == 1 {
+			if _, err := io.WriteString(w, "\n"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// debFiles is everything the Debian layout needs: the files that are installed,
+// the control file that describes the package, the configuration files an
+// upgrade has to keep, the directory holding the maintainer scripts, and whether
+// the checksums file is expected.
+//
+// OpenWrt packages are built through here as well: an ipk is the same container,
+// only the control file inside it differs.
+type debFiles struct {
+	entries  []pkgEntry
+	control  string
+	confiles []string
+	scripts  string
+	checksum bool
+}
+
+// debLayout writes a package in the Debian layout: the version of the format,
+// then the control archive and the data archive.
+func debLayout(f debFiles) ([]byte, error) {
+	control, err := controlTar(f)
+	if err != nil {
+		return nil, err
+	}
+	data, err := tarPack(f.entries, compressGzip)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	members := []arMember{
+		{name: "debian-binary", data: []byte("2.0\n")},
+		{name: "control.tar.gz", data: control},
+		{name: "data.tar.gz", data: data},
+	}
+	if err := writeAr(&buf, members); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// controlTar is the archive of the package metadata: the control file itself,
+// the list of configuration files, the checksums when the format verifies them,
+// and the maintainer scripts that sit in the packaging directory.
+func controlTar(f debFiles) ([]byte, error) {
+	entries := []pkgEntry{{name: "./control", mode: 0o644, data: []byte(f.control)}}
+	if len(f.confiles) > 0 {
+		list := strings.Join(f.confiles, "\n") + "\n"
+		entries = append(entries, pkgEntry{name: "./conffiles", mode: 0o644, data: []byte(list)})
+	}
+	if f.checksum {
+		entries = append(entries, pkgEntry{name: "./md5sums", mode: 0o644, data: md5sums(f.entries)})
+	}
+
+	if f.scripts != "" {
+		scripts, err := os.ReadDir(f.scripts)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range scripts {
+			if s.IsDir() {
+				continue
+			}
+			e, err := textEntry(filepath.Join(f.scripts, s.Name()), "./"+s.Name(), 0o755)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, e)
+		}
+	}
+	return tarPack(entries, compressGzip)
+}
+
+// md5sums is the list dpkg checks the installed files against: the path as it is
+// on the target, two spaces, and the digest, sorted the way dpkg writes it.
+func md5sums(entries []pkgEntry) []byte {
+	var lines []string
+	for _, e := range entries {
+		if e.dir {
+			continue
+		}
+		lines = append(lines, md5Hex(e.data)+"  "+strings.TrimPrefix(e.name, "./"))
+	}
+	sort.Strings(lines)
+	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+// writePackage writes a finished package into dist/packages/.
+func writePackage(root, name string, data []byte) error {
+	dir := filepath.Join(root, distDir, pkgDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	out := filepath.Join(dir, name)
+	if err := os.WriteFile(out, data, 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("  -> %s\n", describe(root, out))
+	return nil
+}
+
+// installedBytes is the size of what a package installs. Some formats want it in
+// bytes and others in KiB.
+func installedBytes(entries []pkgEntry) int64 {
+	var total int64
+	for _, e := range entries {
+		if e.dir {
+			continue
+		}
+		total += int64(len(e.data))
+	}
+	return total
+}
+
+// sha256Hex and md5Hex are the digests the formats ask for, in the spelling they
+// all ask for them: lower case hexadecimal.
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func md5Hex(data []byte) string {
+	sum := md5.Sum(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// gzipFile compresses one file, for the documents a package ships compressed.
+func gzipFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return gzipBytes(data)
+}
+
+// gzipBytes compresses data with gzip, the one compression the standard library
+// writes. The level is the best one rather than the default, since the largest
+// thing this repository compresses is the program a router keeps on its flash,
+// where the few percent it saves are worth the time it takes to pack once.
+func gzipBytes(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	gz, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := gz.Write(data); err != nil {
+		return nil, err
+	}
+	if err := gz.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// appVersion and appRepo read the constants out of the source of internal/app,
+// which is where the program and every package read them from, so the two cannot
+// disagree about them.
+func appVersion(root string) (string, error) { return appConst(root, "Version") }
+
+func appRepo(root string) (string, error) { return appConst(root, "Repo") }
+
+// appConst reads one string constant out of the payload file of internal/app.
+func appConst(root, name string) (string, error) {
+	path := filepath.Join(root, "internal", "app", "payload.go")
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	re := regexp.MustCompile(`(?m)^\s*` + name + `\s*=\s*"([^"]+)"`)
+	m := re.FindSubmatch(src)
+	if m == nil {
+		return "", fmt.Errorf("no %s constant in %s", name, path)
+	}
+	return string(m[1]), nil
+}
