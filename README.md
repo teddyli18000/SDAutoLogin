@@ -259,7 +259,8 @@ SDAutoLogin [command] [options]
 
 run            run in the background, no tray
 status         print the current session state once and exit
-login          submit one login and print the portal reply
+login          submit one login and print the portal reply (nothing is submitted
+               while the portal already shows this client online)
 config         interactive setup, writes config.json
 config --show  print the effective configuration, password never included
 version        print the version

@@ -225,7 +225,7 @@ SDAutoLogin [command] [options]
 
 run            后台运行，无托盘
 status         打印一次当前会话状态后退出
-login          用配置的账号登录一次并打印门户应答
+login          用配置的账号登录一次并打印门户应答（门户已显示本机在线时不提交）
 config         交互式配置，写入 config.json
 config --show  打印生效的配置，不含密码
 version        打印版本

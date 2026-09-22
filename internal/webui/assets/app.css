@@ -82,7 +82,10 @@ body {
   color: var(--text);
   font: 14px/1.55 var(--font);
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  /* Five rows for the five children, so the 1fr lands on main and not on the
+     tab strip: a row that is left with the free space stretches its contents,
+     and the tabs are the one row that must keep its own height. */
+  grid-template-rows: auto auto auto 1fr auto;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }

@@ -623,17 +623,22 @@ async function testEntry(index, buttonNode) {
   const retCode = res.data.result.retCode || "";
   const message = state.i18n["retcode." + retCode] || res.data.result.message || "";
   const accepted = !!res.data.result.success;
+  const alreadyOnline = !!res.data.alreadyOnline;
+  const verdict = alreadyOnline
+    ? t("acct.testOnline")
+    : accepted ? t("acct.testOk") : t("acct.testFail", message);
 
   box.hidden = false;
-  box.className = "test-result " + (accepted ? "ok" : "bad");
-  box.replaceChildren(
-    el("div", { class: "test-line" },
-      el("span", { class: "test-entry", text: entryLabel(index) }),
-      el("span", { class: "test-verdict", text: accepted ? t("acct.testOk") : t("acct.testFail", message) })),
-    el("details", {},
+  box.className = "test-result " + (accepted || alreadyOnline ? "ok" : "bad");
+  box.replaceChildren(el("div", { class: "test-line" },
+    el("span", { class: "test-entry", text: entryLabel(index) }),
+    el("span", { class: "test-verdict", text: verdict })));
+  // Nothing was sent in that case, so there is no reply to show.
+  if (!alreadyOnline) {
+    box.append(el("details", {},
       el("summary", { text: t("test.raw") + " (" + t("test.retcode") + " " + (retCode === "" ? "-" : retCode) + ")" }),
       el("pre", { text: (res.data.result.raw || "").trim() })));
-  toast(accepted ? t("msg.testAccepted") : t("msg.testRejected", message), !accepted);
+  }
 }
 
 /* ---------- probes ---------- */

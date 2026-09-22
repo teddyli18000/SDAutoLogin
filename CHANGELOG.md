@@ -268,6 +268,14 @@ fall back on.
   running with. The page as a whole got a design pass: one spacing and colour
   scale, a switch rather than a checkbox where a state is meant, in-page dialogs
   instead of the browser's own, and a layout that folds to one column on a phone.
+- The test button submits nothing while the portal already reports this client as
+  online. The portal allows one session per address, and a second login on top of
+  one comes back as a refusal that blames the account, so testing a session that
+  was up and a password that was fine was answered with "wrong account or
+  password".
+- The page's grid had one row too few for its five children, so the free space a
+  short panel leaves went to the tab strip rather than to the panel: the tabs grew
+  to several times their height on the panel that did not fill the window.
 - A configuration file written before the list existed is read as one entry of it,
   and it is only rewritten in the new shape when something is saved, so an
   installation that is already there needs nobody to touch it and the upgrade can
@@ -288,12 +296,14 @@ fall back on.
 
 ### Tests
 
-105 cases, up from 52.
+107 cases, up from 52.
 
-- `internal/app` (5): the settings server serves on the address it was given,
+- `internal/app` (7): the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use,
   knows what counts as loopback, and leaves the running configuration and the
-  file it was read from untouched when a save is refused.
+  file it was read from untouched when a save is refused. The login self test is
+  covered on both sides of its rule: it submits one attempt while the portal
+  reports the client offline, and nothing while it reports it online.
 - `cmd/SDAutoLogin` (24): both forms of every option, the address that is
   optional for `--app`, which mode refuses which option, that `--app` is refused in
   a build without a tray, help and version answering regardless of what else is on

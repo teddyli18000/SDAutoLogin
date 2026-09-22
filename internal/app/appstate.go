@@ -115,14 +115,24 @@ type LoginTest struct {
 	Before  portal.Status
 	Result  portal.LoginResult
 	After   portal.Status
+	// AlreadyOnline says the portal reported this client as signed in before
+	// anything was submitted, which is the one case where nothing is.
+	AlreadyOnline bool
 }
 
 // TestLogin submits one attempt of the login list. It reports what the portal
 // replied and never logs the session out.
+//
+// A client the portal already reports as signed in is left alone: the portal
+// allows one session per address, so a second login on top of it comes back as
+// a refusal that blames the account, which says nothing about the credentials.
 func (a *AppState) TestLogin(attempt config.Attempt) LoginTest {
 	cfg := a.Config()
 	client := portal.NewClient(cfg)
 	before := client.QueryStatus()
+	if before.Online {
+		return LoginTest{Attempt: attempt, Before: before, After: before, AlreadyOnline: true}
+	}
 	return LoginTest{
 		Attempt: attempt,
 		Before:  before,

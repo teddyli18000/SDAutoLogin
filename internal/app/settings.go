@@ -368,11 +368,12 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 			attempt.Entry(), attempt.Index+1)
 		test := s.state.TestLogin(attempt)
 		writeJSON(w, map[string]any{
-			"ok":     true,
-			"index":  attempt.Index,
-			"before": statusPayload(snapshotFromStatus(test.Before)),
-			"result": test.Result,
-			"after":  statusPayload(snapshotFromStatus(test.After)),
+			"ok":            true,
+			"index":         attempt.Index,
+			"alreadyOnline": test.AlreadyOnline,
+			"before":        statusPayload(snapshotFromStatus(test.Before)),
+			"result":        test.Result,
+			"after":         statusPayload(snapshotFromStatus(test.After)),
 		})
 
 	case "reload":

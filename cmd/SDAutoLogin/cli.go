@@ -32,7 +32,9 @@ Commands:
   run            run in the background, no tray
   status         print the current session state once and exit
   status --json  print the same as one line of JSON, for a monitoring script
-  login          submit one login with the configured account and print the reply
+  login          submit one login with the configured account and print the reply;
+                 nothing is submitted while the portal already shows this client
+                 online, since the portal allows one session per address
   config         interactive setup, writes config.json
   config --show  print the effective configuration (password never included)
   version        print the version
@@ -609,6 +611,14 @@ func cmdLogin(appDir string, opts options) int {
 	test := app.New(cfg).TestLogin(attempt)
 	fmt.Printf("before       : online=%v ip=%s account=%s\n",
 		test.Before.Online, blank(test.Before.ClientIP), blank(test.Before.Account))
+	if test.AlreadyOnline {
+		fmt.Println("submitted    : nothing, the portal already reports this client as online")
+		fmt.Printf("after        : online=%v ip=%s account=%s\n",
+			test.After.Online, blank(test.After.ClientIP), blank(test.After.Account))
+		// Nothing is wrong: the session is up. Testing a different account
+		// would need the session down, and this program never signs one out.
+		return 0
+	}
 	fmt.Printf("submitted    : %s (password %d chars, entry %d of %d)\n",
 		attempt.Entry(), len(attempt.Password), attempt.Index+1, len(cfg.Accounts))
 	fmt.Printf("success      : %v\n", test.Result.Success)
