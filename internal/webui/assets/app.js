@@ -100,6 +100,16 @@ function applyLang(code) {
   document.documentElement.lang = code === "zh" ? "zh-CN" : "en";
 }
 
+/* The string table arrives with the bootstrap response, so a page whose
+   bootstrap failed has to take the language from the browser instead. Both
+   wordings live here rather than in the table, which this page cannot reach. */
+function bootFailedText() {
+  if ((navigator.language || "").toLowerCase().startsWith("zh")) {
+    return "此页面需要托盘菜单里的一次性令牌。";
+  }
+  return "This page needs the one time token from the tray menu.";
+}
+
 /* The autostart entry lives outside config.json, it is toggled on its own. */
 function applyAutostart(on) {
   if (typeof on === "boolean") $("f-autostart").checked = on;
@@ -969,7 +979,7 @@ async function boot() {
   if (!res.ok) {
     document.body.replaceChildren(el("p", {
       class: "gone",
-      text: "This page needs the one time token from the tray menu.",
+      text: bootFailedText(),
     }));
     return;
   }
