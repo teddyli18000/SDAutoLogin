@@ -417,7 +417,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		lang = i18n.CurrentLang()
 	}
 	writeJSON(w, map[string]any{
-		"version":     Version,
+		"version":     FullVersion(),
 		"repo":        Repo,
 		"platform":    PlatformName(),
 		"lang":        string(lang),

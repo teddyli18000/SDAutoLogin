@@ -20,8 +20,11 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=sdautologin
-# The version of the program, which is the Version constant in
-# internal/app/payload.go of this repository, tagged as v<version>.
+# The version of the program, which is the tag the sources are released at.
+# PKG_SOURCE_VERSION below is the git ref this fetches, so the number has to be
+# written here rather than read out of the sources it fetches. A test in
+# tools/build compares it with the Version variable in internal/app/payload.go,
+# so the two cannot drift apart without a build failing.
 PKG_VERSION:=1.0.0
 PKG_RELEASE:=1
 
@@ -46,7 +49,11 @@ PKG_BUILD_FLAGS:=no-mips16
 
 GO_PKG:=sdautologin
 GO_PKG_BUILD_PKG:=sdautologin/cmd/SDAutoLogin
-GO_PKG_LDFLAGS:=-s -w
+# The version the program reports is written into it by the linker, and this
+# build does not go through tools/build, which is where that happens. PKG_VERSION
+# is the same number as the tag it fetches, so it is passed on here; a build that
+# did not get it would be one that cannot say which release it is.
+GO_PKG_LDFLAGS:=-s -w -X sdautologin/internal/app.Version=$(PKG_VERSION)
 # The tray is left out: a router has no desktop session to put an icon in, and
 # it is the largest thing the program can do without.
 GO_PKG_TAGS:=notray

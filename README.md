@@ -328,11 +328,11 @@ start, the page goes to the default browser instead and the log says so.
 On Windows the file is linked as a GUI program, so a double click does not open
 a console window. Started from a terminal it attaches to that terminal, so the
 output is visible there. Where the output has to be piped or the exit code read
-by a script, build the console variant instead, which is the same source
-without `-H=windowsgui`:
+by a script, build the console variant instead, which is the same source without
+`-H=windowsgui`:
 
 ```sh
-go build -trimpath -ldflags "-s -w" -o SDAutoLogin-console.exe ./cmd/SDAutoLogin
+go run ./tools/build console
 ```
 
 `status` exit codes: `0` online, `1` state unknown or failure, `3` the portal
@@ -475,11 +475,14 @@ together with `go vet`, `go test` and a `gofmt` check, so a package that would
 not install is caught before it is published rather than after.
 
 Pushing a tag publishes the release: the same run creates it and attaches the
-packages and `SHA256SUMS` to it, which the two manifests point at. The tag has to
-be `v` followed by the version in the sources, `v1.0.0` for 1.0.0, and the step
-refuses to publish when the two disagree, since the manifests would then name
-files that are not there. A release that already exists is taken as it is, so a
-tag pushed twice does not fail the run.
+packages and `SHA256SUMS` to it, which the two manifests point at. The version is
+read from that tag, so the packages are named after it and the manifests agree
+with what is attached by construction: the tag is `v` followed by the version,
+`v1.0.0` for 1.0.0. The same version goes into the program itself, which reports
+it with the commit it was built from, and into the version resource of the
+Windows build. The sources carry the number as well, for a tree that is unpacked
+rather than checked out, and a test holds them to the tag. A release that already
+exists is taken as it is, so a tag pushed twice does not fail the run.
 
 ### Debian and Ubuntu
 

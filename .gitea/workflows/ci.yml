@@ -28,7 +28,13 @@ jobs:
     runs-on: ubuntu-latest
     container: golang:1.26
     steps:
+      # The tags are fetched as well as the history, since the version a release
+      # is named after is read from the tag in front of the checkout, and the
+      # test that holds the sources to that tag has nothing to compare against
+      # without it.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # gofmt reports what it would change and still exits 0, so the list is
       # what decides.
@@ -48,7 +54,13 @@ jobs:
     runs-on: ubuntu-latest
     container: golang:1.26
     steps:
+      # Every package and the program inside it are named after the tag this
+      # checkout carries, so the tags have to be here: without them the build
+      # would fall back on the version in the sources, and a release would be
+      # attached under a name the manifests do not point at.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # What the packaging and the checking need beyond the Go toolchain: an
       # rpm, a bsdtar to read the Arch package with, and one of the two
@@ -79,12 +91,13 @@ jobs:
         run: |
           apt-get install -y --no-install-recommends curl jq
 
-      # A tag makes a release, and it has to name the version that is
-      # inside the packages: the two manifests the packaging writes point at
-      # <address>/releases/download/v<version>/<file>, so a tag that disagrees
-      # with the build would publish files that nothing points at. The check
-      # below is the cheap version of that; the version living in a single place
-      # in the sources would make it unnecessary.
+      # A tag makes a release. The version of the release is read from that tag,
+      # so the packages and the manifests that point at
+      # <address>/releases/download/v<version>/<file> agree by construction, and
+      # what is left to check is that the version still comes from the tag at all:
+      # a derivation that quietly fell back on the sources would attach files
+      # under names the manifests do not name. Whether the sources still carry the
+      # version of the tag is a test in the other job.
       - name: publish the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -97,7 +110,7 @@ jobs:
           version=${TAG#v}
           if [ ! -f "dist/packages/sdautologin_${version}-1_amd64.deb" ]; then
             echo "there is no package for $version:"
-            echo "the tag and the version in the sources disagree, so the release would point at nothing"
+            echo "the packages are named after the tag they were built at, and this build did not name this one"
             exit 1
           fi
 

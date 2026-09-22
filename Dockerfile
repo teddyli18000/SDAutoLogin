@@ -17,7 +17,9 @@
 
 # The build goes through the same task runner the scripts and the CMake targets
 # use, so the container gets exactly the flags a local build gets. The
-# dependencies are vendored, so nothing is downloaded.
+# dependencies are vendored, so nothing is downloaded. The repository metadata is
+# kept out of the context, so this build has no tag to read the version from and
+# the version it reports is the one the sources carry.
 FROM golang:1.26 AS build
 
 WORKDIR /src

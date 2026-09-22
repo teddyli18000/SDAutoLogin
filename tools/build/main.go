@@ -37,6 +37,13 @@ const (
 	// winresVersion is pinned so regenerating the resources is reproducible.
 	winresVersion = "github.com/tc-hib/go-winres@v0.3.3"
 
+	// versionVar and commitVar are the variables inside the program that the
+	// linker writes the release into. The path has to be the full one of the
+	// package that holds them, and both have to be variables: -X cannot set a
+	// constant.
+	versionVar = "sdautologin/internal/app.Version"
+	commitVar  = "sdautologin/internal/app.Commit"
+
 	// notrayTag is the build tag of the builds that leave the tray out. Every
 	// package is built from one: there is no desktop session on a router, in a
 	// container or on a server to put an icon in.
@@ -279,12 +286,34 @@ func taskAll(root string) error {
 	return nil
 }
 
-// buildFor builds one target into dist/. moreArgs are extra arguments for go
-// build, such as a build tag.
-func buildFor(root, goos, goarch, name string, gui bool, env []string, moreArgs ...string) error {
+// ldflagsFor is what go build and the linker need to write the release into the
+// program: the version, which is the git tag the checkout is at, and the commit
+// it was built from, so that a copy which is in front of someone can be named
+// exactly. The version is read here rather than in the program, since a program
+// cannot read the tag it was built at.
+func ldflagsFor(root string, gui bool, goos string) (string, error) {
+	version, err := appVersion(root)
+	if err != nil {
+		return "", err
+	}
+
 	flags := "-s -w"
 	if gui && goos == "windows" {
 		flags += " -H=windowsgui"
+	}
+	flags += " -X " + versionVar + "=" + version
+	if commit := appCommit(root); commit != "" {
+		flags += " -X " + commitVar + "=" + commit
+	}
+	return flags, nil
+}
+
+// buildFor builds one target into dist/. moreArgs are extra arguments for go
+// build, such as a build tag.
+func buildFor(root, goos, goarch, name string, gui bool, env []string, moreArgs ...string) error {
+	flags, err := ldflagsFor(root, gui, goos)
+	if err != nil {
+		return err
 	}
 	out := filepath.Join(root, distDir, name)
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
@@ -315,9 +344,19 @@ func taskResources(root string) error {
 	// reads that name to tell which one belongs to which build. Every Windows
 	// architecture that is built needs its own, or that build would be the one
 	// without an icon and version information.
+	//
+	// The version the resource carries is given here rather than written into
+	// winres.json, which is the point: the file a person opens holds no version
+	// that could go stale, and what the resource says comes from the same tag as
+	// everything else.
+	version, err := appVersion(root)
+	if err != nil {
+		return err
+	}
 	env := []string{"GOFLAGS=-mod=mod"}
 	return runGo(root, env, "run", winresVersion, "make",
-		"--in", resConfig, "--out", resPrefix, "--arch", "amd64,arm64,386")
+		"--in", resConfig, "--out", resPrefix, "--arch", "amd64,arm64,386",
+		"--file-version", version, "--product-version", version)
 }
 
 func taskTest(root string) error {

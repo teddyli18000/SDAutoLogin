@@ -505,24 +505,74 @@ func gzipBytes(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// appVersion and appRepo read the constants out of the source of internal/app,
-// the same place the program and every package read them from, so the two cannot
-// disagree about them.
-func appVersion(root string) (string, error) { return appConst(root, "Version") }
+// appVersion is the version of the release being built, which is the git tag the
+// checkout is at, so every package is named after the tag that published it and
+// there is one place to change a version. A tree that was unpacked rather than
+// checked out has no tag to read, and the Version variable in the sources is what
+// it falls back on; the release step refuses a tag that disagrees with it, which
+// is what keeps that fallback from drifting.
+//
+// A checkout past its tag keeps naming that release, which is what the commit
+// that goes into the program with the version is for.
+func appVersion(root string) (string, error) {
+	if tag, ok := gitTag(root); ok {
+		return tag, nil
+	}
+	return appSourceString(root, "Version")
+}
 
-func appRepo(root string) (string, error) { return appConst(root, "Repo") }
+// appCommit is the commit the release is built from, empty when there is no
+// checkout to read it from.
+func appCommit(root string) string {
+	out, err := git(root, "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return out
+}
 
-// appConst reads one string constant out of the payload file of internal/app.
-func appConst(root, name string) (string, error) {
+// appRepo reads the repository address out of the source of internal/app, the
+// same place the program shows it from, so the two cannot disagree about it.
+func appRepo(root string) (string, error) { return appSourceString(root, "Repo") }
+
+// gitTag is the last tag in front of the checkout, without the v this project
+// puts in front of it. Reading the last one rather than the one the commit
+// carries is what makes a build between two releases name the release it is
+// past, which is what a version number is for.
+func gitTag(root string) (string, bool) {
+	out, err := git(root, "describe", "--tags", "--abbrev=0")
+	if err != nil || out == "" {
+		return "", false
+	}
+	return strings.TrimPrefix(out, "v"), true
+}
+
+// git runs one git command in the repository and returns what it wrote, without
+// the newline. A tree that is not a checkout has no git to ask, and the caller
+// falls back on what the sources say.
+func git(root string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// appSourceString reads one string out of the payload file of internal/app,
+// which the program and the packages both take their version from. The value is
+// written either as a constant of its own or in a block of variables, so both
+// shapes are matched, and an empty value is one of the answers, which Commit is.
+func appSourceString(root, name string) (string, error) {
 	path := filepath.Join(root, "internal", "app", "payload.go")
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-	re := regexp.MustCompile(`(?m)^\s*` + name + `\s*=\s*"([^"]+)"`)
+	re := regexp.MustCompile(`(?m)^\s*(?:const\s+|var\s+)?` + name + `\s*=\s*"([^"]*)"`)
 	m := re.FindSubmatch(src)
 	if m == nil {
-		return "", fmt.Errorf("no %s constant in %s", name, path)
+		return "", fmt.Errorf("no %s string in %s", name, path)
 	}
 	return string(m[1]), nil
 }

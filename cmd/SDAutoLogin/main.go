@@ -36,7 +36,7 @@ func main() {
 		// the answer. See attachConsole.
 		attachConsole()
 	}
-	logging.Log.Info("SDAutoLogin %s starting on %s, app dir %s", app.Version, app.PlatformName(), appDir)
+	logging.Log.Info("SDAutoLogin %s starting on %s, app dir %s", app.FullVersion(), app.PlatformName(), appDir)
 
 	if err != nil {
 		// The reason also goes to the log: the Windows build is linked as a GUI
@@ -111,7 +111,7 @@ func runGUI(appDir string, opts options) {
 }
 
 func versionLine() string {
-	return fmt.Sprintf("SDAutoLogin %s (%s/%s)", app.Version, app.PlatformName(), app.Arch())
+	return fmt.Sprintf("SDAutoLogin %s (%s/%s)", app.FullVersion(), app.PlatformName(), app.Arch())
 }
 
 // resolveAppDir picks the directory that holds config.json and logs/. An

@@ -9,11 +9,29 @@ import (
 	"sdautologin/internal/service"
 )
 
-// Version and Repo identify the release and are shown on the About tab.
-const (
+// Repo is where the project lives, shown on the About tab.
+const Repo = "https://git.zqlhub.com/zqlan/SDAutoLogin"
+
+// Version and Commit are what the release is named after, and are variables so
+// the build can write into them the tree it was made from: tools/build takes the
+// version from the git tag in front of it and the commit from the checkout, and
+// passes both to the linker. What stands here is what a build that has neither
+// falls back on, so the two are kept in step with the tag by the release step.
+var (
 	Version = "1.0.0"
-	Repo    = "https://git.zqlhub.com/zqlan/SDAutoLogin"
+	Commit  = ""
 )
+
+// FullVersion is the version with the commit it was built from, which is what the
+// command line, the log and the About tab report. A version number alone does not
+// say which build of it is in front of you, and two builds of one release are
+// what a bug report has to tell apart.
+func FullVersion() string {
+	if Commit == "" {
+		return Version
+	}
+	return Version + "+" + Commit
+}
 
 // PlatformName is the operating system in the spelling the interface uses.
 func PlatformName() string {

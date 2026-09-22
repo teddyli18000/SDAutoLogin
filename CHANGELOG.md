@@ -191,6 +191,30 @@ written in a file that anyone who could read it could use.
   password belongs to, so nothing about the program needed the file to be readable
   by anybody else.
 
+### One version
+
+The version was written down in the sources, and the packages, the Windows
+version resource, the OpenWrt Makefile and the release step had each been told
+about it separately, so cutting a release was a number to change in several
+places that nothing compared with one another.
+
+- The version is read from the git tag the checkout is at, and the build writes it
+  into the program together with the commit it was built from. A copy that is in
+  front of someone can then be named exactly rather than approximately:
+  `--version` prints `1.0.0+5ccacb9`, and the same line opens the log and names
+  the build on the About tab.
+- The Windows version resource takes its number from that tag as well, handed to
+  go-winres by the task runner rather than written into `winres/winres.json`, so
+  the file a person opens holds no version that could go stale.
+- The OpenWrt package names the git ref it fetches, so its `PKG_VERSION` has to be
+  written in its Makefile: what it fetches cannot be asked before it is fetched.
+  That build does not go through the task runner, so the number reaches the
+  program through `GO_PKG_LDFLAGS` instead, and a test compares it with the
+  sources.
+- What the sources carry is now what a tree without a checkout falls back on,
+  which is what a tarball and the container build are. A test holds it to the tag,
+  so the fallback cannot drift into naming a release the sources are not.
+
 ### Continuous integration
 
 Nothing checked a change before it was merged, and the packages were only ever
@@ -223,10 +247,12 @@ looked at by hand, once.
   are kept as an artifact of the CI run.
 - Pushing a tag publishes the release: the same run creates it over the Gitea API
   and attaches the packages and `SHA256SUMS`, where the two manifests say they
-  can be downloaded from. A tag that does not name the version inside
-  the packages is refused instead of published, since the manifests would then
-  name files that are not there, and a release that already exists is taken as it
-  is so that a tag pushed twice does not fail the run.
+  can be downloaded from. The version comes from that tag, so the manifests agree
+  with what is attached by construction; the step still refuses to publish when
+  the tag it ran for is not the one the packages came out named after, which is
+  what a derivation that had stopped reading the tag would look like. A release
+  that already exists is taken as it is so that a tag pushed twice does not fail
+  the run.
 - The Windows packaging lived in a file called `pack_windows.go`, which the
   toolchain reads as "compile this on Windows only": the task could not run on
   Linux at all, and Linux is where both CI and a release build pack. The file is
@@ -333,7 +359,7 @@ that implies.
 
 ### Tests
 
-116 cases, up from 52.
+122 cases, up from 52.
 
 - `internal/app` (16): the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use,
@@ -385,6 +411,12 @@ that implies.
 - `internal/webui` (1): every literal in the page markup that the script
   replaces from the string table is compared with that table, so the two copies
   of a sentence cannot drift apart unnoticed.
+- `tools/build` (6): the version the sources carry is the one the latest tag
+  names, the OpenWrt Makefile names the same one, a tree with no checkout falls
+  back on the sources, a value is read from a constant of its own and from a
+  block of variables alike, the link flags carry the version and the commit, and
+  the variables the linker is told to write into are the ones the program reads.
+  It is the first test this package has.
 
 ## v1.0.0 - 2026-09-21
 

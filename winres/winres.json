@@ -17,20 +17,14 @@
   "RT_VERSION": {
     "#1": {
       "0000": {
-        "fixed": {
-          "file_version": "1.0.0.0",
-          "product_version": "1.0.0.0"
-        },
         "info": {
           "0409": {
             "CompanyName": "Zhiqiang Lan",
             "FileDescription": "Campus network auto login",
-            "FileVersion": "1.0.0",
             "InternalName": "SDAutoLogin",
             "LegalCopyright": "MIT Licence, Zhiqiang Lan",
             "OriginalFilename": "SDAutoLogin.exe",
-            "ProductName": "Campus Auto Login",
-            "ProductVersion": "1.0.0"
+            "ProductName": "Campus Auto Login"
           }
         }
       }
