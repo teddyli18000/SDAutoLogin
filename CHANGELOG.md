@@ -17,11 +17,19 @@ answer the setup wizard on them, so the program had no way in on those machines.
 - `run` takes `--settings=ADDR` and serves the settings page on an address that
   was named, from the start and for as long as the process runs, rather than on
   the loopback server that is started on demand and shut down again when idle.
+  The address to open, one time token and all, is the one the log prints: the
+  bare address is refused, and the newest of those lines is the one that works.
   The page can end a background run, and a warning is written when the address is
   reachable from the network, where the token in its URL is all the protection it
   has.
 - `--username`, `--password`, `--isp` and `--save` write the account down without
   the wizard, as a provisioning script needs.
+- A run with `--settings` starts even when no account is written down yet, and
+  says so in the log with the address to open, since that page is the only way in
+  on a machine whose operator has no other one. Without the page a run with
+  nothing to sign in with is still refused: a service has nobody to answer the
+  setup wizard, and a loop that can only report the same failure is worse than a
+  clear one.
 - `--home=DIR` keeps `config.json` and `logs/` outside the directory the
   executable was dropped in, so that directory can stay read only.
 - `packaging/systemd` holds two units, one for a system service and one for
@@ -359,7 +367,7 @@ that implies.
 
 ### Tests
 
-128 cases, up from 52.
+129 cases, up from 52.
 
 - `internal/app` (16): the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use,
@@ -376,7 +384,7 @@ that implies.
   the cookie in a header. An address is good for one opening and is replaced by
   the one made as it is spent, and every opening the tray makes gets an address of
   its own, so the opening after it is not sent to one that has been used.
-- `cmd/SDAutoLogin` (24): both forms of every option, the address that is
+- `cmd/SDAutoLogin` (25): both forms of every option, the address that is
   optional for `--app`, which mode refuses which option, that `--app` is refused in
   a build without a tray, help and version answering regardless of what else is on
   the command line, the way each status is named, the set of JSON fields, that
@@ -385,6 +393,8 @@ that implies.
   covered as well: the one line form of an entry with and without service types, a
   password holding a colon, the values that cannot be read at all, that an error
   never repeats the password, and that the older options replace the whole list.
+  A run with nothing to sign in with is checked too: refused on its own, allowed
+  when it serves the settings page, since that page is the way in.
 - `internal/config` (25): the settings file and its defaults, what `normalize`
   clamps, the validation of every field, the mode the file is saved with, and the
   list itself: which entries and service types are tried, in which order, the key

@@ -485,6 +485,32 @@ func TestCheckOnlyAcceptsAnOptionInTheModeItBelongsTo(t *testing.T) {
 	}
 }
 
+func TestARunWithNothingToSignInWithNeedsTheSettingsPage(t *testing.T) {
+	addr := "127.0.0.1:8088"
+	empty := &config.Config{}
+
+	// A service has nobody to answer the setup wizard, so a run that could only
+	// report the same failure is refused rather than started.
+	if err := checkAccountForRun(empty, options{}); err == nil {
+		t.Error("a run with no account and no settings page was accepted")
+	}
+
+	// With the page served it is started: that page is the way in on a machine
+	// whose operator has no other one, and the checks report the missing account
+	// until one is written there.
+	if err := checkAccountForRun(empty, options{settings: &addr}); err != nil {
+		t.Errorf("a run serving the settings page was refused: %v", err)
+	}
+
+	// Anything to sign in with is enough, page or no page.
+	configured := &config.Config{Accounts: []config.Account{
+		{Username: "s1234567", Password: "p@ss", ISPs: []string{""}},
+	}}
+	if err := checkAccountForRun(configured, options{}); err != nil {
+		t.Errorf("a configured run was refused: %v", err)
+	}
+}
+
 func TestCheckTrayOnlyAllowsAppWhereThereIsATray(t *testing.T) {
 	addr := "127.0.0.1:8088"
 

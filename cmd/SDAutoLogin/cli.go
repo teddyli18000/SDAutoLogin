@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -77,7 +78,9 @@ Option for the tray mode:
 Option for the run command:
   --settings=ADDR     also serve the settings page on ADDR, for example
                       127.0.0.1:8088 or 0.0.0.0:8088, so a machine with no tray
-                      and no display can still be configured from a browser
+                      and no display can still be configured from a browser.
+                      The address to open, token and all, is the one the log
+                      prints; the bare port is refused
 
 Option for the status command:
   --json              print one line of JSON instead of the report; the exit
@@ -440,15 +443,25 @@ func loadForCLI(appDir string, opts options) (*config.Config, bool) {
 	return cfg, true
 }
 
+// checkAccountForRun reports whether a background run may start with what it was
+// given. A service has nobody to answer the setup wizard, so a run with nothing
+// to sign in with is refused rather than started into a loop that can only
+// report the same failure; the exception is a run that serves the settings page,
+// because that page is the way in on a machine whose operator has no other one.
+func checkAccountForRun(cfg *config.Config, opts options) error {
+	if cfg.Configured() || opts.settings != nil {
+		return nil
+	}
+	return errors.New("no account configured: pass --username and --password, or --account, or run the config command first")
+}
+
 func cmdRun(appDir string, opts options) int {
 	cfg, ok := loadForCLI(appDir, opts)
 	if !ok {
 		return 1
 	}
-	if !cfg.Configured() {
-		// A service has no one to answer the setup wizard, and a config file
-		// written from an empty prompt is worse than a clear failure.
-		fmt.Fprintln(os.Stderr, "no account configured: pass --username and --password, or --account, or run the config command first")
+	if err := checkAccountForRun(cfg, opts); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	if !platform.AcquireSingleInstance(false) {
@@ -471,9 +484,16 @@ func cmdRun(appDir string, opts options) int {
 		defer server.Stop()
 		settingsServer = server
 
-		if _, err := server.URL(); err != nil {
+		url, err := server.URL()
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "settings page: %v\n", err)
 			return 1
+		}
+		if !cfg.Configured() {
+			// This run was allowed to start with nothing to sign in with
+			// because of the page, so it says where the page is: the checks
+			// will report the missing account until one is written there.
+			logging.Log.Warn("no account is written down yet, write one at %s", url)
 		}
 	}
 
