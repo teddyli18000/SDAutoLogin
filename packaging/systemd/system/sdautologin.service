@@ -7,9 +7,11 @@
 #        --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
 #
 # or add --settings=127.0.0.1:8088 to ExecStart below and reach the page through
-# an SSH tunnel: ssh -L 8088:127.0.0.1:8088 the-server, then open
-# http://127.0.0.1:8088/ . Bind to 0.0.0.0 only on a trusted network: the page
-# holds the account in clear text.
+# an SSH tunnel: ssh -L 8088:127.0.0.1:8088 the-server, then open the address
+# the log prints (journalctl -u sdautologin), token and all. The bare port is
+# refused: the address carries a one time token, it opens the page once, and the
+# newest line is the one that works. Bind to 0.0.0.0 only on a trusted network:
+# the page holds the account in clear text.
 #
 # Then:
 #   systemctl daemon-reload

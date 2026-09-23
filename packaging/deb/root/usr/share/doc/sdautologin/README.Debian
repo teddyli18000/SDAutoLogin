@@ -27,7 +27,10 @@ writes that file:
 Leave the service suffix out for the campus network itself. Where the settings
 page is easier than the command line, add --settings=127.0.0.1:8088 to the
 ExecStart line of the unit ("systemctl edit sdautologin"), reach it through an
-SSH tunnel, and write the account there.
+SSH tunnel, and write the account there. The page is opened with the address the
+log prints ("journalctl -u sdautologin") and not with the bare port: the address
+carries a one time token, it opens the page once, and the newest line is the one
+that works.
 
 Settings and log
 ----------------

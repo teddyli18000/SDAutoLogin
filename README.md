@@ -283,7 +283,8 @@ help           print the usage text
 --isp=SUFFIX       service suffix such as @zgyd, empty for the campus network
 --save             write what was given here into config.json as well
 --settings=ADDR    run: also serve the settings page on ADDR, for a machine
-                   with no tray and no display, for example 127.0.0.1:8088
+                   with no tray and no display, for example 127.0.0.1:8088;
+                   the address to open is the one the log prints
 --json             status: print one line of JSON instead of the report
 --app[=ADDR]       open the settings page in a window of its own, without the
                    browser around it, on ADDR or on loopback
@@ -565,7 +566,11 @@ journalctl -u sdautologin -f
 The unit keeps the settings and the log in `/var/lib/sdautologin` and confines
 the process to the network it needs. To configure that machine from a browser,
 add `--settings=127.0.0.1:8088` to `ExecStart` and forward the port over SSH:
-`ssh -L 8088:127.0.0.1:8088 the-server`, then open `http://127.0.0.1:8088/`.
+`ssh -L 8088:127.0.0.1:8088 the-server`. Then open the address the log prints,
+which `journalctl -u sdautologin` shows, rather than the bare port: it carries
+the one time token the page is opened with, and a request without it is refused.
+The address is good for one opening, and the next one goes to the log as it is
+made, so the newest of those lines is the one that works.
 
 ### Container
 
@@ -638,9 +643,13 @@ uci commit sdautologin
 /etc/init.d/sdautologin restart
 ```
 
-Then open `http://10.9.1.3:8088/`, or whatever address the router answers on.
-With an address that is not loopback the token in the address handed out is the
-only protection, so keep it on a trusted network or reach it over a tunnel.
+Then open the address `logread -e SDAutoLogin` prints, with `127.0.0.1` in it
+replaced by the address the router answers on, since the page is served from
+every interface but the log names the loopback one. The port alone is refused:
+the address carries the one time token the page is opened with, and it opens the
+page once, so the newest of those lines is the one that works. With an address
+that is not loopback the token in the address handed out is the only protection,
+so keep it on a trusted network or reach it over a tunnel.
 
 `/etc/config/sdautologin` is declared as a configuration file, so an upgrade
 keeps the account that is in it, and `config.json` lives in `/etc/sdautologin`,

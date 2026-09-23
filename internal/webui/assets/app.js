@@ -114,12 +114,14 @@ function applyLang(code) {
 
 /* The string table arrives with the bootstrap response, so a page whose
    bootstrap failed has to take the language from the browser instead. Both
-   wordings live here rather than in the table, which this page cannot reach. */
+   wordings live here rather than in the table, which this page cannot reach,
+   and they say where to open the page again rather than naming a token: there
+   is nowhere on this page to type one. */
 function bootFailedText() {
   if ((navigator.language || "").toLowerCase().startsWith("zh")) {
-    return "此页面需要托盘菜单里的一次性令牌。";
+    return "设置页已失效，请从托盘重新打开，或打开日志里最新的那个地址。";
   }
-  return "This page needs the one time token from the tray menu.";
+  return "This page is no longer valid, open it again from the tray, or from the newest address in the log.";
 }
 
 /* The autostart entry lives outside config.json, it is toggled on its own. */

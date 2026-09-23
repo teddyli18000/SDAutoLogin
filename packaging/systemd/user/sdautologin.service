@@ -13,7 +13,9 @@
 #       --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
 #
 # or from the settings page, by adding --settings=127.0.0.1:8088 to ExecStart
-# below and opening http://127.0.0.1:8088/ .
+# below and opening the address the log prints (journalctl --user -u
+# sdautologin): the bare port is refused, since the address carries the one time
+# token the page is opened with.
 #
 # A user service stops when the last session ends unless lingering is on; for a
 # machine that has to keep the session up while nobody is logged in, run

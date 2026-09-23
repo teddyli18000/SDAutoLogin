@@ -12,6 +12,10 @@
 #
 #   docker run -d ... -p 8088:8088 sdautologin run --settings=0.0.0.0:8088
 #
+# The page is then opened with the address "docker logs sdautologin" prints,
+# token and all, and not with the bare port: the address carries a one time
+# token, it opens the page once, and the newest line is the one that works.
+#
 # Binding the page to 0.0.0.0 makes it reachable from the network, so only do
 # that on a trusted network: it holds the account in clear text.
 

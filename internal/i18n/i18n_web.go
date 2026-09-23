@@ -117,8 +117,8 @@ var webText = map[string]text{
 	"about.configPath": {"配置文件", "Config file"},
 	"about.logPath":    {"日志文件", "Log file"},
 	"about.logTail":    {"最近日志", "Recent log"},
-	"about.security": {"设置页只监听本机回环地址，并使用一次性令牌鉴权。",
-		"The settings page listens on loopback only and requires a one time token."},
+	"about.security": {"设置页默认只监听本机回环地址，并使用一次性令牌鉴权。",
+		"The settings page listens on loopback by default and requires a one time token."},
 
 	"msg.saved":       {"已保存，并立即重新检测了一次。", "Saved, and one check was run immediately."},
 	"msg.autostart":   {"开机自启设置已更新。", "The startup setting has been updated."},
