@@ -234,6 +234,12 @@ looked at by hand, once.
   toolchain is the one the module asks for rather than whatever the runner
   happens to have, and the second one installs the tools of the formats before it
   starts.
+- Every step is a command of that image, rather than an action fetched from
+  elsewhere: the familiar `actions/checkout` and `actions/upload-artifact` are
+  JavaScript ones and need node in the container, which the Go image has not, so
+  a job that used them failed before it checked anything. The sources are fetched
+  with git from the instance itself, and what was packed is kept by being
+  published, so a run needs nothing of github.com and nothing but the image.
 - `go run ./tools/build verify` is the task that second job runs, and it is the
   automated form of the checks the formats were written against: every package is
   read back with the tool that installs it (`dpkg-deb` for the deb and the ipk,
@@ -251,8 +257,8 @@ looked at by hand, once.
   could not be looked at. On a machine with none of those tools, `verify` says so.
 - `SHA256SUMS` is written next to the packages by the packaging itself, one line
   per file in the spelling of the `sha256sum` tool. Nothing is signed, so this is
-  what a downloaded release can be checked against, and the packages and the file
-  are kept as an artifact of the CI run.
+  what a downloaded release can be checked against, and a tag run attaches it and
+  the packages to the release it publishes.
 - Pushing a tag publishes the release: the same run creates it over the Gitea API
   and attaches the packages and `SHA256SUMS`, where the two manifests say they
   can be downloaded from. The version comes from that tag, so the manifests agree

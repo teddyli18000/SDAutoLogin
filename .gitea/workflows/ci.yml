@@ -9,6 +9,12 @@
 # Both jobs run inside the Go image rather than on whatever the runner happens to
 # have, because the toolchain version is part of what is being checked and the
 # image is a Debian with git and dpkg in it already.
+#
+# Every step here is a command of that image. The familiar actions/checkout is
+# not one of them: it is a JavaScript action and needs node in the container,
+# which this image has not, so the job used to fail before it checked anything.
+# The repository is fetched with git instead, from this instance rather than from
+# github.com, so nothing outside the instance is needed to run this.
 name: CI
 
 # The token of the run is allowed to write to the repository because the last
@@ -32,9 +38,37 @@ jobs:
       # is named after is read from the tag in front of the checkout, and the
       # test that holds the sources to that tag has nothing to compare against
       # without it.
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - name: check out the sources
+        env:
+          # The token of the run goes by one of these names, depending on the
+          # version and how the instance provides it. The ones that are not set
+          # expand to nothing, and no token at all is reported here rather than
+          # left to a fetch that cannot read the repository.
+          TOKEN_CONTEXT: ${{ github.token }}
+          TOKEN_SECRET: ${{ secrets.GITHUB_TOKEN }}
+          TOKEN_GITEA: ${{ secrets.GITEA_TOKEN }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          set -eu
+          token="${TOKEN_CONTEXT:-${TOKEN_SECRET:-${TOKEN_GITEA:-}}}"
+          if [ -z "$token" ]; then
+            echo "this run has no token to fetch the repository with"
+            exit 1
+          fi
+
+          host=${SERVER#http://}
+          host=${host#https://}
+          url="https://oauth2:${token}@${host}/${REPO}.git"
+
+          # The runner may or may not have left a checkout in the working
+          # directory, so init is run either way, which is harmless, and the
+          # remote is added or pointed at the repository again.
+          git init -q .
+          git remote add origin "$url" 2>/dev/null || git remote set-url origin "$url"
+          git fetch --force --tags origin "$REF"
+          git checkout -q -f FETCH_HEAD
 
       # gofmt reports what it would change and still exits 0, so the list is
       # what decides.
@@ -54,13 +88,35 @@ jobs:
     runs-on: ubuntu-latest
     container: golang:1.26
     steps:
-      # Every package and the program inside it are named after the tag this
-      # checkout carries, so the tags have to be here: without them the build
-      # would fall back on the version in the sources, and a release would be
-      # attached under a name the manifests do not point at.
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      # The same checkout as the other job, for the same reason: every package
+      # and the program inside it are named after the tag this checkout carries,
+      # so the tags have to be here. Without them the build would fall back on
+      # the version in the sources, and a release would be attached under a name
+      # the manifests do not point at.
+      - name: check out the sources
+        env:
+          TOKEN_CONTEXT: ${{ github.token }}
+          TOKEN_SECRET: ${{ secrets.GITHUB_TOKEN }}
+          TOKEN_GITEA: ${{ secrets.GITEA_TOKEN }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          set -eu
+          token="${TOKEN_CONTEXT:-${TOKEN_SECRET:-${TOKEN_GITEA:-}}}"
+          if [ -z "$token" ]; then
+            echo "this run has no token to fetch the repository with"
+            exit 1
+          fi
+
+          host=${SERVER#http://}
+          host=${host#https://}
+          url="https://oauth2:${token}@${host}/${REPO}.git"
+
+          git init -q .
+          git remote add origin "$url" 2>/dev/null || git remote set-url origin "$url"
+          git fetch --force --tags origin "$REF"
+          git checkout -q -f FETCH_HEAD
 
       # What the packaging and the checking need beyond the Go toolchain: an
       # rpm, a bsdtar to read the Arch package with, and one of the two
@@ -80,11 +136,10 @@ jobs:
       - name: check every package
         run: go run ./tools/build verify
 
-      - name: keep what was packed
-        uses: actions/upload-artifact@v4
-        with:
-          name: packages
-          path: dist/packages
+      # What was packed is not uploaded anywhere: that would take another
+      # JavaScript action, which this image cannot run either. The packages are
+      # kept when they are published, which is what matters, and a run that is
+      # not a tag leaves them in its working directory.
 
       - name: the tools to publish with
         if: startsWith(github.ref, 'refs/tags/v')
@@ -101,7 +156,9 @@ jobs:
       - name: publish the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TOKEN_CONTEXT: ${{ github.token }}
+          TOKEN_SECRET: ${{ secrets.GITHUB_TOKEN }}
+          TOKEN_GITEA: ${{ secrets.GITEA_TOKEN }}
           REPO: ${{ github.repository }}
           SERVER: ${{ github.server_url }}
           TAG: ${{ github.ref_name }}
@@ -114,8 +171,13 @@ jobs:
             exit 1
           fi
 
+          token="${TOKEN_CONTEXT:-${TOKEN_SECRET:-${TOKEN_GITEA:-}}}"
+          if [ -z "$token" ]; then
+            echo "this run has no token to write a release with"
+            exit 1
+          fi
+          auth="Authorization: token $token"
           api="$SERVER/api/v1/repos/$REPO/releases"
-          auth="Authorization: token $TOKEN"
 
           # The release of this tag, or a new one. Pushing a tag twice, or
           # creating the release by hand first, must not fail the run.
