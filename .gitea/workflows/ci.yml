@@ -29,6 +29,13 @@ on:
     tags: ["v*"]
   pull_request:
 
+# The address the jobs fetch from and publish to. It is named here rather than
+# taken from github.server_url, which is the address the instance gives itself:
+# that is the name it answers to inside its own deployment, one no container of
+# a job can resolve.
+env:
+  INSTANCE: https://git.zqlhub.com
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -47,7 +54,6 @@ jobs:
           TOKEN_CONTEXT: ${{ github.token }}
           TOKEN_SECRET: ${{ secrets.GITHUB_TOKEN }}
           TOKEN_GITEA: ${{ secrets.GITEA_TOKEN }}
-          SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
           REF: ${{ github.ref }}
         run: |
@@ -58,7 +64,7 @@ jobs:
             exit 1
           fi
 
-          host=${SERVER#http://}
+          host=${INSTANCE#http://}
           host=${host#https://}
           url="https://oauth2:${token}@${host}/${REPO}.git"
 
@@ -98,7 +104,6 @@ jobs:
           TOKEN_CONTEXT: ${{ github.token }}
           TOKEN_SECRET: ${{ secrets.GITHUB_TOKEN }}
           TOKEN_GITEA: ${{ secrets.GITEA_TOKEN }}
-          SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
           REF: ${{ github.ref }}
         run: |
@@ -109,7 +114,7 @@ jobs:
             exit 1
           fi
 
-          host=${SERVER#http://}
+          host=${INSTANCE#http://}
           host=${host#https://}
           url="https://oauth2:${token}@${host}/${REPO}.git"
 
@@ -160,7 +165,6 @@ jobs:
           TOKEN_SECRET: ${{ secrets.GITHUB_TOKEN }}
           TOKEN_GITEA: ${{ secrets.GITEA_TOKEN }}
           REPO: ${{ github.repository }}
-          SERVER: ${{ github.server_url }}
           TAG: ${{ github.ref_name }}
         run: |
           set -eu
@@ -177,7 +181,7 @@ jobs:
             exit 1
           fi
           auth="Authorization: token $token"
-          api="$SERVER/api/v1/repos/$REPO/releases"
+          api="$INSTANCE/api/v1/repos/$REPO/releases"
 
           # The release of this tag, or a new one. Pushing a tag twice, or
           # creating the release by hand first, must not fail the run.
