@@ -35,6 +35,11 @@ on:
 # a job can resolve.
 env:
   INSTANCE: https://git.zqlhub.com
+  # Where the job installs the tools of the formats from. The image's own
+  # sources are Debian's, which answered from far away here: four small packages
+  # took minutes. Point this at a mirror near the runner, an internal one or one
+  # in the same country, and the same four take seconds.
+  DEBIAN_MIRROR: mirrors.tuna.tsinghua.edu.cn
 
 jobs:
   test:
@@ -127,9 +132,29 @@ jobs:
       # rpm, a bsdtar to read the Arch package with, and one of the two
       # compressors that package wants, which the standard library cannot write.
       # dpkg-deb, which reads the deb and the ipk, is in the base image.
+      #
+      # The image's own sources are rewritten to the mirror first, both spellings
+      # of the archive being one host away from the other. A network that cannot
+      # reach the mirror has the image's own sources put back, so this step is
+      # neither slower nor broken there.
       - name: install the tools of the formats
         run: |
-          apt-get update
+          set -eu
+          files="/etc/apt/sources.list /etc/apt/sources.list.d/debian.sources"
+          for f in $files; do
+            [ -f "$f" ] || continue
+            sed -i "s|deb.debian.org|$DEBIAN_MIRROR|g; s|security.debian.org|$DEBIAN_MIRROR|g" "$f"
+          done
+
+          if ! apt-get update -qq; then
+            echo "the mirror $DEBIAN_MIRROR did not answer, going back to the image's own sources"
+            for f in $files; do
+              [ -f "$f" ] || continue
+              sed -i "s|$DEBIAN_MIRROR|deb.debian.org|g" "$f"
+            done
+            apt-get update
+          fi
+
           apt-get install -y --no-install-recommends rpm libarchive-tools xz-utils zstd
 
       - name: pack every format
