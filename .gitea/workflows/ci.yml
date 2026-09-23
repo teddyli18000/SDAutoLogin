@@ -37,9 +37,12 @@ env:
   INSTANCE: https://git.zqlhub.com
   # Where the job installs the tools of the formats from. The image's own
   # sources are Debian's, which answered from far away here: four small packages
-  # took minutes. Point this at a mirror near the runner, an internal one or one
-  # in the same country, and the same four take seconds.
-  DEBIAN_MIRROR: mirrors.tuna.tsinghua.edu.cn
+  # took minutes. The runner is a machine of the instance's own, so this names
+  # the mirror it reaches over the internal network, which answers at once and
+  # is not billed as traffic. The step puts the image's own sources back when
+  # this one does not answer, so a runner outside that network is neither slower
+  # nor broken there.
+  DEBIAN_MIRROR: mirrors.tencentyun.com
 
 jobs:
   test:
@@ -133,21 +136,34 @@ jobs:
       # compressors that package wants, which the standard library cannot write.
       # dpkg-deb, which reads the deb and the ipk, is in the base image.
       #
-      # The image's own sources are rewritten to the mirror first, both spellings
-      # of the archive being one host away from the other. A network that cannot
-      # reach the mirror has the image's own sources put back, so this step is
-      # neither slower nor broken there.
+      # The image's own sources are Debian's and are pointed at the mirror
+      # first, both spellings of the archive being one host away from the other.
+      # Whether the mirror answers is asked of the mirror itself rather than of
+      # apt-get: an index that could not be fetched at all is a warning there and
+      # the exit status stays 0, so a check on that status would pass on a runner
+      # which cannot reach the mirror and leave the install to fail with nothing
+      # to install from. What apt-get is asked is the other way this can go
+      # wrong, a mirror that answers but carries no such suite, which is an
+      # error. Either way the image's own sources are put back, so a runner
+      # outside the mirror's network is neither slower nor broken.
       - name: install the tools of the formats
         run: |
           set -eu
           files="/etc/apt/sources.list /etc/apt/sources.list.d/debian.sources"
-          for f in $files; do
-            [ -f "$f" ] || continue
-            sed -i "s|deb.debian.org|$DEBIAN_MIRROR|g; s|security.debian.org|$DEBIAN_MIRROR|g" "$f"
-          done
+
+          # The mirror is named as a host, so the archive is asked for on the
+          # port http uses by default.
+          if timeout 10 bash -c "exec 3<>/dev/tcp/${DEBIAN_MIRROR}/80" 2>/dev/null; then
+            for f in $files; do
+              [ -f "$f" ] || continue
+              sed -i "s|deb.debian.org|$DEBIAN_MIRROR|g; s|security.debian.org|$DEBIAN_MIRROR|g" "$f"
+            done
+          else
+            echo "the mirror $DEBIAN_MIRROR does not answer, installing from the image's own sources"
+          fi
 
           if ! apt-get update -qq; then
-            echo "the mirror $DEBIAN_MIRROR did not answer, going back to the image's own sources"
+            echo "the sources of $DEBIAN_MIRROR could not be read, going back to the image's own sources"
             for f in $files; do
               [ -f "$f" ] || continue
               sed -i "s|$DEBIAN_MIRROR|deb.debian.org|g" "$f"

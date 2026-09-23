@@ -234,6 +234,16 @@ looked at by hand, once.
   toolchain is the one the module asks for rather than whatever the runner
   happens to have, and the second one installs the tools of the formats before it
   starts.
+- Those tools come from the mirror the runner reaches over the network of the
+  machine it runs on, rather than from the archive the image names, which
+  answered from far enough away here that four small packages took minutes.
+  Whether the mirror answers is asked of the mirror rather than of
+  `apt-get update`: an index that could not be fetched at all is a warning there
+  and its exit status stays 0, so a runner that cannot reach the mirror would
+  have gone on and installed from an empty index. A mirror that answers and
+  carries no such suite is an error rather than a warning, and that is caught as
+  well. Either way the image's own sources are put back, so a runner outside the
+  network of the mirror is neither slower nor broken.
 - Every step is a command of that image, rather than an action fetched from
   elsewhere: the familiar `actions/checkout` and `actions/upload-artifact` are
   JavaScript ones and need node in the container, which the Go image has not, so
