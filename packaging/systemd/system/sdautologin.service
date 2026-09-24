@@ -13,6 +13,13 @@
 # newest line is the one that works. Bind to 0.0.0.0 only on a trusted network:
 # the page holds the account in clear text.
 #
+# The password does not have to be written down at all. systemd can hand it over as
+# a credential, which the program picks up by itself, so that neither the file nor
+# the command line ever holds one; add this to the [Service] section below, with
+# the secret on the first line of a file root reads (0600) and nobody else:
+#
+#   LoadCredential=password:/etc/sdautologin/password
+#
 # Then:
 #   systemctl daemon-reload
 #   systemctl enable --now sdautologin

@@ -17,6 +17,13 @@
 # sdautologin): the bare port is refused, since the address carries the one time
 # token the page is opened with.
 #
+# The password does not have to be written down at all. systemd can hand it over as
+# a credential, which the program picks up by itself, so that neither the file nor
+# the command line ever holds one; add this to the [Service] section below, with
+# the secret on the first line of a file this user reads (0600) and nobody else:
+#
+#   LoadCredential=password:/etc/sdautologin/password
+#
 # A user service stops when the last session ends unless lingering is on; for a
 # machine that has to keep the session up while nobody is logged in, run
 # "loginctl enable-linger $USER" or use the system service instead.

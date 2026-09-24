@@ -281,6 +281,11 @@ help           print the usage text
                    several, in the order they are to be tried
 --username=NAME    use this account, as the single entry of the list
 --password=SECRET  use this password instead of the configured one
+--password-file=PATH
+                   read the password from the first line of PATH instead; a
+                   secret on the command line is in the process list of every
+                   user on the machine, so this is the form to use from a
+                   script, a service or a container
 --isp=SUFFIX       service suffix such as @zgyd, empty for the campus network
 --save             write what was given here into config.json as well
 --settings=ADDR    run: also serve the settings page on ADDR, for a machine
@@ -315,6 +320,15 @@ SDAutoLogin run --account=s1234567:SECRET@zgyd+cucc --account=s7654321:OTHER --s
 
 A password that holds an `@` cannot be written in that form, since the `@`
 introduces the service types; `--username` and `--password` take it.
+
+There is one more place the password can come from, and it is the better one for
+a service. A command line is in the process list of every user on the machine, so
+`--password-file=PATH` reads the password from the first line of a file instead,
+and a systemd unit that hands the secret over with
+`LoadCredential=password:/etc/sdautologin/password` needs no option at all: the
+program reads `$CREDENTIALS_DIRECTORY/password` by itself when nothing else named
+a password. Either way only the line ending is dropped, since a password may end
+in a space.
 
 The same executable serves both modes: started without a command it puts the
 tray icon up and keeps running, started with one it does that one thing and

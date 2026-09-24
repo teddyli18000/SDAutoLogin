@@ -64,6 +64,13 @@ Options, for the commands that read the account:
                       --password instead.
   --username=NAME     use this account, as the single entry of the list
   --password=SECRET   use this password instead of the configured one
+  --password-file=PATH
+                      read the password from the first line of PATH instead. A
+                      secret given on the command line is in the process list of
+                      every user on the machine, so this is the form to use from
+                      a script, a service or a container. A systemd unit that
+                      hands the secret over with LoadCredential needs neither:
+                      the program reads $CREDENTIALS_DIRECTORY/password itself
   --isp=SUFFIX        service suffix such as @zgyd, an empty value for the
                       campus network itself
   --save              write what was given here into config.json as well,
@@ -111,7 +118,12 @@ type options struct {
 	home     *string
 	username *string
 	password *string
-	isp      *string
+	// passwordFile is a path to read the password from instead of naming it
+	// here. It is for the machines where the secret belongs in neither the config
+	// file nor the command line, the command line being readable by every user
+	// that can see the process list.
+	passwordFile *string
+	isp          *string
 	// accounts are entries given whole, written as user:password@service, in the
 	// order they are to be tried. A provisioning script fills the login list by
 	// repeating the option.
@@ -138,7 +150,7 @@ type options struct {
 func knownOption(arg string) bool {
 	name, _, _ := strings.Cut(arg, "=")
 	switch name {
-	case "--home", "--username", "--password", "--isp", "--account", "--settings",
+	case "--home", "--username", "--password", "--password-file", "--isp", "--account", "--settings",
 		"--app", "--save", "--json", "--no-log":
 		return true
 	}
@@ -150,7 +162,7 @@ func knownOption(arg string) bool {
 // case on a desktop.
 func takesValue(name string) bool {
 	switch name {
-	case "--home", "--username", "--password", "--isp", "--account", "--settings":
+	case "--home", "--username", "--password", "--password-file", "--isp", "--account", "--settings":
 		return true
 	}
 	return false
@@ -183,6 +195,9 @@ func (o *options) set(name, value string) bool {
 	case "--password":
 		v := value
 		o.password = &v
+	case "--password-file":
+		v := value
+		o.passwordFile = &v
 	case "--isp":
 		v := value
 		o.isp = &v
@@ -247,7 +262,8 @@ func (o options) given() bool {
 // the reminder about --save printed: that reminder is about a secret used for one
 // run only, while --no-log is a switch meant to be passed on every start.
 func (o options) accountGiven() bool {
-	return o.username != nil || o.password != nil || o.isp != nil || len(o.accounts) > 0
+	return o.username != nil || o.password != nil || o.passwordFile != nil ||
+		o.isp != nil || len(o.accounts) > 0
 }
 
 // applyTo copies the overrides onto cfg. An option that was not given leaves the
@@ -256,9 +272,19 @@ func (o options) accountGiven() bool {
 // The account options describe the login list as a whole rather than adding to
 // it: a provisioning script names the accounts to use, in the order it names them.
 func (o options) applyTo(cfg *config.Config) error {
+	// The password may come from a file rather than from here, which is how a
+	// service or a container is given one without it appearing in a process list.
+	password, givenPassword, err := o.passwordOverride()
+	if err != nil {
+		return err
+	}
+
 	switch {
-	case len(o.accounts) > 0 && (o.username != nil || o.password != nil || o.isp != nil):
-		return fmt.Errorf("--account names the account and the service itself, so it cannot be combined with --username, --password or --isp")
+	case len(o.accounts) > 0 && (o.username != nil || o.password != nil || o.passwordFile != nil || o.isp != nil):
+		return fmt.Errorf("--account names the account and the service itself, so it cannot be combined with --username, --password, --password-file or --isp")
+
+	case len(o.accounts) > 0 && givenPassword:
+		return fmt.Errorf("--account carries the password itself, so it cannot be combined with a password read from a file")
 
 	case len(o.accounts) > 0:
 		list := make([]config.Account, 0, len(o.accounts))
@@ -271,7 +297,7 @@ func (o options) applyTo(cfg *config.Config) error {
 		}
 		cfg.Accounts = list
 
-	case o.username != nil || o.password != nil || o.isp != nil:
+	case o.username != nil || o.password != nil || o.passwordFile != nil || o.isp != nil || givenPassword:
 		// One account described field by field. What is not given is taken from
 		// the entry that is already there, so a password can be changed without
 		// repeating the account it belongs to.
@@ -282,8 +308,8 @@ func (o options) applyTo(cfg *config.Config) error {
 		if o.username != nil {
 			entry.Username = *o.username
 		}
-		if o.password != nil {
-			entry.Password = *o.password
+		if givenPassword {
+			entry.Password = password
 		}
 		if o.isp != nil {
 			entry.ISPs = []string{*o.isp}
@@ -295,6 +321,73 @@ func (o options) applyTo(cfg *config.Config) error {
 		cfg.LogToFile = false
 	}
 	return nil
+}
+
+// passwordOverride is the password to use in place of the configured one, and
+// whether there is one to use at all. It is named on the command line, or read
+// from a file, or handed over by systemd; a run that was given none of them keeps
+// what the configuration holds, which is what --save then writes.
+func (o options) passwordOverride() (string, bool, error) {
+	switch {
+	case o.password != nil && o.passwordFile != nil:
+		return "", false, fmt.Errorf("--password and --password-file both name the password")
+	case o.password != nil:
+		return *o.password, true, nil
+	case o.passwordFile != nil:
+		password, err := readPasswordFile(*o.passwordFile)
+		if err != nil {
+			return "", false, err
+		}
+		return password, true, nil
+	}
+
+	systemd := credentialPasswordPath()
+	if systemd == "" {
+		return "", false, nil
+	}
+	password, err := readPasswordFile(systemd)
+	if err != nil {
+		return "", false, err
+	}
+	return password, true, nil
+}
+
+// credentialName is the name of the credential a systemd unit is expected to hand
+// over: LoadCredential=password:/some/file puts that file at
+// $CREDENTIALS_DIRECTORY/password, which no other process on the machine can
+// read, and which is not written to disk again by anything here.
+const credentialName = "password"
+
+// credentialPasswordPath is where systemd left the credential for this run, and
+// "" when there is none — which is every run systemd did not start at all, and
+// every unit that does not ask for a credential.
+func credentialPasswordPath() string {
+	dir := os.Getenv("CREDENTIALS_DIRECTORY")
+	if dir == "" {
+		return ""
+	}
+	path := filepath.Join(dir, credentialName)
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		return ""
+	}
+	return path
+}
+
+// readPasswordFile reads the password from the first line of a file, which is how
+// a secret is kept out of both a command line and the configuration file. Only
+// the line ending is dropped: a password may end in a space, and trimming more
+// than the newline would quietly change it.
+func readPasswordFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read the password from %s: %w", path, err)
+	}
+	line, _, _ := strings.Cut(string(data), "\n")
+	line = strings.TrimSuffix(line, "\r")
+	if line == "" {
+		return "", fmt.Errorf("%s holds no password", path)
+	}
+	return line, nil
 }
 
 // parseAccount reads the one line form of an account,

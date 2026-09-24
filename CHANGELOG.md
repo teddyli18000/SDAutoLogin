@@ -88,6 +88,12 @@ close the places it appears besides the file.
   at startup, with a line in the log saying what was found and what was done.
   Windows has no mode bits to lean on, so there the file is given an access list
   of its own naming only the account the program runs as.
+- The password does not have to be in the file at all. `--password-file=PATH`
+  reads it from the first line of a file, and a systemd unit can hand it over as
+  a credential with `LoadCredential=password:/path`, which the program picks up
+  from `$CREDENTIALS_DIRECTORY/password` on its own. A command line is in the
+  process list of every user on the machine, so a service or a container can now
+  keep the secret out of both the file and the arguments it was started with.
 
 ## v1.1.0 - 2026-09-24
 

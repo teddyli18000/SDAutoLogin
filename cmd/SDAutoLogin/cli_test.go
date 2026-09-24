@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -31,6 +33,27 @@ func TestParseOptionsAcceptsBothForms(t *testing.T) {
 		}
 		if opts.isp == nil || *opts.isp != "@zgyd" {
 			t.Errorf("parseOptions(%v) isp = %v", args, opts.isp)
+		}
+		if !opts.given() {
+			t.Errorf("parseOptions(%v) reported nothing as given", args)
+		}
+	}
+}
+
+func TestParseOptionsAcceptsThePasswordFileInBothForms(t *testing.T) {
+	for _, args := range [][]string{
+		{"--password-file=/etc/sdautologin/secret"},
+		{"--password-file", "/etc/sdautologin/secret"},
+	} {
+		opts, rest, err := parseOptions(args)
+		if err != nil {
+			t.Fatalf("parseOptions(%v): %v", args, err)
+		}
+		if len(rest) != 0 {
+			t.Errorf("parseOptions(%v) left %v over", args, rest)
+		}
+		if opts.passwordFile == nil || *opts.passwordFile != "/etc/sdautologin/secret" {
+			t.Errorf("parseOptions(%v) passwordFile = %v", args, opts.passwordFile)
 		}
 		if !opts.given() {
 			t.Errorf("parseOptions(%v) reported nothing as given", args)
@@ -217,6 +240,140 @@ func TestApplyToOnlyChangesWhatWasGiven(t *testing.T) {
 	}
 	if entry.Username != "old" || len(entry.ISPs) != 1 || entry.ISPs[0] != "@cucc" {
 		t.Errorf("an option that was not given changed the entry: %+v", entry)
+	}
+}
+
+// writeSecret leaves a password in a file of its own, the way a service or a
+// script hands one over.
+func writeSecret(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "portal-password")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A password that is read from a file is the form a service uses: the command
+// line of a process is readable by every user that can see the process list, and
+// the configuration file is the file the secret is being kept out of.
+func TestApplyToReadsThePasswordFromAFile(t *testing.T) {
+	path := writeSecret(t, "fromthefile\n")
+	cfg := &config.Config{Accounts: []config.Account{
+		{Username: "s1234567", Password: "stale", ISPs: []string{"@zgyd"}},
+	}}
+
+	if err := (options{passwordFile: &path}).applyTo(cfg); err != nil {
+		t.Fatalf("applyTo: %v", err)
+	}
+
+	entry := cfg.Accounts[0]
+	if entry.Password != "fromthefile" {
+		t.Errorf("Password = %q, want the one in the file", entry.Password)
+	}
+	if entry.Username != "s1234567" || len(entry.ISPs) != 1 || entry.ISPs[0] != "@zgyd" {
+		t.Errorf("the entry was changed beyond its password: %+v", entry)
+	}
+}
+
+// Only the line ending comes off the file. A password may end in a space, and a
+// space that was trimmed away is a password quietly different from the one that
+// was written.
+func TestAPasswordFileKeepsEverythingButTheLineEnding(t *testing.T) {
+	path := writeSecret(t, "two spaces  \r\nsecond line\n")
+
+	got, err := readPasswordFile(path)
+	if err != nil {
+		t.Fatalf("readPasswordFile: %v", err)
+	}
+	if got != "two spaces  " {
+		t.Errorf("readPasswordFile = %q, want %q", got, "two spaces  ")
+	}
+}
+
+func TestAnEmptyPasswordFileIsRefused(t *testing.T) {
+	path := writeSecret(t, "")
+	if _, err := readPasswordFile(path); err == nil {
+		t.Error("a file with nothing in it was taken for a password")
+	}
+}
+
+// systemd hands a LoadCredential secret to the one service that asked for it,
+// through a directory no other process on the machine can read, so a unit can
+// keep the password out of every file the program writes.
+func TestApplyToTakesThePasswordSystemdHandedOver(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, credentialName), []byte("fromsystemd\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CREDENTIALS_DIRECTORY", dir)
+
+	cfg := &config.Config{Accounts: []config.Account{
+		{Username: "s1234567", Password: "stale", ISPs: []string{""}},
+	}}
+	if err := (options{}).applyTo(cfg); err != nil {
+		t.Fatalf("applyTo: %v", err)
+	}
+
+	if got := cfg.Accounts[0].Password; got != "fromsystemd" {
+		t.Errorf("Password = %q, want the credential", got)
+	}
+}
+
+func TestARunWithoutACredentialKeepsTheConfiguredPassword(t *testing.T) {
+	t.Setenv("CREDENTIALS_DIRECTORY", t.TempDir())
+	cfg := &config.Config{Accounts: []config.Account{
+		{Username: "s1234567", Password: "stored", ISPs: []string{""}},
+	}}
+
+	if err := (options{}).applyTo(cfg); err != nil {
+		t.Fatalf("applyTo: %v", err)
+	}
+	if got := cfg.Accounts[0].Password; got != "stored" {
+		t.Errorf("Password = %q, want the configured one", got)
+	}
+}
+
+func TestACommandLinePasswordWinsOverACredential(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, credentialName), []byte("fromsystemd\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CREDENTIALS_DIRECTORY", dir)
+
+	password := "fromthecommandline"
+	cfg := &config.Config{Accounts: []config.Account{{Username: "s1234567", ISPs: []string{""}}}}
+	if err := (options{password: &password}).applyTo(cfg); err != nil {
+		t.Fatalf("applyTo: %v", err)
+	}
+	if got := cfg.Accounts[0].Password; got != password {
+		t.Errorf("Password = %q, want the one that was named", got)
+	}
+}
+
+func TestTwoPasswordsAreRefused(t *testing.T) {
+	path := writeSecret(t, "fromthefile\n")
+	password := "fromthecommandline"
+	cfg := &config.Config{Accounts: []config.Account{
+		{Username: "s1234567", Password: "stale", ISPs: []string{""}},
+	}}
+
+	if err := (options{password: &password, passwordFile: &path}).applyTo(cfg); err == nil {
+		t.Error("two sources for one password were accepted")
+	}
+	if got := cfg.Accounts[0].Password; got != "stale" {
+		t.Errorf("a run that was refused changed the entry: %q", got)
+	}
+}
+
+// --account carries the password in the entry itself, so a password read from a
+// file has nowhere to go and is refused rather than silently dropped.
+func TestAnAccountWithAFilePasswordIsRefused(t *testing.T) {
+	path := writeSecret(t, "fromthefile\n")
+	cfg := &config.Config{}
+
+	if err := (options{accounts: []string{"first:one"}, passwordFile: &path}).applyTo(cfg); err == nil {
+		t.Error("--account was combined with a password from a file")
 	}
 }
 

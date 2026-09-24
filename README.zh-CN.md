@@ -243,6 +243,9 @@ help           打印用法
                    登录列表里的一条；可重复给出多条，顺序就是尝试顺序
 --username=NAME    用该账号作为列表里唯一的一条
 --password=SECRET  用该密码替代配置中的密码
+--password-file=PATH
+                   改为从 PATH 的第一行读取密码；写在命令行上的密钥会出现在本机
+                   每个用户的进程列表里，因此脚本、服务与容器用这种写法
 --isp=SUFFIX       运营商后缀，例如 @zgyd；留空表示校园网本身
 --save             同时把命令行给出的值写入 config.json
 --settings=ADDR    run：额外在 ADDR 上提供设置页，供没有托盘、没有显示器的
@@ -272,6 +275,13 @@ SDAutoLogin run --account=s1234567:SECRET@zgyd+cucc --account=s7654321:OTHER --s
 
 密码里含 `@` 时无法用这种写法，因为 `@` 就是引出服务类型的那个字符；这种情况用
 `--username` 与 `--password`。
+
+密码还可以来自另一个地方，服务场景用它更好。命令行会出现在本机每个用户的进程列表
+里，所以 `--password-file=PATH` 改为从文件的第一行读取密码；而用
+`LoadCredential=password:/etc/sdautologin/password` 把密钥递过来的 systemd unit 则
+连选项都不需要，程序会在没有别处给出密码时自己读
+`$CREDENTIALS_DIRECTORY/password`。两种写法都只去掉行尾，因为密码本身可能以空格
+结尾。
 
 GUI 与命令行是**同一个可执行文件**，只是参数不同：不带子命令时启动托盘并常驻，
 带子命令时执行一次后退出。`-cli` 等同于 `run`，`-test-login` 等同于 `login`。
