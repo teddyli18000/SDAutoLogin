@@ -2,6 +2,8 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -774,6 +776,85 @@ func TestASwitchWithoutAServiceTypeIsRefused(t *testing.T) {
 	if got := stub.loginCount(); got != 0 {
 		t.Errorf("a login was submitted %d time(s) for a request that named no service type", got)
 	}
+}
+
+// TestThePortalPageOpenedIsTheConfiguredOne covers the way out of a session the
+// portal will not sign in again: the page asks for the portal's own page, and
+// what reaches the desktop is the address the program is configured with. The
+// address in the request is ignored on purpose - a page that could name one
+// would be a page that can hand the shell anything it likes.
+func TestThePortalPageOpenedIsTheConfiguredOne(t *testing.T) {
+	cfg := portalPageConfig()
+	server, opened := portalPageServer(t, cfg, nil)
+
+	rec := postAction(t, server, `{"action":"openPortal","url":"http://example.com/not-the-portal"}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var reply struct {
+		OK  bool   `json:"ok"`
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &reply); err != nil {
+		t.Fatalf("reading the reply: %v", err)
+	}
+	if !reply.OK {
+		t.Errorf("the reply is not ok: %s", rec.Body.String())
+	}
+	if reply.URL != cfg.PortalBaseURL {
+		t.Errorf("the reply names %q, want the configured portal page %q", reply.URL, cfg.PortalBaseURL)
+	}
+	if len(*opened) != 1 || (*opened)[0] != cfg.PortalBaseURL {
+		t.Errorf("opened %q, want exactly the configured portal page %q", *opened, cfg.PortalBaseURL)
+	}
+}
+
+// TestAPortalPageThatCannotBeOpenedIsReported covers the other half of that
+// button: when the desktop will not take the address, the request is answered as
+// a failure with a message key, so the page says the button did nothing instead
+// of reporting a browser that never came up.
+func TestAPortalPageThatCannotBeOpenedIsReported(t *testing.T) {
+	server, opened := portalPageServer(t, portalPageConfig(), errors.New("nothing here takes http addresses"))
+
+	rec := postAction(t, server, `{"action":"openPortal"}`)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "err.openPortal") {
+		t.Errorf("the reply does not name the message to show: %s", rec.Body.String())
+	}
+	if len(*opened) != 1 {
+		t.Errorf("opened %q, want the one attempt that failed", *opened)
+	}
+}
+
+// portalPageConfig is a configuration whose portal home page is known, which is
+// the address the button beside a refusal is expected to open.
+func portalPageConfig() *config.Config {
+	return &config.Config{
+		Accounts:      []config.Account{{Username: "s1234567", Password: "p@ss"}},
+		PortalBaseURL: "http://10.9.1.3/",
+	}
+}
+
+// portalPageServer is a running settings server whose desktop is replaced with
+// one that records what it was asked to open, and fails when fail is set.
+func portalPageServer(t *testing.T, cfg *config.Config, fail error) (*Server, *[]string) {
+	t.Helper()
+
+	server := NewServer(New(cfg), "", nil)
+	t.Cleanup(server.Stop)
+	if _, err := server.URL(); err != nil {
+		t.Fatalf("URL: %v", err)
+	}
+	opened := &[]string{}
+	server.openExternal = func(target string) error {
+		*opened = append(*opened, target)
+		return fail
+	}
+	return server, opened
 }
 
 // TestASaveCarriesThePreferredServiceSwitch covers the JSON name of that option

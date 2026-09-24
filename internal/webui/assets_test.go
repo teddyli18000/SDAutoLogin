@@ -46,3 +46,41 @@ func TestThePageQuotesTheStringTable(t *testing.T) {
 		t.Error("not one literal in the page was compared against the table")
 	}
 }
+
+// scriptText holds the two shapes in which the script names a string: t("key"),
+// which may take arguments after it, and state.i18n["key"]. A key the script puts
+// together while it runs, like the ret_code and state ones, matches neither: the
+// quoted part has to be the whole key. That is what keeps this from failing on
+// the composed ones. The word boundary in front of t( is what keeps the calls
+// that merely end in one - closest(".account"), split("; ") - from being read as
+// calls to it.
+var scriptText = []*regexp.Regexp{
+	regexp.MustCompile(`\bt\(["']([^"']+)["'][),]`),
+	regexp.MustCompile(`state\.i18n\[["']([^"']+)["']\]`),
+}
+
+// TestTheScriptQuotesTheStringTable is the other half of
+// TestThePageQuotesTheStringTable. The script names most of the page's strings
+// itself, and a key that was renamed or mistyped in one of the two places shows
+// up on screen as the key rather than as the wording.
+func TestTheScriptQuotesTheStringTable(t *testing.T) {
+	script, err := fs.ReadFile(Assets(), "app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := i18n.ALL(i18n.LangEN)
+
+	checked := 0
+	for _, names := range scriptText {
+		for _, m := range names.FindAllStringSubmatch(string(script), -1) {
+			key := m[1]
+			checked++
+			if _, ok := table[key]; !ok {
+				t.Errorf("app.js names the key %q, which the string table does not hold", key)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Error("not one key in the script was compared against the table")
+	}
+}
