@@ -45,10 +45,18 @@ func SetAutostart(on bool) bool {
 		// reg fails when the value is already absent, or was already there, so
 		// the resulting state is what decides, not the exit code.
 		if AutostartEnabled() == on {
+			logging.Log.Debug("the autostart entry of %s already said what was asked of it", winRunKey)
 			return true
 		}
 		logging.Log.Warn("updating autostart entry: %v", err)
 		return false
+	}
+	if on {
+		// The command line is what an entry that starts the wrong directory or
+		// the wrong program is diagnosed from, and it never carries a password.
+		logging.Log.Debug("autostart entry written: %s = %s", winRunKey, command)
+	} else {
+		logging.Log.Debug("autostart entry removed from %s", winRunKey)
 	}
 	return true
 }

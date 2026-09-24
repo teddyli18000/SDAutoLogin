@@ -10,6 +10,31 @@ import (
 	"time"
 )
 
+// TestTheDirectoryProbeTellsWhatCanBeWritten covers the question the fallback
+// rests on. The directory is probed rather than read off its mode bits, since
+// what makes a temporary directory unusable is usually a mount option or a
+// policy that the mode does not show, so the probe has to be right about the
+// three shapes a machine can be in: a directory of its own, something that is not
+// a directory, and a path that is not there at all. A probe that answered true
+// for the last two would leave the lock file in a directory that cannot hold it.
+func TestTheDirectoryProbeTellsWhatCanBeWritten(t *testing.T) {
+	dir := t.TempDir()
+	if !dirIsWritable(dir) {
+		t.Errorf("dirIsWritable(%s) = false, want true for a directory of its own", dir)
+	}
+
+	file := filepath.Join(dir, "a-file")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if dirIsWritable(file) {
+		t.Errorf("dirIsWritable(%s) = true, want false for something that is not a directory", file)
+	}
+	if dirIsWritable(filepath.Join(dir, "gone", "deeper")) {
+		t.Error("dirIsWritable() = true for a directory that is not there, want false")
+	}
+}
+
 func TestASecondCopyCanAskTheRunningOneForItsPage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.sock")
 	listener, err := listenSettingsSocket(path)

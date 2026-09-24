@@ -56,6 +56,7 @@ func SetAutostart(on bool) bool {
 			logging.Log.Warn("disabling autostart: %v", err)
 			return false
 		}
+		logging.Log.Debug("autostart entry removed: %s", path)
 		return true
 	}
 	if executablePath() == "" {
@@ -74,6 +75,9 @@ func SetAutostart(on bool) bool {
 		logging.Log.Warn("writing autostart entry: %v", err)
 		return false
 	}
+	// The command line is what an entry that starts the wrong directory or the
+	// wrong program is diagnosed from, and it never carries a password.
+	logging.Log.Debug("autostart entry written: %s (exec %s)", path, autostartCommand())
 	return true
 }
 

@@ -673,6 +673,104 @@ func TestASaveThatLeavesThePasswordAloneKeepsIt(t *testing.T) {
 	}
 }
 
+// TestAFirstSaveFromThePage covers what the page sends when nothing is
+// configured yet, which is what the wizard does. The list a save carries is the
+// list of cards, so an account that has not been put in it is an account the
+// request does not have, and a password that was not put in the card is one the
+// request does not carry either. Both are refused by name, and the refusal is
+// what the page shows next to the field it is about: the one a reader met was
+// "password is required" on an account whose password had just been typed into a
+// card that was rebuilt underneath it.
+func TestAFirstSaveFromThePage(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want int
+		key  string
+	}{
+		{
+			"an account with the password that was typed",
+			`{"accounts":[{"username":"23D001","password":"hunter2","isps":[""]}]}`,
+			http.StatusOK, "",
+		},
+		{
+			"no account at all, the wizard's list before the account is put in it",
+			`{"accounts":[]}`,
+			http.StatusBadRequest, "err.accountsRequired",
+		},
+		{
+			"an account whose password field came back empty",
+			`{"accounts":[{"username":"23D001","isps":[""]}]}`,
+			http.StatusBadRequest, "err.passwordRequired",
+		},
+		{
+			"an account with no name",
+			`{"accounts":[{"username":"","password":"hunter2","isps":[""]}]}`,
+			http.StatusBadRequest, "err.accountRequired",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// A configuration as a fresh installation has it: a file that exists
+			// and holds no account, so there is no stored password for an empty
+			// field to keep.
+			cfg, err := config.LoadConfig(filepath.Join(t.TempDir(), "config.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := New(cfg)
+			server := NewServer(state, "", nil)
+			t.Cleanup(server.Stop)
+			t.Cleanup(state.Stop)
+			if _, err := server.URL(); err != nil {
+				t.Fatalf("URL: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(c.body)))
+			req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
+			req.Header.Set("X-Auth-Token", server.session)
+			rec := httptest.NewRecorder()
+			server.handleConfig(rec, req)
+
+			if rec.Code != c.want {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, c.want, rec.Body.String())
+			}
+			if c.key != "" && !strings.Contains(rec.Body.String(), c.key) {
+				t.Errorf("the refusal does not name %s: %s", c.key, rec.Body.String())
+			}
+			if c.want == http.StatusOK {
+				if got := state.Config().Accounts; len(got) != 1 || got[0].Password != "hunter2" {
+					t.Errorf("Accounts = %+v, want the account with the password that was sent", got)
+				}
+				return
+			}
+			if got := len(state.Config().Accounts); got != 0 {
+				t.Errorf("a refused first save left %d account(s) behind", got)
+			}
+		})
+	}
+}
+
+// TestTheRefusalLineNamesEveryField covers the line a refused save writes to the
+// log. It has to name every field that was refused, in one order, so two refusals
+// can be read against each other, and it says which field it is without ever
+// carrying what was in it.
+func TestTheRefusalLineNamesEveryField(t *testing.T) {
+	got := describeErrors(map[string]string{
+		"accounts.1.password": "err.passwordRequired",
+		"accounts":            "err.accountsRequired",
+		"accounts.0.username": "err.accountRequired",
+	})
+	want := "accounts=err.accountsRequired; accounts.0.username=err.accountRequired; accounts.1.password=err.passwordRequired"
+	if got != want {
+		t.Errorf("describeErrors() = %q, want %q", got, want)
+	}
+	if got := describeErrors(nil); got != "" {
+		t.Errorf("describeErrors(nil) = %q, want nothing", got)
+	}
+}
+
 func TestIsLoopback(t *testing.T) {
 	for _, host := range []string{"127.0.0.1", "::1", "localhost", "LOCALHOST"} {
 		if !isLoopback(host) {

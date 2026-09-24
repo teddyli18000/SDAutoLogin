@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -343,18 +344,30 @@ func (s *Server) authorised(r *http.Request) bool {
 	s.lastHit.Store(time.Now().UnixNano())
 	cookie, err := r.Cookie(sessionCookie)
 	if err != nil {
+		// The three ways a request is refused are told apart here, because which
+		// one it was is the difference between a page left over from an earlier
+		// run and a page that is not sending what this server asks of it.
+		logging.Log.Debug("refusing %s %s: no session cookie, so the page was not opened from an address of this run",
+			r.Method, r.URL.Path)
 		return false
 	}
 	s.mu.Lock()
 	session := s.session
 	s.mu.Unlock()
 	if !tokenEqual(cookie.Value, session) {
+		logging.Log.Debug("refusing %s %s: the session cookie is not the one this run handed out",
+			r.Method, r.URL.Path)
 		return false
 	}
 	if r.Method == http.MethodGet {
 		return true
 	}
-	return tokenEqual(r.Header.Get("X-Auth-Token"), session)
+	if !tokenEqual(r.Header.Get("X-Auth-Token"), session) {
+		logging.Log.Debug("refusing %s %s: the cookie was sent without the token header a change has to carry",
+			r.Method, r.URL.Path)
+		return false
+	}
+	return true
 }
 
 // tokenEqual compares two tokens in a time that does not depend on how many
@@ -503,6 +516,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	// the configuration the program is running with.
 	next := s.state.Config().Clone()
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(next); err != nil {
+		logging.Log.Warn("the settings page sent a configuration that could not be read: %v", err)
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{
 			"ok":     false,
 			"errors": map[string]string{"_": "err.badRequest"},
@@ -514,6 +528,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	// reader typed is in the request and is left alone.
 	next.KeepPasswordsFrom(s.state.Config())
 	if errs := next.Validate(); len(errs) > 0 {
+		// The field paths of the refusal go to the log, since the page shows them
+		// next to the inputs a reader may not be looking at: accounts.0.password
+		// says a password is missing, never what it is.
+		logging.Log.Warn("the settings page's configuration was refused: %s", describeErrors(errs))
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "errors": errs})
 		return
 	}
@@ -528,6 +546,22 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	logging.Log.Info("settings page saved the config: %s", next.Summary())
 	writeJSON(w, map[string]any{"ok": true, "config": pageConfig(next)})
+}
+
+// describeErrors is a validation result as one line: the field paths and the
+// message keys that go with them, in a stable order, so a refusal in the log can
+// be read against the page. The paths name the fields, never their values.
+func describeErrors(errs map[string]string) string {
+	fields := make([]string, 0, len(errs))
+	for field := range errs {
+		fields = append(fields, field)
+	}
+	slices.Sort(fields)
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		parts = append(parts, field+"="+errs[field])
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {

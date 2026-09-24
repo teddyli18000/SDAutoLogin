@@ -204,11 +204,16 @@ func (s *Service) Stop() {
 	done := s.done
 	s.mu.Unlock()
 
-	// Waited for outside the lock: the loop takes it again on its way out.
+	// Waited for outside the lock: the loop takes it again on its way out. The
+	// wait is measured, since a check that is in the middle of talking to the
+	// portal is the whole reason this waits at all: a stop that returns at once
+	// is a loop that had nothing in flight.
+	asked := time.Now()
 	<-done
 
 	checks, attempts := s.stats()
-	logging.Log.Debug("service stopped (checks=%d, login attempts=%d)", checks, attempts)
+	logging.Log.Debug("service stopped (checks=%d, login attempts=%d, the loop ended %s after it was asked to)",
+		checks, attempts, time.Since(asked).Round(time.Millisecond))
 }
 
 func (s *Service) stats() (checks, attempts int64) {
@@ -221,6 +226,7 @@ func (s *Service) stats() (checks, attempts int64) {
 // entries that were refused before are given another chance, since the settings
 // just saved may be what was wrong with one of them.
 func (s *Service) Restart(cfg *config.Config) {
+	logging.Log.Debug("restarting the check loop on new settings: %s", cfg.Summary())
 	s.Stop()
 	s.mu.Lock()
 	s.cfg = cfg

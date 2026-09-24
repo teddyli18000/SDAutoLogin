@@ -509,6 +509,10 @@ func (o options) checkTrayOptions() error {
 // dropped, which a script would take for a JSON report.
 func exitIfBadOptions(o options, command string, run func(string, options) int, appDir string) {
 	if err := o.check(command); err != nil {
+		// Into the log as well as onto the terminal: the Windows build is linked
+		// as a windowless program, so a start that fails here from a shortcut
+		// leaves nothing on screen and the log is the only trace of it.
+		logging.Log.Error("%v", err)
 		fmt.Fprintf(os.Stderr, "%v\n\n", err)
 		printUsage(os.Stderr)
 		os.Exit(2)
@@ -522,6 +526,7 @@ func exitIfBadOptions(o options, command string, run func(string, options) int, 
 func runCommand(args []string, appDir string, opts options) int {
 	command := args[0]
 	if err := opts.check(command); err != nil {
+		logging.Log.Error("%v", err)
 		fmt.Fprintf(os.Stderr, "%v\n\n", err)
 		printUsage(os.Stderr)
 		return 2
@@ -613,10 +618,12 @@ func cmdRun(appDir string, opts options) int {
 		return 1
 	}
 	if err := checkAccountForRun(cfg, opts); err != nil {
+		logging.Log.Error("%v", err)
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	if !platform.AcquireSingleInstance(false) {
+		logging.Log.Info("another instance is already running, so this one stops")
 		fmt.Fprintln(os.Stderr, "another instance is already running")
 		return 1
 	}
@@ -638,6 +645,11 @@ func cmdRun(appDir string, opts options) int {
 
 		url, err := server.URL()
 		if err != nil {
+			// Into the log too: a port that cannot be bound (one another
+			// program holds, or one this machine has reserved) is the failure
+			// this option meets most often, and it is the one thing the log did
+			// not say when a run stopped right after starting.
+			logging.Log.Error("settings page: %v", err)
 			fmt.Fprintf(os.Stderr, "settings page: %v\n", err)
 			return 1
 		}

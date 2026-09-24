@@ -783,6 +783,105 @@ func TestCheckOnlyAcceptsAnOptionInTheModeItBelongsTo(t *testing.T) {
 	}
 }
 
+// TestTheAutostartEntryRepeatsOnlyTheOptionThatSaysWhereTheSettingsLive covers
+// what an entry is allowed to carry. It outlives the run, in a registry value or
+// a file anyone can read, so the password must not be in it, and the account
+// options belong to the run rather than to the entry. What has to be repeated is
+// --home: an entry without it starts on a fresh configuration beside the
+// executable, which looks from the outside like the account was lost.
+func TestTheAutostartEntryRepeatsOnlyTheOptionThatSaysWhereTheSettingsLive(t *testing.T) {
+	account, secret := "23D001", "hunter2"
+	addr := "127.0.0.1:8088"
+
+	// A run that was not told where the settings live has nothing to repeat: the
+	// entry then starts the program as it was started.
+	if got := autostartArguments(options{
+		username: &account,
+		password: &secret,
+		accounts: []string{"23D001:hunter2@zgyd"},
+		settings: &addr,
+		app:      &addr,
+		json:     true,
+	}); len(got) != 0 {
+		t.Errorf("autostartArguments() with no --home = %q, want nothing", got)
+	}
+
+	// A relative directory is made absolute, since an entry does not run in the
+	// directory the option was written in.
+	rel := filepath.Join("sub", "settings")
+	abs, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := autostartArguments(options{
+		home:     &rel,
+		username: &account,
+		password: &secret,
+		accounts: []string{"23D001:hunter2@zgyd"},
+		settings: &addr,
+		app:      &addr,
+		json:     true,
+		save:     true,
+	})
+	if len(got) != 1 {
+		t.Fatalf("autostartArguments() = %q, want the one --home argument", got)
+	}
+	if want := "--home=" + abs; got[0] != want {
+		t.Errorf("autostartArguments() = %q, want %q", got[0], want)
+	}
+	for _, arg := range got {
+		if strings.Contains(arg, secret) || strings.Contains(arg, account) {
+			t.Errorf("the entry would carry %q, and neither a secret nor an account belongs in a place that outlives the run", arg)
+		}
+	}
+
+	// An empty --home is the same as none at all: it would name no directory.
+	empty := ""
+	if got := autostartArguments(options{home: &empty}); got != nil {
+		t.Errorf("autostartArguments(--home=) = %q, want nothing", got)
+	}
+}
+
+// TestTheTrayRefusesAnOptionItCannotHonour covers the mode that names no command.
+// --json and --settings belong to the status and run commands, and a tray run
+// that quietly dropped them would leave a script waiting for a report that never
+// comes, or a caller waiting for a page nothing serves.
+func TestTheTrayRefusesAnOptionItCannotHonour(t *testing.T) {
+	addr := "127.0.0.1:8088"
+	dir := t.TempDir()
+
+	for _, c := range []struct {
+		option string
+		opts   options
+	}{
+		{"--json", options{json: true}},
+		{"--settings", options{settings: &addr}},
+	} {
+		err := c.opts.checkTrayOptions()
+		if err == nil {
+			t.Errorf("%s was accepted by the tray, which has nowhere to put it", c.option)
+			continue
+		}
+		if !strings.Contains(err.Error(), strings.TrimPrefix(c.option, "--")) {
+			t.Errorf("the refusal does not name %s: %v", c.option, err)
+		}
+	}
+
+	// What the tray does honour: the options it was started with, and the two
+	// that describe the program itself.
+	for _, c := range []options{
+		{},
+		{home: &dir},
+		{noLog: true},
+		{app: &addr},
+		{home: &dir, noLog: true, app: &addr},
+	} {
+		if err := c.checkTrayOptions(); err != nil {
+			t.Errorf("checkTrayOptions(%+v) = %v, want the tray's own options accepted", c, err)
+		}
+	}
+}
+
 func TestARunWithNothingToSignInWithNeedsTheSettingsPage(t *testing.T) {
 	addr := "127.0.0.1:8088"
 	empty := &config.Config{}
