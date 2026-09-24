@@ -331,8 +331,8 @@ SDAutoLogin status --json | jq -r .state
 | `portalBaseUrl` | `http://10.9.1.3/` | 门户首页，用于读取客户端 IP |
 | `eportalUrl` | `http://10.9.1.3:801/eportal/` | Dr.COM 认证接口根地址 |
 | `accountPrefix` | `,0,` | 门户登录页使用的账号前缀 |
-| `checkIntervalSeconds` | `15` | 检测间隔，最小 5 秒 |
-| `httpTimeoutSeconds` | `6` | 请求超时，最小 2 秒 |
+| `checkIntervalSeconds` | `15` | 检测间隔，最小 5 秒，最大一天 |
+| `httpTimeoutSeconds` | `6` | 请求超时，最小 2 秒，最大一刻钟 |
 | `autoLogin` | `true` | 掉线后自动登录 |
 | `checkInternet` | `true` | 是否同时探测外网 |
 | `verboseLog` | `true` | 记录每次检测的诊断信息 |

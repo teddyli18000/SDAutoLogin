@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"sdautologin/internal/config"
 )
@@ -407,6 +408,29 @@ func TestTruncateCollapsesWhitespaceAndCutsLongText(t *testing.T) {
 	}
 }
 
+func TestTruncateCutsOnACharacterBoundary(t *testing.T) {
+	// Cut by bytes and a multi-byte character at the seam becomes a broken
+	// sequence in the log; the result has to stay valid text and keep the same
+	// ellipsis.
+	long := strings.Repeat("\u597d", 200) // 600 bytes, cut would land mid-character
+
+	got := Truncate(long)
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("Truncate = %q, want the ellipsis", got)
+	}
+	body := strings.TrimSuffix(got, "...")
+	if !utf8.ValidString(body) {
+		t.Errorf("Truncate left a broken character: %q", body)
+	}
+	if len(body) > 300 {
+		t.Errorf("Truncate kept %d bytes, want at most 300", len(body))
+	}
+	// Nothing was dropped beyond the cut, so the kept text is the prefix.
+	if !strings.HasPrefix(long, body) {
+		t.Error("Truncate did not keep a prefix of the input")
+	}
+}
+
 func TestLoggedURLsNeverContainThePassword(t *testing.T) {
 	// The login request carries the password in its query string and that URL is
 	// written to the log, so it has to be masked first. It masks the parameter
@@ -428,5 +452,53 @@ func TestLoggedURLsNeverContainThePassword(t *testing.T) {
 	// reading.
 	if !strings.Contains(got, "a=login") {
 		t.Errorf("safeURL = %s, want the other parameters left alone", got)
+	}
+}
+
+func TestLoginTruncatesALongPortalMessage(t *testing.T) {
+	// The portal's wording is logged and shown on the page and the tooltip, so
+	// a portal that answers with a whole page must not put it all there. The
+	// raw reply is already cut this way; the message has to match.
+	long := strings.Repeat("z", 400)
+	s := &stubPortal{loginReply: `{"result":0,"ret_code":"99","msg":"` + long + `"}`}
+
+	res := NewClient(s.start(t)).Login(Status{ClientIP: "203.0.113.7"}, testAttempt())
+
+	if res.Message != Truncate(long) {
+		t.Errorf("Message kept %d bytes, want the same cut as Truncate", len(res.Message))
+	}
+	if len(res.Message) > truncateLimit+len("...") || !strings.HasSuffix(res.Message, "...") {
+		t.Errorf("Message = %q, want it cut to a readable length", res.Message)
+	}
+}
+
+func TestMaskSecretsHidesThePasswordInAURL(t *testing.T) {
+	raw := "http://portal/eportal/?a=login&user_account=" + url.QueryEscape(",0,s1234567@zgyd") +
+		"&user_password=" + url.QueryEscape("p@ss@word")
+
+	got := MaskSecrets(raw)
+	if strings.Contains(got, url.QueryEscape("p@ss@word")) || strings.Contains(got, "p@ss@word") {
+		t.Errorf("MaskSecrets left the password in place: %s", got)
+	}
+	if !strings.Contains(got, "user_password=***") {
+		t.Errorf("MaskSecrets = %s, want the parameter replaced", got)
+	}
+	// user_account is a login name, not a secret, and is deliberately logged.
+	if !strings.Contains(got, "user_account="+url.QueryEscape(",0,s1234567@zgyd")) {
+		t.Errorf("MaskSecrets = %s, want user_account left alone", got)
+	}
+}
+
+func TestMaskSecretsHidesThePasswordInARawReply(t *testing.T) {
+	// A portal can echo the request back, so a caller that prints the reply
+	// needs the same masking that safeURL applies to a URL.
+	raw := "reply: a=login&user_password=secret&user_account=,0,s1"
+
+	got := MaskSecrets(raw)
+	if strings.Contains(got, "secret") {
+		t.Errorf("MaskSecrets left the password in place: %s", got)
+	}
+	if !strings.Contains(got, "user_password=***&user_account=,0,s1") {
+		t.Errorf("MaskSecrets = %s, want only the password replaced", got)
 	}
 }

@@ -25,9 +25,19 @@ const HasTray = true
 // the library uses a pure Go D-Bus StatusNotifierItem backend, on macOS it needs
 // cgo and therefore the Xcode command line tools at build time.
 //
-// There is no fallback here: the toolkit either puts the icon up or the program
-// exits with it, so the caller's fallback is unused.
-func Run(state *app.AppState, opts Options, _ func()) {
+// A machine with no session bus has no tray to put up, and the toolkit does not
+// say so: it starts the program and then waits for a quit that nothing can ask
+// for. That is what the caller's fallback is for, and it is taken here rather
+// than left to a caller that cannot see the difference.
+func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
+	if err := sessionBusError(); err != nil {
+		logging.Log.Warn("no session bus to put a tray icon on (%v), running without one", err)
+		// No server was built here: the toolkit was to build one once it had an
+		// icon to go with it, so the fallback has to make its own.
+		fallback(nil)
+		return
+	}
+
 	// The tap handler is registered before the event loop starts on purpose.
 	// The Linux backend reads it while it exports the status notifier item, so a
 	// handler set from the ready callback can arrive too late: the item would be
@@ -169,8 +179,9 @@ func trayReady(state *app.AppState, opts Options) *unixTray {
 	// socket until this loop reads it, rather than being lost.
 	go platform.WaitForSettingsRequest(t.answerSettingsRequest)
 
+	// A page opened for a machine with nothing written down yet is logged by the
+	// caller, which knows whether the page was opened by this or by the fallback.
 	if !t.state.Config().Configured() {
-		logging.Log.Warn("no account configured yet, opening the settings page")
 		t.openSettings()
 	} else if t.opts.AppWindow {
 		t.openSettings()

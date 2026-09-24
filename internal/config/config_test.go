@@ -255,6 +255,28 @@ func TestNormalizeClampsOutOfRangeValues(t *testing.T) {
 	}
 }
 
+// TestNormalizeClampsValuesThatWouldWrapTheDuration covers the other end of the
+// range. Both values become a time.Duration by multiplication, and a large enough
+// one wraps into a negative duration: the check timer then fires at once, which
+// turns the loop into a hot loop against the portal, and the request timeout is
+// already past before the request is sent.
+func TestNormalizeClampsValuesThatWouldWrapTheDuration(t *testing.T) {
+	// A value that fits in an int on every platform the program is built for,
+	// and is far past the bound, so the clamp is what has to hold whatever the
+	// multiplication would do with it here.
+	const tooLarge = 1 << 30
+	cfg := &Config{CheckIntervalSeconds: tooLarge, HTTPTimeoutSeconds: tooLarge}
+
+	cfg.normalize()
+
+	if cfg.CheckIntervalSeconds != maxCheckIntervalSeconds {
+		t.Errorf("CheckIntervalSeconds = %d, want it held to %d", cfg.CheckIntervalSeconds, maxCheckIntervalSeconds)
+	}
+	if cfg.HTTPTimeoutSeconds != maxHTTPTimeoutSeconds {
+		t.Errorf("HTTPTimeoutSeconds = %d, want it held to %d", cfg.HTTPTimeoutSeconds, maxHTTPTimeoutSeconds)
+	}
+}
+
 func TestNormalizeGivesAnEntryAServiceType(t *testing.T) {
 	// An entry that names no service is the campus network itself, the portal
 	// dropdown's first choice.
@@ -476,6 +498,24 @@ func TestMatchFindsTheEntryAnOnlineAccountBelongsTo(t *testing.T) {
 		if index != c.index || isp != c.isp {
 			t.Errorf("Match(%q) = %d %q, want %d %q", c.reported, index, isp, c.index, c.isp)
 		}
+	}
+}
+
+// TestMatchIsNotFooledByAnEntryWithoutAService covers the entry the command line
+// can leave behind, one that names an account and no service type. It cannot be
+// submitted, but the portal still reports the account as the one signed in, and
+// matching it must not read a service type that is not there.
+func TestMatchIsNotFooledByAnEntryWithoutAService(t *testing.T) {
+	cfg := &Config{AccountPrefix: ",0,", Accounts: []Account{
+		{Username: "23D001", Password: "p"},
+	}}
+
+	index, isp := cfg.Match("23D001")
+	if index != 0 || isp != "" {
+		t.Errorf("Match = %d %q, want the entry and no service type", index, isp)
+	}
+	if index, isp := cfg.Match(",0,23D001@zgyd"); index != -1 || isp != "" {
+		t.Errorf("Match of a suffixed account = %d %q, want no match", index, isp)
 	}
 }
 

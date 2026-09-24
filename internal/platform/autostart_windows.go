@@ -23,11 +23,20 @@ func AutostartEnabled() bool {
 
 // SetAutostart adds or removes the HKCU Run entry. reg runs hidden, otherwise
 // a console window would flash on every toggle.
+//
+// What is written is the command this run was started with, so an entry set up
+// from a run given --home starts that directory's configuration rather than a
+// fresh one beside the executable.
 func SetAutostart(on bool) bool {
+	command := autostartCommand()
+	if on && command == "" {
+		logging.Log.Warn("this program cannot name its own executable, so no autostart entry was written")
+		return false
+	}
 	var cmd *exec.Cmd
 	if on {
 		cmd = exec.Command("reg", "add", winRunKey, "/v", winRunValue,
-			"/t", "REG_SZ", "/d", executablePath(), "/f")
+			"/t", "REG_SZ", "/d", command, "/f")
 	} else {
 		cmd = exec.Command("reg", "delete", winRunKey, "/v", winRunValue, "/f")
 	}

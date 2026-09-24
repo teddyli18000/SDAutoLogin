@@ -405,6 +405,28 @@ func TestLoadForCLITakesThePasswordSystemdHandedOver(t *testing.T) {
 	}
 }
 
+// An account named without a service type is the campus network, and it has to be
+// usable as it stands: a run given this is not saved, so it never passes through
+// the normalization that would fill the service type in, and an entry without one
+// is an entry nothing can be submitted for.
+func TestAnAccountWithoutAServiceTypeCanSignIn(t *testing.T) {
+	appDir := t.TempDir()
+	cfg, ok := loadForCLI(appDir, options{accounts: []string{"s1234567:topsecret"}})
+	if !ok {
+		t.Fatal("the run was refused")
+	}
+	if !cfg.Configured() {
+		t.Fatalf("the run has nothing to sign in with: %+v", cfg.Accounts)
+	}
+	attempts := cfg.Attempts()
+	if len(attempts) != 1 {
+		t.Fatalf("Attempts = %+v, want the one entry", attempts)
+	}
+	if attempts[0].Username != "s1234567" || attempts[0].ISP != "" {
+		t.Errorf("the attempt is %+v, want the campus network", attempts[0])
+	}
+}
+
 // A password on its own says nothing about the rest of the list, so the entries
 // after the first are left where they are: the fallback order is not what this
 // run was about.
@@ -541,10 +563,11 @@ func TestApplyToReplacesTheListWithTheAccountsGiven(t *testing.T) {
 	if got := cfg.Accounts[1].ISPs; len(got) != 2 || got[0] != "@cucc" || got[1] != "@zgyd" {
 		t.Errorf("ISPs = %v, want both service types in the order they were given", got)
 	}
-	// No service type at all is the campus network, which the configuration
-	// fills in when it is normalized.
-	if got := cfg.Accounts[2].ISPs; len(got) != 0 {
-		t.Errorf("ISPs = %v, want nothing for the entry that named no service", got)
+	// No service type at all is the campus network, and an entry with none
+	// cannot be submitted at all: the suffix is filled in here rather than left
+	// to a normalization that a run without --save never reaches.
+	if got := cfg.Accounts[2].ISPs; len(got) != 1 || got[0] != "" {
+		t.Errorf("ISPs = %v, want the campus network for the entry that named no service", got)
 	}
 }
 
@@ -555,7 +578,10 @@ func TestParseAccount(t *testing.T) {
 		password string
 		isps     []string
 	}{
-		{"s1234567:simple", "s1234567", "simple", nil},
+		// Naming no service at all is the campus network itself, which is an
+		// empty suffix rather than no suffix: an entry without one is not
+		// something that can be submitted.
+		{"s1234567:simple", "s1234567", "simple", []string{""}},
 		{"s1234567:simple@zgyd", "s1234567", "simple", []string{"@zgyd"}},
 		{"s1234567:simple@zgyd+cucc", "s1234567", "simple", []string{"@zgyd", "@cucc"}},
 		// An empty element in front is the campus network itself, the way to name
@@ -563,7 +589,7 @@ func TestParseAccount(t *testing.T) {
 		{"s1234567:simple@+zgyd", "s1234567", "simple", []string{"", "@zgyd"}},
 		{"s1234567:@zgyd", "s1234567", "", []string{"@zgyd"}},
 		{"s1234567:p:with:colons@zgyd", "s1234567", "p:with:colons", []string{"@zgyd"}},
-		{"  s1234567  :simple", "s1234567", "simple", nil},
+		{"  s1234567  :simple", "s1234567", "simple", []string{""}},
 	}
 	for _, c := range cases {
 		entry, err := parseAccount(c.raw)

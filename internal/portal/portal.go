@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"sdautologin/internal/config"
 	"sdautologin/internal/logging"
@@ -222,8 +223,11 @@ func (c *Client) Login(st Status, attempt config.Attempt) LoginResult {
 	case retCodeText[result.RetCode] != "":
 		result.Message = retCodeText[result.RetCode]
 	default:
+		// The portal's own wording is echoed into the log and shown on the page
+		// and the tooltip, so it goes through the same cut as the raw reply: a
+		// portal that answers with a whole page must not put it all in either.
 		if msg := unescapeJSON(firstMatch(reMsg, body)); msg != "" {
-			result.Message = msg
+			result.Message = Truncate(msg)
 		} else {
 			result.Message = fmt.Sprintf("result=%q, HTTP %d", res, code)
 		}
@@ -327,12 +331,19 @@ func (c *Client) get(client *http.Client, rawURL string) (int, string, error) {
 	return resp.StatusCode, string(data), nil
 }
 
-// safeURL removes the password from a request URL before it is logged. It masks
-// the parameter rather than a particular password, since the login list may hold
-// several accounts and the one being submitted is the one that must not reach
-// the log.
+// safeURL removes the password from a request URL before it is logged.
 func (c *Client) safeURL(rawURL string) string {
-	return rePassword.ReplaceAllString(rawURL, "${1}***")
+	return MaskSecrets(rawURL)
+}
+
+// MaskSecrets removes the password from a string before it is logged, so a
+// caller that prints the portal's own reply gets the same protection as a
+// caller that logs a request URL. It masks the parameter rather than a
+// particular password, since the login list may hold several accounts and the
+// one being submitted is the one that must not reach the log. A login name is
+// not a secret, so user_account is deliberately left readable.
+func MaskSecrets(s string) string {
+	return rePassword.ReplaceAllString(s, "${1}***")
 }
 
 func elapsedMS(start time.Time) int64 {
@@ -360,13 +371,24 @@ func unescapeJSON(s string) string {
 	return s
 }
 
+// truncateLimit is how much of a portal reply is kept. It is a byte count, so a
+// line of Chinese text is cut shorter than a line of Latin text.
+const truncateLimit = 300
+
 // Truncate collapses whitespace and cuts s to a length that keeps a log line
 // readable. Portal replies are echoed through it, so the whole body never
 // floods the log.
 func Truncate(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) <= 300 {
+	if len(s) <= truncateLimit {
 		return s
 	}
-	return s[:300] + "..."
+	// The cut is moved back to a character boundary: cutting a multi-byte
+	// character in half would write a broken sequence into the log, and log
+	// lines are read as text by whatever tail tool the user has.
+	cut := truncateLimit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }

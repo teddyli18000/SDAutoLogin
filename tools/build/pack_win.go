@@ -81,7 +81,13 @@ func taskWindows(root string) error {
 	if err := writeScoopManifest(root, version, repo, builds); err != nil {
 		return err
 	}
-	return writeWingetManifests(root, version, repo, builds)
+	if err := writeWingetManifests(root, version, repo, builds); err != nil {
+		return err
+	}
+	// This task is registered on its own as well as under taskPackages, so the
+	// digests are rewritten here too: an archive and the file that describes it
+	// must not disagree after either.
+	return writeChecksums(root)
 }
 
 // windowsZip is the archive of one Windows build: the program, the licence and
@@ -272,7 +278,7 @@ Installers:
   InstallerSha256: %s
 `, build.winget, releaseURL(repo, version, build.archive), build.digest)
 	}
-	b.WriteString("ManifestType: installer\nManifestVersion: 1.10.0\n")
+	fmt.Fprintf(&b, "ManifestType: installer\nManifestVersion: %s\n", wingetManifestVersion)
 	return b.String()
 }
 

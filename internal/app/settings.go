@@ -95,6 +95,23 @@ func NewServer(state *AppState, addr string, onQuit func()) *Server {
 	return &Server{state: state, addr: addr, onQuit: onQuit}
 }
 
+// SetOnQuit replaces the callback the page's exit button calls. A run that took
+// over the server the tray had built gives it its own: the message the tray would
+// have posted belongs to a window that never got a message loop.
+func (s *Server) SetOnQuit(f func()) {
+	s.mu.Lock()
+	s.onQuit = f
+	s.mu.Unlock()
+}
+
+// quitCallback is the callback above, read under the lock, so replacing it while
+// a request is being served is safe.
+func (s *Server) quitCallback() func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.onQuit
+}
+
 // URL starts the server on first use and returns the tokenised address.
 func (s *Server) URL() (string, error) {
 	s.mu.Lock()
@@ -589,8 +606,8 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	case "quit":
 		logging.Log.Info("exit requested from the settings page")
 		writeJSON(w, map[string]any{"ok": true})
-		if s.onQuit != nil {
-			go s.onQuit()
+		if f := s.quitCallback(); f != nil {
+			go f()
 		}
 
 	default:

@@ -269,6 +269,56 @@ func TestAWriteNeedsTheHeaderAsWellAsTheCookie(t *testing.T) {
 	}
 }
 
+// TestTheExitButtonReachesTheCallbackThatWasSetLast covers the run that took
+// over the server the tray had built. The callback the tray gave it posts a
+// message to a window that never got a message loop, so the fallback replaces it
+// with one that ends this run, and the page's exit button has to reach the new
+// one rather than the old.
+func TestTheExitButtonReachesTheCallbackThatWasSetLast(t *testing.T) {
+	state := New(&config.Config{Accounts: []config.Account{{Username: "s1234567", Password: "p@ss"}}})
+
+	trayQuit := make(chan struct{}, 1)
+	server := NewServer(state, "127.0.0.1:0", func() { trayQuit <- struct{}{} })
+	t.Cleanup(server.Stop)
+
+	fallbackQuit := make(chan struct{}, 1)
+	server.SetOnQuit(func() { fallbackQuit <- struct{}{} })
+
+	url, err := server.URL()
+	if err != nil {
+		t.Fatalf("URL: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, pageAddress(url)+"/api/action",
+		strings.NewReader(`{"action":"quit"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
+	req.Header.Set("X-Auth-Token", server.session)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("quit: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("quit: status %d, want 200", resp.StatusCode)
+	}
+
+	// The callback is called on a goroutine of its own, so the reply arriving
+	// first does not promise that it has run yet.
+	select {
+	case <-fallbackQuit:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the exit button did not reach the callback the fallback set")
+	}
+	select {
+	case <-trayQuit:
+		t.Error("the exit button posted to the window the tray would have used")
+	default:
+	}
+}
+
 // TestTheServerBoundsEveryPhaseOfARequest holds the server to a deadline on
 // every step of a request. A form the page sends arrives in one piece, so a
 // caller that sends one byte and then stops is not someone to wait for.

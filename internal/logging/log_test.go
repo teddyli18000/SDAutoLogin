@@ -114,3 +114,95 @@ func TestASecondInitReplacesTheFirst(t *testing.T) {
 		t.Errorf("the second file was not written: %q", data)
 	}
 }
+
+func TestInitDoesNotReportAFileItCouldNotOpen(t *testing.T) {
+	// A directory where app.log belongs makes the open fail. Path() feeds the
+	// tray's "open log" item, the log tail and the About tab, so it must not
+	// name a file that was never opened.
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "app.log"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	Log.Init(dir, true)
+	defer Log.CloseFile()
+
+	if p := Log.Path(); p != "" {
+		t.Errorf("Path() = %q, want nothing after the log file could not be opened", p)
+	}
+}
+
+func TestInitDoesNotReportADirectoryItCouldNotCreate(t *testing.T) {
+	// A regular file where the log directory belongs makes MkdirAll fail, and
+	// the failure has to leave Path() empty just as a failed open does.
+	parent := t.TempDir()
+	blocker := filepath.Join(parent, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	Log.Init(filepath.Join(blocker, "logs"), true)
+	defer Log.CloseFile()
+
+	if p := Log.Path(); p != "" {
+		t.Errorf("Path() = %q, want nothing when the directory could not be created", p)
+	}
+}
+
+func TestAFailedRotationIsNotRetriedForEveryLine(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "logs")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A full app.log so the next line asks for a rotation...
+	path := filepath.Join(dir, "app.log")
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", maxLogSize)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// ...and a directory at the rotation target, which makes the rename fail
+	// whatever the platform, the way a file another program holds open does on
+	// Windows.
+	if err := os.Mkdir(filepath.Join(dir, "app.log.1"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	Log.Init(dir, true)
+	defer Log.CloseFile()
+
+	// The first line fills the log past the limit and cannot rotate it.
+	Log.Info("the line that asks for a rotation")
+
+	Log.mu.Lock()
+	gaveUp := Log.rotateDone
+	handle := Log.file
+	size := Log.size
+	Log.mu.Unlock()
+
+	if !gaveUp {
+		t.Fatal("rotation was not marked as given up after the rename failed")
+	}
+	if handle == nil {
+		t.Fatal("no handle was taken back, so the log would stop being written")
+	}
+	if size <= maxLogSize {
+		t.Errorf("size = %d, want more than %d, since the file was not truncated", size, maxLogSize)
+	}
+	// The filled file is still there, so nothing was silently truncated.
+	if info, err := os.Stat(path); err != nil || info.Size() <= maxLogSize {
+		t.Fatalf("app.log = %v, %v, want the full file left in place", info, err)
+	}
+
+	// Following lines must not repeat the close and rename: the handle stays
+	// the same and the size keeps growing.
+	Log.Info("a line after the failed rotation")
+	Log.mu.Lock()
+	sameHandle := Log.file == handle
+	grew := Log.size > size
+	Log.mu.Unlock()
+	if !sameHandle {
+		t.Error("a later line reopened the file, so the failed rotation was retried per line")
+	}
+	if !grew {
+		t.Error("the log stopped growing, so the failed rotation reset the size")
+	}
+}

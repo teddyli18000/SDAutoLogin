@@ -38,8 +38,10 @@ func currentLanguageChoice() int {
 }
 
 // runSetupWizard asks for the account details on stdin. It backs the "config"
-// command and the first run on platforms without a settings page.
-func runSetupWizard(cfg *config.Config) {
+// command, which is the only way in on a machine that has neither a desktop nor
+// a browser; a background run is given its account beforehand or through the
+// settings page, since nobody is there to answer questions.
+func runSetupWizard(cfg *config.Config) error {
 	in := bufio.NewReader(os.Stdin)
 	fmt.Println("=== campus network auto login: first run setup ===")
 	fmt.Println("(press Enter to keep the value in brackets)")
@@ -84,9 +86,11 @@ func runSetupWizard(cfg *config.Config) {
 
 	if err := cfg.Save(); err != nil {
 		logging.Log.Error("saving config: %v", err)
-		return
+		fmt.Fprintf(os.Stderr, "not saved: %v\n", err)
+		return err
 	}
 	fmt.Println("saved to", cfg.Path())
+	return nil
 }
 
 func prompt(in *bufio.Reader, label, def string) string {

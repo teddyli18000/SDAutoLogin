@@ -152,7 +152,10 @@ func taskRpm(root string) error {
 			return err
 		}
 	}
-	return nil
+	// This task is registered on its own as well as under taskPackages, so the
+	// digests are rewritten here too: an archive and the file that describes it
+	// must not disagree after either.
+	return writeChecksums(root)
 }
 
 // packageRpm writes the .rpm of one target.

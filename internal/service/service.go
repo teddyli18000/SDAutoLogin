@@ -119,6 +119,9 @@ type Service struct {
 	lastLogin string
 	running   bool
 	stopCh    chan struct{}
+	// done is closed by the loop as it returns, so a restart can wait for the
+	// loop it just stopped before it hands the new configuration over.
+	done      chan struct{}
 	triggerCh chan struct{}
 
 	checks       int64
@@ -172,14 +175,24 @@ func (s *Service) Start() {
 	}
 	s.running = true
 	stop := make(chan struct{})
+	done := make(chan struct{})
 	s.stopCh = stop
-	interval := time.Duration(s.cfg.CheckIntervalSeconds) * time.Second
+	s.done = done
+	cfg := s.cfg
 	s.mu.Unlock()
 
-	go s.loop(stop, interval)
-	logging.Log.Info("service started: %s", s.cfg.Summary())
+	go s.loop(stop, done, time.Duration(cfg.CheckIntervalSeconds)*time.Second)
+	logging.Log.Info("service started: %s", cfg.Summary())
 }
 
+// Stop ends the check loop and waits for it to have finished. Waiting is what
+// keeps a restart from running two loops at once: a loop that is in the middle of
+// a check would otherwise carry on with the configuration and the client the
+// restart has just replaced, so both of them would be talking to the portal at
+// the same time, and the one that finished last would publish its own view of a
+// configuration that is no longer in use.
+//
+// It must not be called from the loop itself, since it waits for that loop.
 func (s *Service) Stop() {
 	s.mu.Lock()
 	if !s.running {
@@ -188,7 +201,12 @@ func (s *Service) Stop() {
 	}
 	s.running = false
 	close(s.stopCh)
+	done := s.done
 	s.mu.Unlock()
+
+	// Waited for outside the lock: the loop takes it again on its way out.
+	<-done
+
 	checks, attempts := s.stats()
 	logging.Log.Debug("service stopped (checks=%d, login attempts=%d)", checks, attempts)
 }
@@ -224,7 +242,8 @@ func (s *Service) Trigger() {
 	}
 }
 
-func (s *Service) loop(stop <-chan struct{}, interval time.Duration) {
+func (s *Service) loop(stop <-chan struct{}, done chan struct{}, interval time.Duration) {
+	defer close(done)
 	s.tick()
 	timer := time.NewTimer(interval)
 	defer timer.Stop()

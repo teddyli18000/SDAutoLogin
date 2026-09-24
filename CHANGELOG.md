@@ -105,6 +105,78 @@ asking where it is answered: at the point a release is cut. A branch is checked
 from the checkout with the same tasks, `go run ./tools/build test`, `packages` and
 `verify`, which is what they are there for.
 
+### Defects
+
+A pass over the program for the ways it could fail, rather than for what it does,
+turned up a set of faults that had been shipping. They are fixed here.
+
+- The account the command line writes always has a service type now.
+  `--account=user:pass`, which the usage text offers as the campus network itself,
+  and `--username` without `--isp`, both left the entry with none, and a run that
+  is not saved never passes through the normalization that would have filled it
+  in. An entry without a service type cannot be submitted, so `run` refused to
+  start with "no account configured" — the very option the caller had just used —
+  and the tray ran with nothing it could sign in with. On a machine whose session
+  was already online the same entry crashed the program outright: the first check
+  read a service type that was not there, and the whole process went down with the
+  tray icon.
+- Stopping the check loop waits for it to finish. Saving the settings restarts the
+  loop, and the one being replaced used to carry on through whatever check it was
+  in the middle of: two loops talking to the portal at once, one of them with the
+  old passwords and the new endpoints, and the last one to finish publishing its
+  view of a configuration that had already been replaced.
+- The log no longer gives up quietly. A rotation it cannot do — on Windows a log
+  an editor still has open is enough — used to be retried for every single line
+  and never succeed again, so the file grew without bound and every line cost a
+  close and a rename; that is reported once now. A log file that cannot be opened
+  at all is no longer claimed: the About tab, the log tail and "open log" used to
+  point at a file that was not there.
+- The page's first run works. The wizard's account is put into the list before it
+  is saved, since that list is what a save sends, and a save the server refuses is
+  shown in the wizard rather than behind it, where it could not be seen. On a fresh
+  installation the button did nothing at all.
+- A dropped account keeps its place. The order was read back through the position
+  each card came from, which applied the move a second time: two accounts went back
+  to where they were, three came out in an order nobody had asked for, and the
+  priority the list exists for was wrong until it was put right by hand.
+- The shortcuts are held to the rules of the commands they stand for: `-cli
+  --json` used to start the background mode with the option dropped, where `run
+  --json` is a usage error.
+- A background run asks nothing on stdin, so `run --settings` on a machine with no
+  account brings up the settings page rather than a wizard nobody is there to
+  answer, and no longer writes a half empty account into the file on the way.
+  `config` reports a save that failed with a non-zero status instead of reporting
+  success.
+- The message the portal sends back is cut to length before it reaches the log and
+  the page, and `login` masks the credentials in the raw reply it prints, as the
+  request in the log already was.
+- On Linux the tray runs without an icon when there is no session bus to put one
+  on, rather than starting the program and waiting for a quit that nothing can ask
+  for.
+- A tray whose icon cannot be made at all hands this run over to the background
+  mode on the settings server it had already built, so the page that server serves
+  stays the way in and its exit button ends the run. That button used to post a
+  message to the window the tray would have made, which never got a message loop,
+  so a run in that state could only be ended by killing it.
+- An autostart entry carries the option that says where the settings live, so a
+  run started that way finds the account rather than beginning on a fresh
+  configuration beside the executable, which looks from the outside like the
+  account was lost. No password is written into an entry, which outlives the run
+  in a place anyone can read.
+- The instance lock is taken in the user's cache directory when nothing can be
+  written to the temporary one, and a run that cannot take it at all says so
+  rather than reporting nothing.
+- A check interval or a request timeout large enough to wrap the duration into a
+  negative one is held to a day and to a quarter of an hour: the timer would
+  otherwise have fired at once and turned the loop into a hot loop against the
+  portal.
+- Every packaging task refreshes `SHA256SUMS`, so a package written on its own
+  cannot be at odds with the checksums; a `verify` run fails when a manifest it
+  checks is missing rather than passing over it in silence.
+- The Windows resources are held to the version of the sources: a tag that moved
+  without the `resources` task being run leaves the file version Explorer shows
+  naming the release before it, while the program itself reports the new one.
+
 ## v1.1.0 - 2026-09-24
 
 A release for what v1.0.0 could not reach: the machines that are not a desktop,

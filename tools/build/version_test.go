@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 // testRoot is the repository the test runs in.
@@ -186,6 +188,46 @@ func TestTheLinkerWritesIntoTheVariablesTheProgramReads(t *testing.T) {
 			t.Errorf("the linker writes %s, which the sources do not declare: %v", c.name, err)
 		}
 	}
+}
+
+// TestTheWindowsResourcesCarryTheVersionOfTheSources covers the one generated
+// file that a build links rather than makes: the resource object carries the icon
+// and the version information, the resources task writes it for the tag the tree
+// is at, and nothing regenerates it in the meantime. A tag that moved without that
+// task being run leaves the file version Explorer shows naming the release before
+// it, while the program itself reports the new one.
+func TestTheWindowsResourcesCarryTheVersionOfTheSources(t *testing.T) {
+	root := testRoot(t)
+	version, err := appSourceString(root, "Version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The version is stored the way Windows stores strings in a version resource.
+	want := utf16Bytes(version)
+
+	for _, arch := range []string{"amd64", "arm64", "386"} {
+		path := filepath.Join(root, "winres", "rsrc_windows_"+arch+".syso")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("%s: %v (run: go run ./tools/build resources)", describe(root, path), err)
+			continue
+		}
+		if !bytes.Contains(data, want) {
+			t.Errorf("%s does not carry the version the sources name (%q); run: go run ./tools/build resources",
+				describe(root, path), version)
+		}
+	}
+}
+
+// utf16Bytes is s as the little endian UTF-16 a Windows version resource holds its
+// strings in.
+func utf16Bytes(s string) []byte {
+	units := utf16.Encode([]rune(s))
+	out := make([]byte, 0, 2*len(units))
+	for _, unit := range units {
+		out = append(out, byte(unit), byte(unit>>8))
+	}
+	return out
 }
 
 // modulePath is the module named in go.mod, which is the prefix of every package

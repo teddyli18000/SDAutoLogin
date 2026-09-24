@@ -127,10 +127,12 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 // desktop session.
 const HasTray = true
 
-// Run puts the tray icon up and blocks on the message loop. fallback is used
-// when the tray cannot be created, so the program keeps checking in the
-// background instead of quitting.
-func Run(state *app.AppState, opts Options, fallback func()) {
+// Run puts the tray icon up and blocks on the message loop. fallback is used when
+// the tray cannot be created, so the program keeps checking in the background
+// instead of quitting. It is handed the settings server, since the page does not
+// depend on the icon and is the only way in on a machine whose icon could not be
+// made.
+func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
 	// The tray window and its message loop must stay on one OS thread.
 	runtime.LockOSThread()
 
@@ -158,7 +160,9 @@ func Run(state *app.AppState, opts Options, fallback func()) {
 			// can still be opened on a machine where the icon could not be.
 			a.openSettings()
 		}
-		fallback()
+		// The server goes with it: the page it serves is the way in on a machine
+		// whose icon could not be made, and it has to be able to end this run.
+		fallback(a.settings)
 		return
 	}
 

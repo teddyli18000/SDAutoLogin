@@ -260,6 +260,37 @@ func checksums(t *testing.T, root string) string {
 	return string(data)
 }
 
+// TestTheChecksumsFileOnlyNamesWhatIsThere covers the rewrite a single-format
+// task ends with: the file describes the directory as it is now, so a package
+// that has gone is not left in it carrying the digest of a build that is no
+// longer there. An archive and the file that describes it would then disagree,
+// which is what the rewrite is there to prevent.
+func TestTheChecksumsFileOnlyNamesWhatIsThere(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, distDir, pkgDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keep := "sdautologin_1.2.3-1_amd64.deb"
+	gone := pkgName + "-" + goldenVersion + "-" + pkgRelease + ".x86_64.rpm"
+	for _, name := range []string{keep, gone} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writeChecksums(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, gone)); err != nil {
+		t.Fatal(err)
+	}
+
+	want := sha256Hex([]byte(keep+"\n")) + "  " + keep + "\n"
+	if got := checksums(t, root); got != want {
+		t.Errorf("the file holds:\n%q\nwant\n%q", got, want)
+	}
+}
+
 // TestTheGoldenLayoutOfTheDebianContainer pins the container dpkg and opkg read:
 // the ar archive with the three members it has to have in that order, and the
 // entries of the two tar archives inside it. Everything of that layout that is

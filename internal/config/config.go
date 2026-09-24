@@ -90,6 +90,18 @@ type Config struct {
 	path string
 }
 
+// The bounds normalize holds every value to, whatever the page or a hand edited
+// file asked for. The upper ones matter because both of these are multiplied
+// into a time.Duration: a value large enough to wrap it becomes negative, and a
+// negative interval fires the timer at once, which turns the check loop into a
+// hot loop against the portal.
+const (
+	// A check a day apart is already far past useful.
+	maxCheckIntervalSeconds = 24 * 60 * 60
+	// A request that takes longer than this has failed whatever the portal says.
+	maxHTTPTimeoutSeconds = 15 * 60
+)
+
 func defaultConfig() *Config {
 	return &Config{
 		Accounts:             []Account{},
@@ -169,6 +181,17 @@ func (c *Config) normalize() {
 	}
 	if c.HTTPTimeoutSeconds < 2 {
 		c.HTTPTimeoutSeconds = 2
+	}
+	// The upper bounds are not a matter of taste. Both values become a
+	// time.Duration by multiplication, and a large enough one wraps into a
+	// negative duration: the timer then fires at once and the check loop turns
+	// into a hot loop against the portal, with the timeout expiring before the
+	// request is made. A day between checks is already far past useful.
+	if c.CheckIntervalSeconds > maxCheckIntervalSeconds {
+		c.CheckIntervalSeconds = maxCheckIntervalSeconds
+	}
+	if c.HTTPTimeoutSeconds > maxHTTPTimeoutSeconds {
+		c.HTTPTimeoutSeconds = maxHTTPTimeoutSeconds
 	}
 	if strings.TrimSpace(c.PortalBaseURL) == "" {
 		c.PortalBaseURL = defaultConfig().PortalBaseURL
@@ -278,8 +301,14 @@ func (c *Config) Match(reported string) (int, string) {
 			}
 		}
 		// The portal does not always echo the suffix, so the account on its own
-		// is taken as a match as well.
+		// is taken as a match as well. An entry may have no service type at all,
+		// which the command line can leave behind: it cannot be submitted, but
+		// it is still the entry the portal is talking about, and guessing a
+		// suffix for it would put a name in the page that was never configured.
 		if strings.EqualFold(a.Username, stripped) {
+			if len(a.ISPs) == 0 {
+				return i, ""
+			}
 			return i, a.ISPs[0]
 		}
 	}

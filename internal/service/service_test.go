@@ -591,6 +591,53 @@ func TestStartAndStopCanBeCalledTwice(t *testing.T) {
 	svc.Stop()
 }
 
+// TestStopWaitsForTheCheckThatIsRunning covers what a restart does: saving the
+// settings stops the loop and starts another one, and the loop that was stopped
+// has to be gone before the new configuration and client are handed over. A loop
+// that is in the middle of a check would otherwise finish that check with the
+// old passwords and the new endpoints, and both loops would be talking to the
+// portal at once.
+func TestStopWaitsForTheCheckThatIsRunning(t *testing.T) {
+	entered := make(chan struct{})
+	finished := make(chan struct{})
+	var once, done sync.Once
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "eportal") {
+			_, _ = io.WriteString(w, "var v4ip = '203.0.113.7';")
+			return
+		}
+		once.Do(func() { close(entered) })
+		// Long enough that a Stop which does not wait returns while this is
+		// still in flight, which is the difference the test is about.
+		time.Sleep(200 * time.Millisecond)
+		done.Do(func() { close(finished) })
+		_, _ = io.WriteString(w, `{"result":"1","user_account":"s1234567","online_ip":"203.0.113.7"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	svc := NewService(&config.Config{
+		Accounts:             []config.Account{{Username: "s1234567", Password: "p@ss", ISPs: []string{""}}},
+		PortalBaseURL:        srv.URL + "/",
+		EportalURL:           srv.URL + "/eportal/",
+		AccountPrefix:        ",0,",
+		CheckIntervalSeconds: 5,
+		HTTPTimeoutSeconds:   5,
+		AutoLogin:            true,
+		JsVersion:            "3.3.3",
+	})
+	svc.Start()
+
+	<-entered
+	svc.Stop()
+
+	select {
+	case <-finished:
+	default:
+		t.Error("Stop returned while a check of the loop it stopped was still running")
+	}
+}
+
 func TestStateCodesAreStableAndUnique(t *testing.T) {
 	// The code travels as the "state" field of the settings API and names the
 	// i18n key "state.<code>", so it is part of two interfaces.

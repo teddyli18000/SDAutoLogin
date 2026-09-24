@@ -366,41 +366,46 @@ func verifyWindows(root, path string) (string, error) {
 }
 
 // verifyManifests checks that the two manifests that name a Windows archive carry
-// the digest of the archive that is there now.
+// the digest of the archive that is there now. A manifest that is not there at
+// all is an error rather than something to pass over: a check that skips what it
+// cannot find would report success for a release that never wrote one.
 func verifyManifests(root, archive, digest, arch string) error {
 	scoop := filepath.Join(root, distDir, pkgDir, manifestDir, "scoop", pkgName+".json")
-	if data, err := os.ReadFile(scoop); err == nil {
-		var manifest struct {
-			Architecture map[string]struct {
-				URL  string `json:"url"`
-				Hash string `json:"hash"`
-			} `json:"architecture"`
-		}
-		if err := json.Unmarshal(data, &manifest); err != nil {
-			return fmt.Errorf("%s: %w", filepath.Base(scoop), err)
-		}
-		key := map[string]string{"amd64": "64bit", "arm64": "arm64", "386": "32bit"}[arch]
-		entry, ok := manifest.Architecture[key]
-		if !ok {
-			return fmt.Errorf("%s names no %s build", filepath.Base(scoop), key)
-		}
-		if entry.Hash != strings.ToUpper(digest) && entry.Hash != digest {
-			return fmt.Errorf("%s carries another digest for %s", filepath.Base(scoop), archive)
-		}
-		if !strings.HasSuffix(entry.URL, "/"+archive) {
-			return fmt.Errorf("%s points at %q", filepath.Base(scoop), entry.URL)
-		}
+	data, err := os.ReadFile(scoop)
+	if err != nil {
+		return fmt.Errorf("%s: %w (the windows task writes it)", describe(root, scoop), err)
+	}
+	var manifest struct {
+		Architecture map[string]struct {
+			URL  string `json:"url"`
+			Hash string `json:"hash"`
+		} `json:"architecture"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return fmt.Errorf("%s: %w", filepath.Base(scoop), err)
+	}
+	key := map[string]string{"amd64": "64bit", "arm64": "arm64", "386": "32bit"}[arch]
+	entry, ok := manifest.Architecture[key]
+	if !ok {
+		return fmt.Errorf("%s names no %s build", filepath.Base(scoop), key)
+	}
+	if entry.Hash != strings.ToUpper(digest) && entry.Hash != digest {
+		return fmt.Errorf("%s carries another digest for %s", filepath.Base(scoop), archive)
+	}
+	if !strings.HasSuffix(entry.URL, "/"+archive) {
+		return fmt.Errorf("%s points at %q", filepath.Base(scoop), entry.URL)
 	}
 
 	winget := filepath.Join(root, distDir, pkgDir, manifestDir, "winget", wingetID+".installer.yaml")
-	if data, err := os.ReadFile(winget); err == nil {
-		text := string(data)
-		if !strings.Contains(text, archive) {
-			return fmt.Errorf("%s names no %s", filepath.Base(winget), archive)
-		}
-		if !strings.Contains(strings.ToUpper(text), strings.ToUpper(digest)) {
-			return fmt.Errorf("%s carries no digest for %s", filepath.Base(winget), archive)
-		}
+	text, err := os.ReadFile(winget)
+	if err != nil {
+		return fmt.Errorf("%s: %w (the windows task writes it)", describe(root, winget), err)
+	}
+	if !strings.Contains(string(text), archive) {
+		return fmt.Errorf("%s names no %s", filepath.Base(winget), archive)
+	}
+	if !strings.Contains(strings.ToUpper(string(text)), strings.ToUpper(digest)) {
+		return fmt.Errorf("%s carries no digest for %s", filepath.Base(winget), archive)
 	}
 	return nil
 }

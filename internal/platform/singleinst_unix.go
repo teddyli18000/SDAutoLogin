@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -32,15 +33,56 @@ var instanceTaken bool
 // wants, so a connection that says nothing at all cannot hold the loop.
 const settingsRequestTimeout = 5 * time.Second
 
-// lockPath and socketPath are the two rendezvous names, next to each other in
-// the temporary directory. The lock decides who is the single copy; the socket
-// is how a later copy asks that copy for its settings page.
-func lockPath() string   { return filepath.Join(os.TempDir(), "sdautologin.lock") }
-func socketPath() string { return filepath.Join(os.TempDir(), "sdautologin.sock") }
+// instanceDir is the directory the two rendezvous names live in: the temporary
+// directory, which is where a second copy of the program looks as well, with the
+// user's own cache directory as the fallback for a machine where nothing can be
+// written there — a service with a private or a read-only /tmp. Both copies run
+// as the same user, so a per-user directory is still a place where they meet.
+//
+// It is decided once, so that the socket and the lock cannot end up in two
+// different directories, one of which the other copy never looks in.
+var (
+	instanceDirOnce sync.Once
+	instanceDirPath string
+)
 
-// AcquireSingleInstance takes an exclusive lock on a file in the temporary
-// directory, and publishes a socket beside it that a later copy connects to in
-// order to ask for the settings page.
+func instanceDir() string {
+	instanceDirOnce.Do(func() {
+		instanceDirPath = os.TempDir()
+		if dirIsWritable(instanceDirPath) {
+			return
+		}
+		if cache, err := os.UserCacheDir(); err == nil && dirIsWritable(cache) {
+			instanceDirPath = cache
+		}
+	})
+	return instanceDirPath
+}
+
+// dirIsWritable reports whether a file can be made in dir at all, which is what
+// the lock file needs. It is probed rather than read off the mode bits: what
+// makes a directory unusable here is usually a mount option or a policy, which
+// the mode does not show.
+func dirIsWritable(dir string) bool {
+	f, err := os.CreateTemp(dir, ".sdautologin-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return true
+}
+
+// lockPath and socketPath are the two rendezvous names, next to each other in
+// the directory above. The lock decides who is the single copy; the socket is how
+// a later copy asks that copy for its settings page.
+func lockPath() string   { return filepath.Join(instanceDir(), "sdautologin.lock") }
+func socketPath() string { return filepath.Join(instanceDir(), "sdautologin.sock") }
+
+// AcquireSingleInstance takes an exclusive lock on a file in the directory above,
+// and publishes a socket beside it that a later copy connects to in order to ask
+// for the settings page.
 //
 // The socket is made before the lock is taken on purpose: a copy that finds the
 // lock taken is then certain to find the socket as well, so its request cannot
@@ -54,7 +96,14 @@ func AcquireSingleInstance(requestSettings bool) bool {
 
 	f, err := os.OpenFile(lockPath(), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		logging.Log.Warn("could not open the lock file %s: %v", lockPath(), err)
+		// Nothing to take the lock with, so this copy cannot tell whether
+		// another one is running. Starting anyway is the lesser evil: refusing
+		// would leave the program unusable on a machine whose temporary and cache
+		// directories are both closed off, which is what a container often looks
+		// like. The line has to say what it means, because two copies would both
+		// be signing in and the portal allows one session per address.
+		logging.Log.Warn("could not open the lock file %s: %v; this run cannot tell whether another instance is already running",
+			lockPath(), err)
 		closeListener(listener)
 		return true
 	}

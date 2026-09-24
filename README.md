@@ -387,8 +387,8 @@ first run.
 | `portalBaseUrl` | `http://10.9.1.3/` | portal home page, read for the client IP |
 | `eportalUrl` | `http://10.9.1.3:801/eportal/` | Dr.COM eportal root |
 | `accountPrefix` | `,0,` | prefix the portal page uses for a browser login |
-| `checkIntervalSeconds` | `15` | how often the session is checked, minimum 5 |
-| `httpTimeoutSeconds` | `6` | request timeout, minimum 2 |
+| `checkIntervalSeconds` | `15` | how often the session is checked, 5 seconds at the least and a day at the most |
+| `httpTimeoutSeconds` | `6` | request timeout, 2 seconds at the least and 15 minutes at the most |
 | `autoLogin` | `true` | sign back in when the session is gone |
 | `checkInternet` | `true` | also probe the probe addresses |
 | `verboseLog` | `true` | write per-check diagnostics |

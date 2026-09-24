@@ -317,6 +317,11 @@ func (o options) applyTo(cfg *config.Config) error {
 		if o.isp != nil {
 			entry.ISPs = []string{*o.isp}
 		}
+		if len(entry.ISPs) == 0 {
+			// An account named on its own has no service type yet, and the
+			// campus network is the one the portal's dropdown starts with.
+			entry.ISPs = []string{""}
+		}
 		cfg.Accounts = []config.Account{entry}
 
 	case givenPassword:
@@ -326,7 +331,7 @@ func (o options) applyTo(cfg *config.Config) error {
 		// not what this run was about, and a list cut down to one entry is not
 		// something the reader asked for.
 		if len(cfg.Accounts) == 0 {
-			cfg.Accounts = []config.Account{{Password: password}}
+			cfg.Accounts = []config.Account{{Password: password, ISPs: []string{""}}}
 		} else {
 			cfg.Accounts[0].Password = password
 		}
@@ -431,8 +436,15 @@ func parseAccount(raw string) (config.Account, error) {
 		return config.Account{}, fmt.Errorf("--account is written as user:password@service, and this value is not")
 	}
 
-	entry := config.Account{Username: strings.TrimSpace(username), Password: password}
+	// Leaving the part after the password out entirely means the campus network,
+	// which is what the portal's own dropdown starts with, and an entry with no
+	// service type at all is one nothing can be submitted for: the suffix is
+	// filled in here rather than left to a normalization that a run without
+	// --save never reaches, which would leave a run that has an account and
+	// still cannot sign in.
+	entry := config.Account{Username: strings.TrimSpace(username), Password: password, ISPs: []string{""}}
 	if services != "" {
+		entry.ISPs = nil
 		for _, part := range strings.Split(services, "+") {
 			part = strings.TrimSpace(part)
 			if part == "" {
@@ -474,6 +486,34 @@ func checkTray(o options, hasTray bool) error {
 		return fmt.Errorf("--app needs the tray, which this build does not have")
 	}
 	return nil
+}
+
+// checkTrayOptions reports an option that only a command can honour. The tray is
+// the mode that names no command, so an option belonging to one is refused here
+// rather than dropped: `--json` would otherwise put up a tray icon where the
+// caller asked for a report and a script would wait for it.
+func (o options) checkTrayOptions() error {
+	switch {
+	case o.settings != nil:
+		return fmt.Errorf("--settings belongs to the run command, the tray serves its page on loopback")
+	case o.json:
+		return fmt.Errorf("--json belongs to the status command, the tray has nothing to report as JSON")
+	}
+	return nil
+}
+
+// exitIfBadOptions refuses a shortcut whose options do not belong to the command
+// it stands for, and otherwise runs that command. The shortcut is only a shorter
+// way to write the command, so the options are held to the same rules: -cli
+// --json is the usage error run --json is, rather than an option that is quietly
+// dropped, which a script would take for a JSON report.
+func exitIfBadOptions(o options, command string, run func(string, options) int, appDir string) {
+	if err := o.check(command); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n\n", err)
+		printUsage(os.Stderr)
+		os.Exit(2)
+	}
+	os.Exit(run(appDir, o))
 }
 
 // runCommand runs the command named by args[0]. The options have already been
@@ -762,7 +802,10 @@ func cmdLogin(appDir string, opts options) int {
 	fmt.Printf("success      : %v\n", test.Result.Success)
 	fmt.Printf("ret_code     : %s\n", blank(test.Result.RetCode))
 	fmt.Printf("message      : %s\n", test.Result.Message)
-	fmt.Printf("raw_reply    : %s\n", portal.Truncate(test.Result.Raw))
+	// The reply is the portal's own text, and a portal that answers an error page
+	// or an echo of the request can carry the password in it: what is printed is
+	// masked the same way the request in the log is.
+	fmt.Printf("raw_reply    : %s\n", portal.Truncate(portal.MaskSecrets(test.Result.Raw)))
 	fmt.Printf("after        : online=%v ip=%s account=%s\n",
 		test.After.Online, blank(test.After.ClientIP), blank(test.After.Account))
 
@@ -784,7 +827,11 @@ func cmdConfig(appDir string, rest []string, opts options) int {
 			return 0
 		}
 	}
-	runSetupWizard(cfg)
+	if err := runSetupWizard(cfg); err != nil {
+		// The wizard says what went wrong; the exit status is what a script
+		// reads, and a configuration that was not written is not a success.
+		return 1
+	}
 	return 0
 }
 
