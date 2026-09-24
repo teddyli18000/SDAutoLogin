@@ -27,6 +27,15 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+/* Every decision this page makes that a reader could later ask about is written
+   to the browser's console, so a report of "the button did nothing" can be read
+   back in the order it happened. The prefix is what to filter on. Nothing secret
+   goes through here: whether a password is there is said, never the password. */
+function note(what, detail) {
+  if (detail === undefined) console.log("[sdautologin] " + what);
+  else console.log("[sdautologin] " + what, detail);
+}
+
 function t(key, ...args) {
   let out = state.i18n[key] || key;
   args.forEach((a, i) => { out = out.split("{" + i + "}").join(a); });
@@ -222,10 +231,18 @@ function accountCard(entry, index) {
   // says so instead, and the field is left empty for the reader to replace it
   // with. Empty is what "keep the stored one" looks like in the request the page
   // sends back.
+  //
+  // What the reader has typed is put back as the card is rebuilt, because a card
+  // is rebuilt from what is on the page every time the list changes: a password
+  // typed into a card and then lost to a drag, a language change or a refused
+  // save was reported back as a missing one, on an account the reader had just
+  // filled in. The stored password is still never sent to the page, so an entry
+  // that comes from the program arrives with this empty and says so instead.
   const password = el("input", {
     id: passwordID,
     type: "password",
     autocomplete: "off",
+    value: entry.password || "",
     placeholder: entry.hasPassword ? t("field.password.keep") : t("field.password"),
     oninput: markDirty,
     dataset: { field: "password" },
@@ -339,6 +356,15 @@ function collect() {
     jsVersion: $("f-jsversion").value.trim(),
     language: $("f-language").value,
   };
+}
+
+/* accountsBrief is the list as a console line: the name of each entry and whether
+   it carries a password. It is what a save writes into the console, so a refused
+   save can be read back without the passwords ever being written down. */
+function accountsBrief(accounts) {
+  return accounts.map((entry, i) =>
+    "#" + (i + 1) + " " + (entry.username || "(no account)") +
+    (entry.password ? " password=set" : " password=empty"));
 }
 
 /* redraw rebuilds the list from the values read out of the DOM; every change to
@@ -577,18 +603,23 @@ async function submit() {
   const btn = $("btnSave");
   btn.disabled = true;
   btn.textContent = t("msg.saving");
-  const res = await api("/api/config", { method: "POST", body: JSON.stringify(collect()) });
+  const body = collect();
+  note("saving " + body.accounts.length + " account(s)", accountsBrief(body.accounts));
+  const res = await api("/api/config", { method: "POST", body: JSON.stringify(body) });
   btn.disabled = false;
   btn.textContent = t("btn.save");
   if (res.unreachable) {
+    note("the save did not reach the program: the page's session is gone");
     toast(t("msg.stale"), true);
     return false;
   }
   if (!res.ok || !res.data.ok) {
     state.errors = res.data.errors || { _: "err.saveFailed" };
+    note("the save was refused", state.errors);
     renderAccounts(collect().accounts);
     return false;
   }
+  note("the configuration was saved");
   state.errors = {};
   state.dirty = false;
   applyConfig(res.data.config);
@@ -613,6 +644,10 @@ async function refreshStatus() {
     // back is to open the page again from the tray.
     if (!warnedStale) {
       warnedStale = true;
+      // Said once per page, in the console as well as on screen: what the reader
+      // sees is a page that has stopped answering, and the line says which of the
+      // two it was.
+      note("this page's session is gone: the status request was refused, the program has quit or its settings service has shut down");
       toast(t("msg.stale"), true);
     }
     return;
@@ -699,7 +734,10 @@ function readProbes() {
 
 async function switchLanguage(lang) {
   const res = await api("/api/bootstrap?lang=" + encodeURIComponent(lang));
-  if (!res.ok) return;
+  if (!res.ok) {
+    note("the language was not changed: the bootstrap answered " + res.status);
+    return;
+  }
   state.i18n = res.data.i18n || state.i18n;
   state.operators = res.data.operators || state.operators;
   applyI18n();
@@ -713,6 +751,16 @@ async function switchLanguage(lang) {
   renderStatus(res.data.status || state.status);
   fillWizardSelect(state.operators);
   markDirty();
+  // Nothing is saved while the wizard is open: the account it is about is not in
+  // the list yet, so the save would be refused with "at least one account" over
+  // a step the reader has not reached, and that refusal was what the first run
+  // showed when only the language had been picked. The wizard's own button saves
+  // the language along with the account, and a reader who skips it changes the
+  // language again on the page behind, where saving is what that means.
+  if (!$("wizard").hidden) {
+    note("the language was changed while the wizard is open, not saving it yet");
+    return;
+  }
   await submit();
 }
 
@@ -833,6 +881,7 @@ function wire() {
     if (!username) {
       const slot = document.querySelector('[data-error="wizard"]');
       slot.textContent = t("err.accountRequired");
+      note("the wizard was submitted with no account name");
       return;
     }
     const accounts = collect().accounts;
@@ -845,14 +894,18 @@ function wire() {
     // What is saved is the list the cards hold, so the account the wizard is
     // about has to be a card before anything is submitted. On a first run the
     // list is empty, and a request built from it carries no account at all,
-    // which the server refuses as a missing account.
+    // which the server refuses as a missing account. The card keeps the password
+    // it is given, see accountCard, so it is in the request as well.
     redraw(accounts);
-    // A card renders its password field empty on purpose — what is stored is
-    // never written into the page — so the password the wizard was just given has
-    // to be put in it, or the save would carry an account with no password.
-    const card = $("accountList").firstElementChild;
-    if (card) card.querySelector('[data-field="password"]').value = $("w-password").value;
-    if (await submit()) $("wizard").hidden = true;
+    note("the wizard's account was put in the list as card 1, saving it");
+    // submit hides the wizard once the server has taken the configuration, and
+    // shows the refusal inside it when it has not.
+    await submit();
+  });
+
+  $("btnWizardSkip").addEventListener("click", () => {
+    $("wizard").hidden = true;
+    note("the wizard was skipped; the settings page behind it is the way in");
   });
 
   window.addEventListener("beforeunload", (event) => {
@@ -990,7 +1043,9 @@ function wireAccounts() {
     // into the position they came from would apply the move a second time, and a
     // dropped card would either jump home or land somewhere else entirely.
     state.status = Object.assign({}, state.status, { entryIndex: -1, skipped: [] });
-    redraw(collect().accounts);
+    const dropped = collect().accounts;
+    note("the list was dropped in this order", accountsBrief(dropped));
+    redraw(dropped);
   });
 
   // The arrow keys move what has the focus: a chip within its account, a card
@@ -1029,6 +1084,7 @@ function wireAccounts() {
 async function boot() {
   const res = await api("/api/bootstrap");
   if (!res.ok) {
+    note("the page cannot be used: the bootstrap was refused (" + res.status + "), the session is gone");
     document.body.replaceChildren(el("p", {
       class: "gone",
       text: bootFailedText(),
@@ -1059,6 +1115,13 @@ async function boot() {
 
   wire();
   if (!state.configured) $("wizard").hidden = false;
+  note("the page is ready", {
+    version: data.version,
+    configured: state.configured,
+    accounts: (data.config && data.config.accounts ? data.config.accounts.length : 0),
+    wizard: !state.configured,
+    language: data.config ? data.config.language : "",
+  });
 
   setInterval(refreshStatus, 5000);
 }

@@ -70,6 +70,13 @@ and a content column behind them that fills the window.
   colours from the palette, the scrollbars are thin and tinted, a long path wraps
   inside the field that shows it, and a reader whose system asks for less motion is
   given none.
+- The first-run wizard can be left for later. It carries a second button that closes
+  it onto the settings page behind it, where the account can be filled in whenever
+  the machine is next looked at. Finishing it closes the wizard as well, as soon as
+  the server has taken what was typed, and it saves nothing on a step of its own any
+  more: picking the interface language used to send a configuration with no account
+  in it, and the refusal that came back was shown over the step the reader had not
+  reached yet.
 
 ### The password
 
@@ -135,6 +142,14 @@ turned up a set of faults that had been shipping. They are fixed here.
   is saved, since that list is what a save sends, and a save the server refuses is
   shown in the wizard rather than behind it, where it could not be seen. On a fresh
   installation the button did nothing at all.
+- A password typed into a card stays in it. A card is rebuilt from what is on the
+  page every time the list changes, and the rebuild put the account name back but
+  not the password: moving an account, adding one, changing the language or a
+  refused save came back with the field empty, and the next save was refused with
+  "Password is required" on an account whose password had just been typed into it.
+  The field is filled from what the page reads now, and the stored password is
+  still never sent to the page, so an entry the reader did not touch is still an
+  empty field that means "keep the one that is there".
 - A dropped account keeps its place. The order was read back through the position
   each card came from, which applied the move a second time: two accounts went back
   to where they were, three came out in an order nobody had asked for, and the

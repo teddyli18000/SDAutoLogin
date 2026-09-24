@@ -138,6 +138,9 @@ var webText = map[string]text{
 	"wizard.step2":  {"2. 填写账号和密码", "2. Enter the account and password"},
 	"wizard.step3":  {"3. 选择服务类型", "3. Pick the service type"},
 	"wizard.finish": {"完成并开始自动登录", "Finish and start auto login"},
+	// Skipping leaves the settings page, which is behind the wizard, as the way
+	// in: not every machine is set up on the spot.
+	"wizard.skip": {"以后再说", "Not now"},
 
 	"err.accountsRequired": {"至少需要一个账号", "At least one account is required"},
 	"err.accountRequired":  {"账号不能为空", "Account is required"},
