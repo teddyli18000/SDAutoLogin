@@ -527,7 +527,14 @@ with what is attached by construction: the tag is `v` followed by the version,
 it with the commit it was built from, and into the version resource of the
 Windows build. The sources carry the number as well, for a tree that is unpacked
 rather than checked out, and a test holds them to the tag. A release that already
-exists is taken as it is, so a tag pushed twice does not fail the run.
+exists is taken as it is, so a tag pushed twice does not fail the run. Each file
+replaces the attachment that carries its name rather than joining it, since this
+instance keeps two attachments of one name instead of replacing the first, and a
+run that finds files already attached says so: a tag published twice usually means
+it was moved, which is a new release wearing the version of the old one.
+`.gitea/scripts/dedupe-release-assets.sh` clears up a release that was doubled
+before that, keeping the newest attachment of each name and printing the rest,
+with the time each was uploaded, unless it is given `--apply`.
 
 ### Debian and Ubuntu
 
