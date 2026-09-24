@@ -23,11 +23,16 @@ name: CI
 permissions:
   contents: write
 
+# A tag is what this runs on, and nothing else. The two jobs answer the question a
+# release has to answer, and that question is worth asking exactly where it is
+# answered: what is checked here is what is about to be published. Every push
+# built the program, packed every format and verified them a second time, which is
+# a lot of the runner's time for a change that is often a line of prose. A branch
+# is checked from the checkout instead, with the same tasks:
+# go run ./tools/build test, packages, verify.
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-  pull_request:
 
 # The address the jobs fetch from and publish to. It is named here rather than
 # taken from github.server_url, which is the address the instance gives itself:
@@ -172,8 +177,8 @@ jobs:
 
       # What was packed is not uploaded anywhere: that would take another
       # JavaScript action, which this image cannot run either. The packages are
-      # kept when they are published, which is what matters, and a run that is
-      # not a tag leaves them in its working directory.
+      # kept when they are published, which is what matters, and a run that stops
+      # before that leaves them in its working directory.
 
       - name: the tools to publish with
         if: startsWith(github.ref, 'refs/tags/v')

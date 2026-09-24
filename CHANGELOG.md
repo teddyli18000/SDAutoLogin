@@ -95,6 +95,16 @@ close the places it appears besides the file.
   process list of every user on the machine, so a service or a container can now
   keep the secret out of both the file and the arguments it was started with.
 
+### Continuous integration
+
+A tag is what CI runs on now, and nothing else. Every push built the program,
+packed all four formats and then verified them by packing them a second time,
+which is a lot of the runner's time for a change that is often one line of prose.
+What those jobs answer is whether a release is sound, and that is a question worth
+asking where it is answered: at the point a release is cut. A branch is checked
+from the checkout with the same tasks, `go run ./tools/build test`, `packages` and
+`verify`, which is what they are there for.
+
 ## v1.1.0 - 2026-09-24
 
 A release for what v1.0.0 could not reach: the machines that are not a desktop,

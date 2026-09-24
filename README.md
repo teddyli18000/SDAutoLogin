@@ -488,9 +488,11 @@ and winget manifests carry the digest of the archive that is there. It then pack
 everything a second time and fails if a single byte came out differently, since a
 release built twice has to be the same release.
 
-All of this runs on every push in [.gitea/workflows/ci.yml](.gitea/workflows/ci.yml),
-together with `go vet`, `go test` and a `gofmt` check, so a package that would
-not install is caught before it is published rather than after.
+All of this runs when a tag is pushed, in
+[.gitea/workflows/ci.yml](.gitea/workflows/ci.yml), together with `go vet`,
+`go test` and a `gofmt` check, so a package that would not install is caught
+before it is published rather than after. Nothing else starts it: a branch is
+checked from the checkout, with those same tasks, instead of on the runner.
 
 Pushing a tag publishes the release: the same run creates it and attaches the
 packages and `SHA256SUMS` to it, which the two manifests point at. The version is
