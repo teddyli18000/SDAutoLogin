@@ -208,6 +208,8 @@ log, since the one before it was spent by the browser that opened it.
 - Whether the passwords are written to the config file.
 - Interface language.
 - Sign in automatically after a disconnection.
+- Move a session that was already up onto the first service type of its account,
+  and a button on the entry the session is on that does it by hand.
 - Run at startup.
 - Check interval, and the reachability probes.
 
@@ -255,6 +257,16 @@ next entry that does work.
 
 A disabled entry takes no part at all, so an entry can be taken out of the
 running without deleting its password.
+
+The order of an entry's service types is what the program follows when it signs
+in itself. A session that is already up when the program starts — one signed in
+by hand, or by a previous run — is not something the portal moves, and one
+session per address means the only way onto another service type is a login that
+replaces it. The program signs in again as the first service type of the entry
+that session belongs to, once: a portal that will not sign in again while a
+session is up is reported and left as it is, and the entry is not taken out of
+the running for it. The option can be turned off, and the card of the account in
+use then offers a button that moves the session by hand.
 
 ## Command line
 
@@ -390,6 +402,7 @@ first run.
 | `checkIntervalSeconds` | `15` | how often the session is checked, 5 seconds at the least and a day at the most |
 | `httpTimeoutSeconds` | `6` | request timeout, 2 seconds at the least and 15 minutes at the most |
 | `autoLogin` | `true` | sign back in when the session is gone |
+| `switchToPreferredService` | `true` | sign a session that is already up in again as the first service type of its entry |
 | `checkInternet` | `true` | also probe the probe addresses |
 | `verboseLog` | `true` | write per-check diagnostics |
 | `logToFile` | `true` | also write `logs/app.log`, see `--no-log` |

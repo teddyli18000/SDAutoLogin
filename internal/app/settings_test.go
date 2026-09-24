@@ -673,6 +673,117 @@ func TestASaveThatLeavesThePasswordAloneKeepsIt(t *testing.T) {
 	}
 }
 
+// postAction runs one action the page can ask for and hands back the reply, so
+// the contract between the page and the handler is what is being read rather
+// than the handler on its own.
+func postAction(t *testing.T, server *Server, action string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/action",
+		bytes.NewReader([]byte(`{"action":"`+action+`"}`)))
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
+	req.Header.Set("X-Auth-Token", server.session)
+	rec := httptest.NewRecorder()
+	server.handleAction(rec, req)
+	return rec
+}
+
+// TestThePageCanAskForTheServiceTypeTheSessionShouldBeOn covers the reply the
+// button on the page is rendered from: whether there was anything to move, and
+// when there was, what the sign-in went out as. A session that is already on the
+// first service type is answered the same way as one that is not up at all -
+// with nothing to move - rather than with a login reply nobody asked for.
+func TestThePageCanAskForTheServiceTypeTheSessionShouldBeOn(t *testing.T) {
+	cases := []struct {
+		name    string
+		session string
+		moved   bool
+	}{
+		{"a session on the campus network, with China Mobile first in the entry", "s1234567", true},
+		{"a session already on the first service type", "s1234567@zgyd", false},
+		{"a session that is down", "", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, logins := portalStubSession(t, []string{"@zgyd", ""}, c.session,
+				`{"result":1,"ret_code":0,"msg":"authentication successful"}`)
+			state := New(cfg)
+			server := NewServer(state, "", nil)
+			t.Cleanup(server.Stop)
+			if _, err := server.URL(); err != nil {
+				t.Fatalf("URL: %v", err)
+			}
+
+			rec := postAction(t, server, "usePreferred")
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			want := `"moved":false`
+			if c.moved {
+				want = `"moved":true`
+			}
+			if !strings.Contains(body, want) {
+				t.Errorf("the reply does not say %s: %s", want, body)
+			}
+			if c.moved && !strings.Contains(body, `"isp":"@zgyd"`) {
+				t.Errorf("the reply does not name the service type the sign-in went out as: %s", body)
+			}
+			wantLogins := 0
+			if c.moved {
+				wantLogins = 1
+			}
+			if got := logins(); got != wantLogins {
+				t.Errorf("logins = %d, want %d", got, wantLogins)
+			}
+		})
+	}
+}
+
+// TestASaveCarriesThePreferredServiceSwitch covers the JSON name of that option
+// on its way from the page: the page posts the whole configuration back, so a
+// name the struct does not have would drop the switch in silence and the page
+// would go on showing it as on.
+func TestASaveCarriesThePreferredServiceSwitch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := New(cfg)
+	server := NewServer(state, "", nil)
+	t.Cleanup(server.Stop)
+	if _, err := server.URL(); err != nil {
+		t.Fatalf("URL: %v", err)
+	}
+
+	body := `{"accounts":[{"username":"s1234567","password":"p@ss","isps":[""]}],` +
+		`"switchToPreferredService":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(body)))
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
+	req.Header.Set("X-Auth-Token", server.session)
+	rec := httptest.NewRecorder()
+	server.handleConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if state.Config().SwitchToPreferredService {
+		t.Error("the running configuration still has the switch on")
+	}
+	// Read back from the file rather than from what was written into it: the
+	// next start is what the switch has to hold for.
+	reloaded, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.SwitchToPreferredService {
+		t.Error("the file still has the switch on, so the next start would move the session again")
+	}
+}
+
 // TestAFirstSaveFromThePage covers what the page sends when nothing is
 // configured yet, which is what the wizard does. The list a save carries is the
 // list of cards, so an account that has not been put in it is an account the

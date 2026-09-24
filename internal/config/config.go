@@ -81,9 +81,19 @@ type Config struct {
 	// machine with a small flash turns it off: its service manager already
 	// collects the console output, and the rotating file is the same text on the
 	// flash again.
-	LogToFile bool     `json:"logToFile"`
-	ProbeURLs []string `json:"probeUrls"`
-	JsVersion string   `json:"jsVersion"`
+	LogToFile bool `json:"logToFile"`
+	// SwitchToPreferredService signs in again when the session is up on a
+	// service type other than the first one of its entry.
+	//
+	// The order of the service types of an entry is the order they are to be
+	// used in, and the portal keeps one session per client address, so a session
+	// that was already up when the program started - one signed in by hand, or
+	// by a previous run with another order - stays where it is unless something
+	// moves it. Turning this off leaves such a session alone and only reports
+	// which service type it is on; the page has a button to move it then.
+	SwitchToPreferredService bool     `json:"switchToPreferredService"`
+	ProbeURLs                []string `json:"probeUrls"`
+	JsVersion                string   `json:"jsVersion"`
 	// Language selects the interface language: auto, zh or en.
 	Language string `json:"language"`
 
@@ -115,7 +125,12 @@ func defaultConfig() *Config {
 		CheckInternet:        true,
 		VerboseLog:           true,
 		LogToFile:            true,
-		Language:             string(i18n.LangAuto),
+		// On: the order of an entry's service types is there to be followed, and
+		// the program signs in as the first one whenever it signs in itself. A
+		// session that was already up is the one case where the order would
+		// otherwise be a wish rather than what happens.
+		SwitchToPreferredService: true,
+		Language:                 string(i18n.LangAuto),
 		ProbeURLs: []string{
 			"http://connect.rom.miui.com/generate_204",
 			"http://www.baidu.com",
@@ -300,12 +315,15 @@ func (c *Config) Match(reported string) (int, string) {
 				return i, isp
 			}
 		}
-		// The portal does not always echo the suffix, so the account on its own
-		// is taken as a match as well. An entry may have no service type at all,
-		// which the command line can leave behind: it cannot be submitted, but
-		// it is still the entry the portal is talking about, and guessing a
-		// suffix for it would put a name in the page that was never configured.
+		// An account with no suffix on it is a session that was signed in
+		// without one, which is what the campus network itself is: the portal
+		// echoes what a login was submitted with, so a suffix it does not name
+		// was not sent. When the entry holds that service type it is the answer,
+		// and a portal that strips the suffix anyway leaves the guess below.
 		if strings.EqualFold(a.Username, stripped) {
+			if slices.Contains(a.ISPs, "") {
+				return i, ""
+			}
 			if len(a.ISPs) == 0 {
 				return i, ""
 			}
@@ -313,6 +331,37 @@ func (c *Config) Match(reported string) (int, string) {
 		}
 	}
 	return -1, ""
+}
+
+// PreferredFor returns the attempt the session the portal reports should be on:
+// the first service type of the entry that account belongs to. It reports false
+// when there is nothing to move the session onto - the account names no entry,
+// the entry is switched off or cannot be submitted, or the session is already on
+// the first service type.
+//
+// It is what the order of an entry's service types means for a session that is
+// already up. The portal keeps one session per client address, so moving one is a
+// sign-in that replaces it rather than something that happens by itself, which is
+// why the caller decides whether to act on this.
+func (c *Config) PreferredFor(reported string) (Attempt, bool) {
+	index, isp := c.Match(reported)
+	if index < 0 {
+		return Attempt{}, false
+	}
+	entry := c.Accounts[index]
+	if entry.Disabled || !entry.usable() || len(entry.ISPs) == 0 {
+		return Attempt{}, false
+	}
+	first := entry.ISPs[0]
+	if first == isp {
+		return Attempt{}, false
+	}
+	return Attempt{
+		Index:    index,
+		Username: entry.Username,
+		Password: entry.Password,
+		ISP:      first,
+	}, true
 }
 
 // EntryLabel names one entry of the login list and one of its service types, for
@@ -472,10 +521,11 @@ func (c *Config) Summary() string {
 		entries = append(entries, fmt.Sprintf("%s(%s,%s)", a.Username, strings.Join(services, ">"), state))
 	}
 	return fmt.Sprintf(
-		"accounts=%q prefix=%q interval=%ds timeout=%ds autoLogin=%v checkInternet=%v verboseLog=%v logToFile=%v rememberPassword=%v language=%q portal=%s eportal=%s",
+		"accounts=%q prefix=%q interval=%ds timeout=%ds autoLogin=%v checkInternet=%v verboseLog=%v logToFile=%v rememberPassword=%v switchToPreferredService=%v language=%q portal=%s eportal=%s",
 		strings.Join(entries, " "), c.AccountPrefix,
 		c.CheckIntervalSeconds, c.HTTPTimeoutSeconds, c.AutoLogin, c.CheckInternet,
-		c.VerboseLog, c.LogToFile, c.RememberPassword, c.Language, c.PortalBaseURL, c.EportalURL)
+		c.VerboseLog, c.LogToFile, c.RememberPassword, c.SwitchToPreferredService,
+		c.Language, c.PortalBaseURL, c.EportalURL)
 }
 
 // Validate returns a field path to message key map, where the keys are looked up

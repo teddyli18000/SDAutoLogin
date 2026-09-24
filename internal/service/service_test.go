@@ -107,8 +107,15 @@ func (s *stubPortal) start(t *testing.T) *config.Config {
 		if s.online {
 			result = "1"
 		}
-		fmt.Fprintf(w, `{"result":%s,"user_account":"s1234567",`+
-			`"online_ip":"203.0.113.7","online_time":"2026-01-01 00:00:00"}`, result)
+		// The portal echoes the account a login was submitted with, so the stub
+		// does too: which service type the session is on is read off that echo,
+		// and a stub that always named the same account would not show it.
+		account := "s1234567"
+		if len(s.attempted) > 0 {
+			account = strings.TrimPrefix(s.attempted[len(s.attempted)-1], ",0,")
+		}
+		fmt.Fprintf(w, `{"result":%s,"user_account":%q,`+
+			`"online_ip":"203.0.113.7","online_time":"2026-01-01 00:00:00"}`, result, account)
 	})
 
 	srv := httptest.NewServer(mux)
@@ -283,6 +290,130 @@ func TestTickDoesNotCallALoginFailedWhenTheSessionCannotBeReadBack(t *testing.T)
 	}
 	if svc.failStreak != 0 {
 		t.Errorf("failStreak = %d, want a login that could not be read back to be no failure", svc.failStreak)
+	}
+}
+
+// TestTickMovesASessionOntoTheServiceTypeTheEntryPutsFirst covers the session
+// that was already up when the program started, on a service type the entry does
+// not put first. The portal keeps one session per client address, so following the
+// order of the list means signing in again; the echo of the account is what says
+// which service type the session is on, since the portal writes back what a login
+// was submitted with.
+func TestTickMovesASessionOntoTheServiceTypeTheEntryPutsFirst(t *testing.T) {
+	sp := &stubPortal{online: true, loginBody: `{"result":1,"ret_code":"0"}`}
+	cfg := sp.start(t)
+	// The session is on the campus network - the portal names it without a
+	// suffix - while the entry puts China Mobile first.
+	cfg.Accounts[0].ISPs = []string{"@zgyd", ""}
+	cfg.SwitchToPreferredService = true
+	svc := NewService(cfg)
+
+	svc.tick()
+
+	snap := svc.Snapshot()
+	if snap.State != StateOnline {
+		t.Fatalf("State = %v, want Online (message %q)", snap.State, snap.Message)
+	}
+	if !strings.Contains(snap.Message, "switched to") {
+		t.Errorf("Message = %q, want it to say the session was moved", snap.Message)
+	}
+	if snap.EntryIndex != 0 || snap.Entry != "s1234567 (China Mobile)" {
+		t.Errorf("Entry = %q at %d, want the entry the session was moved to", snap.Entry, snap.EntryIndex)
+	}
+	if snap.UsedISP != "@zgyd" || snap.MoveToPreferred {
+		t.Errorf("the snapshot says the session is on %q and should be moved (%v), want it on the first service type and nothing left to do",
+			snap.UsedISP, snap.MoveToPreferred)
+	}
+	if got := sp.submitted(); len(got) != 1 || got[0] != ",0,s1234567@zgyd" {
+		t.Errorf("submitted = %q, want one login as the first service type", got)
+	}
+}
+
+// TestTickLeavesASessionAloneWhenTheOrderIsNotToBeEnforced is the same session
+// with the option off: what is already up is left where it is, and the interface
+// is left to say which service type that is.
+func TestTickLeavesASessionAloneWhenTheOrderIsNotToBeEnforced(t *testing.T) {
+	sp := &stubPortal{online: true, loginBody: `{"result":1,"ret_code":"0"}`}
+	cfg := sp.start(t)
+	cfg.Accounts[0].ISPs = []string{"@zgyd", ""}
+	cfg.SwitchToPreferredService = false
+	svc := NewService(cfg)
+
+	svc.tick()
+
+	snap := svc.Snapshot()
+	if snap.State != StateOnline {
+		t.Fatalf("State = %v, want Online (message %q)", snap.State, snap.Message)
+	}
+	if strings.Contains(snap.Message, "switched") {
+		t.Errorf("Message = %q, want the session to have been left alone", snap.Message)
+	}
+	if _, logins := sp.counts(); logins != 0 {
+		t.Errorf("logins = %d, want none while the order is not enforced", logins)
+	}
+	// What the page renders the offer from: the service type the session is on,
+	// the one it should be on, and whether there is anything to move at all. The
+	// last of those is a flag of its own because the campus network itself is a
+	// service type with an empty suffix.
+	if snap.UsedISP != "" || snap.PreferredISP != "@zgyd" || !snap.MoveToPreferred {
+		t.Errorf("the snapshot offers used=%q preferred=%q move=%v, want the campus network moved onto China Mobile",
+			snap.UsedISP, snap.PreferredISP, snap.MoveToPreferred)
+	}
+}
+
+// TestTickLeavesASessionAloneWhenAutoLoginIsOff covers the other switch that
+// answers whether this program signs in on its own. Moving a session is a
+// sign-in, so a reader who turned automatic login off is not logged in for it;
+// the page's button is offered either way.
+func TestTickLeavesASessionAloneWhenAutoLoginIsOff(t *testing.T) {
+	sp := &stubPortal{online: true, loginBody: `{"result":1,"ret_code":"0"}`}
+	cfg := sp.start(t)
+	cfg.Accounts[0].ISPs = []string{"@zgyd", ""}
+	cfg.SwitchToPreferredService = true
+	cfg.AutoLogin = false
+	svc := NewService(cfg)
+
+	svc.tick()
+
+	snap := svc.Snapshot()
+	if snap.State != StateOnline {
+		t.Fatalf("State = %v, want Online (message %q)", snap.State, snap.Message)
+	}
+	if _, logins := sp.counts(); logins != 0 {
+		t.Errorf("logins = %d, want none while automatic login is off", logins)
+	}
+	if snap.PreferredISP != "@zgyd" || !snap.MoveToPreferred {
+		t.Errorf("the offer is used=%q preferred=%q move=%v, want it left for the button",
+			snap.UsedISP, snap.PreferredISP, snap.MoveToPreferred)
+	}
+}
+
+// TestTickAsksOnceWhenThePortalWillNotSignInAgainWhileTheSessionIsUp covers the
+// portal that refuses a second sign-in. The session is left as it is, the entry is
+// not put out of the running for it - the account was not what was refused - and
+// the portal is not asked again on every check.
+func TestTickAsksOnceWhenThePortalWillNotSignInAgainWhileTheSessionIsUp(t *testing.T) {
+	sp := &stubPortal{online: true, loginBody: `{"result":0,"ret_code":"1"}`}
+	cfg := sp.start(t)
+	cfg.Accounts[0].ISPs = []string{"@zgyd", ""}
+	cfg.SwitchToPreferredService = true
+	svc := NewService(cfg)
+
+	svc.tick()
+	first := svc.Snapshot()
+	if first.State != StateOnline {
+		t.Fatalf("State = %v, want Online, the session is still a working one (message %q)", first.State, first.Message)
+	}
+	if !strings.Contains(first.Message, "would not sign in again") {
+		t.Errorf("Message = %q, want it to say the portal refused the second sign-in", first.Message)
+	}
+	if len(svc.skipped(time.Now())) != 0 {
+		t.Error("the entry was put out of the running for a refusal that was not about the account")
+	}
+
+	svc.tick()
+	if _, logins := sp.counts(); logins != 1 {
+		t.Errorf("logins = %d, want one: a portal that will not sign in again must be asked once", logins)
 	}
 }
 

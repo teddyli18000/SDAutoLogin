@@ -76,9 +76,26 @@ type Snapshot struct {
 	// mark the entry in use. EntryIndex is -1 while nothing has signed in.
 	Entry      string
 	EntryIndex int
+	// UsedISP is the service type of that entry the portal says the session is
+	// on: the suffix the entry is submitted with, empty for the campus network
+	// itself. The page names the one the session is on with it, rather than
+	// every type the entry may be used with, which is the difference between
+	// "the campus network" and "one of these two".
+	UsedISP string
 	// Skipped lists the entries that are being left alone for a while: the
 	// portal refused them for a reason time will not fix by itself.
 	Skipped []Skipped
+	// PreferredISP is the service type of that entry the session should be on
+	// when it is on another one, which is the first one the entry names, and
+	// MoveToPreferred says whether there is anything to move it onto at all.
+	// The page shows that service type with a button that signs in again, for a
+	// reader who would rather move the session than wait for the next run.
+	//
+	// The two are told apart because the service type to move the session onto
+	// may be the campus network itself, which is an empty suffix: the value
+	// alone would say the same thing as "nothing to do".
+	PreferredISP    string
+	MoveToPreferred bool
 }
 
 // Skipped is one entry of the login list that is not being tried, why, and how
@@ -155,6 +172,11 @@ type Service struct {
 	// keyed by config.Attempt.Key, so the check walks past a broken account
 	// instead of submitting it again every interval.
 	rejected map[string]rejection
+	// switchTried remembers that this session has been signed in again to move
+	// it onto the service type its entry puts first. A portal that will not sign
+	// in while the session is up must not be asked again every check, and the
+	// next session may be moved again.
+	switchTried bool
 }
 
 func NewService(cfg *config.Config) *Service {
@@ -250,6 +272,10 @@ func (s *Service) Restart(cfg *config.Config) {
 	s.cfg = cfg
 	s.client = portal.NewClient(cfg)
 	s.rejected = map[string]rejection{}
+	// The settings may be what was wrong: a service type was added, the order
+	// was changed, or the option that moves a session onto the first one was
+	// turned on. A session that was left alone is asked about again.
+	s.switchTried = false
 	s.mu.Unlock()
 	s.Start()
 }
@@ -337,6 +363,14 @@ func (s *Service) tick() {
 		}
 
 	case st.Online:
+		// A session that is up on another service type of the same entry is
+		// signed in again as the first one, when the configuration asks for it
+		// and when this is the round that first saw it. See switchToPreferred.
+		if a, ok := s.preferredPending(cfg, st); ok {
+			snap = s.switchToPreferred(cfg, st, snap, a)
+			break
+		}
+
 		if cfg.CheckInternet {
 			snap.InternetChecked = true
 			snap.InternetOK = s.client.ProbeInternet()
@@ -372,17 +406,7 @@ func (s *Service) tick() {
 		s.failStreak = 0
 		s.mu.Unlock()
 
-		// The portal names the account this address is signed in with, so the
-		// interface can say which entry of the list the session is on, including
-		// one this program did not sign in itself.
-		if st.Account != "" {
-			if index, isp := cfg.Match(st.Account); index >= 0 {
-				s.setActive(index, cfg.EntryLabel(index, isp))
-			} else {
-				s.setActive(-1, "")
-			}
-			snap.Entry, snap.EntryIndex = s.active()
-		}
+		snap = s.attribute(cfg, st, snap)
 
 	case !cfg.AutoLogin:
 		snap.State = StateOffline
@@ -423,6 +447,12 @@ func (s *Service) tick() {
 func (s *Service) signIn(cfg *config.Config, st portal.Status, snap Snapshot, offline string) Snapshot {
 	now := time.Now()
 	s.pruneRejected(now)
+
+	// A session is being signed in from scratch, so whatever was tried to move
+	// the one before it does not apply to this one.
+	s.mu.Lock()
+	s.switchTried = false
+	s.mu.Unlock()
 
 	attempts := cfg.Attempts()
 	ready := make([]config.Attempt, 0, len(attempts))
@@ -490,14 +520,9 @@ func (s *Service) signIn(cfg *config.Config, st portal.Status, snap Snapshot, of
 		}
 
 		// The login endpoint can report success while the portal still shows
-		// the client as offline, so confirm before declaring victory - and ask
-		// more than once, because the online list is written a moment behind
-		// the login endpoint. See confirmTries.
-		verify := s.client.QueryStatus()
-		for i := 1; i < confirmTries && !verify.Online; i++ {
-			time.Sleep(confirmDelay)
-			verify = s.client.QueryStatus()
-		}
+		// the client as offline, so confirm before declaring victory. See
+		// confirmLogin for why that is asked more than once.
+		verify := s.confirmLogin()
 		if !verify.Online {
 			if !verify.Known {
 				// The portal could not be asked whether the login took, so
@@ -529,29 +554,183 @@ func (s *Service) signIn(cfg *config.Config, st portal.Status, snap Snapshot, of
 			return snap
 		}
 
-		last := time.Now().Format("01-02 15:04:05")
-		entry := a.Entry()
-		s.mu.Lock()
-		s.lastLogin = last
-		s.failStreak = 0
-		s.lastOnlineAt = time.Now()
-		s.activeIndex, s.activeEntry = a.Index, entry
-		s.mu.Unlock()
-
-		snap.State = StateOnline
-		snap.LastLoginAt = last
-		snap.Account = verify.Account
-		snap.ClientIP = verify.ClientIP
-		snap.OnlineSince = verify.OnlineSince
-		snap.Entry, snap.EntryIndex = entry, a.Index
-		snap.Message = "signed in as " + entry + " at " + last
 		logging.Log.Info("reconnect attempt #%d succeeded in %d ms as %s (entry %d of %d), account %s, client ip %s, session since %s",
-			attempt, elapsedMS(attemptStart), entry, a.Index+1, len(cfg.Accounts),
+			attempt, elapsedMS(attemptStart), a.Entry(), a.Index+1, len(cfg.Accounts),
 			verify.Account, verify.ClientIP, verify.OnlineSince)
-		return snap
+		return s.signedIn(snap, a, verify, "signed in as")
 	}
 
 	return s.allRefused(snap, now, offline)
+}
+
+// confirmLogin reads the session back after a login the portal accepted, and
+// hands back what the portal said. See confirmTries.
+func (s *Service) confirmLogin() portal.Status {
+	verify := s.client.QueryStatus()
+	for i := 1; i < confirmTries && !verify.Online; i++ {
+		time.Sleep(confirmDelay)
+		verify = s.client.QueryStatus()
+	}
+	return verify
+}
+
+// signedIn is what a login the portal confirmed leaves behind: the snapshot the
+// interface is shown, and the session facts every later snapshot is built from.
+// verb is how the log and the page word it, "signed in as" for a sign-in and
+// "switched to" for a session that was moved onto another service type.
+func (s *Service) signedIn(snap Snapshot, a config.Attempt, verify portal.Status, verb string) Snapshot {
+	last := time.Now().Format("01-02 15:04:05")
+	entry := a.Entry()
+	s.mu.Lock()
+	s.lastLogin = last
+	s.failStreak = 0
+	s.lastOnlineAt = time.Now()
+	s.activeIndex, s.activeEntry = a.Index, entry
+	s.mu.Unlock()
+
+	snap.State = StateOnline
+	snap.LastLoginAt = last
+	snap.Account = verify.Account
+	snap.ClientIP = verify.ClientIP
+	snap.OnlineSince = verify.OnlineSince
+	snap.Entry, snap.EntryIndex = entry, a.Index
+	// The login went out with this service type appended to the account, and the
+	// portal echoes what it was given, so this is the type the session is on. The
+	// switch is left with nothing to do: it has just been made, or was asked
+	// once for this session already.
+	snap.UsedISP = a.ISP
+	snap.MoveToPreferred = false
+	snap.Message = verb + " " + entry + " at " + last
+	return snap
+}
+
+// attribute records which entry of the list the portal says the session is on,
+// so the interface can mark it, including a session this program did not sign in
+// itself. It also says which service type that entry puts first when the session
+// is not on it, which is what the page offers the button for.
+func (s *Service) attribute(cfg *config.Config, st portal.Status, snap Snapshot) Snapshot {
+	if st.Account == "" {
+		return snap
+	}
+	if index, isp := cfg.Match(st.Account); index >= 0 {
+		s.setActive(index, cfg.EntryLabel(index, isp))
+		snap.UsedISP = isp
+	} else {
+		s.setActive(-1, "")
+		snap.UsedISP = ""
+	}
+	snap.Entry, snap.EntryIndex = s.active()
+
+	snap.PreferredISP = ""
+	snap.MoveToPreferred = false
+	if a, ok := cfg.PreferredFor(st.Account); ok {
+		snap.PreferredISP = a.ISP
+		snap.MoveToPreferred = true
+	}
+	return snap
+}
+
+// preferredPending reports the attempt a session that is already up should be
+// moved onto, and false when there is nothing to do.
+//
+// A move is only ever inside one entry of the list: a session on an account the
+// list names, on a service type other than the first one of that entry. Signing
+// in as another entry's account would replace a session that works with one that
+// the order of the list says nothing about - the list is the failover order for
+// signing in, not a ranking of who should be online.
+func (s *Service) preferredPending(cfg *config.Config, st portal.Status) (config.Attempt, bool) {
+	if !cfg.SwitchToPreferredService {
+		return config.Attempt{}, false
+	}
+	if !cfg.AutoLogin {
+		// Moving a session is a sign-in, and one switch already answers whether
+		// this program signs in on its own. A reader who turned that off is left
+		// to the button on the page, which is offered either way.
+		return config.Attempt{}, false
+	}
+	s.mu.Lock()
+	tried := s.switchTried
+	s.mu.Unlock()
+	if tried {
+		// Asked once for this session already, and the portal did not move it.
+		return config.Attempt{}, false
+	}
+	a, ok := cfg.PreferredFor(st.Account)
+	if !ok {
+		return config.Attempt{}, false
+	}
+	if s.cooling(a) {
+		// The first service type is being left alone for a while, so the session
+		// stays where it is rather than moving onto something that was refused.
+		return config.Attempt{}, false
+	}
+	return a, true
+}
+
+// switchToPreferred signs in again while the session is up, to move it onto the
+// service type its entry puts first. The portal keeps one session per client
+// address, so this either replaces the session or is refused; either way the
+// session is left working, and a refusal is not treated as the account being
+// broken: the entry has to stay usable for when the session does drop.
+func (s *Service) switchToPreferred(cfg *config.Config, st portal.Status, snap Snapshot, a config.Attempt) Snapshot {
+	s.mu.Lock()
+	s.switchTried = true
+	s.attempts++
+	attempt := s.attempts
+	s.mu.Unlock()
+
+	logging.Log.Info("the session is on %s, which is not the service type its entry puts first, signing in again as %s (attempt #%d)",
+		st.Account, a.Entry(), attempt)
+
+	start := time.Now()
+	res := s.client.Login(st, a)
+	if !res.Success {
+		logging.Log.Warn("the portal would not sign in again while the session is up: %s (ret_code=%s, raw %s); the session is left alone until it drops",
+			res.Message, res.RetCode, portal.Truncate(res.Raw))
+		message := "the portal would not sign in again while the session is up"
+		if stays := s.entryLabel(cfg, st); stays != "" {
+			message += ", the session stays as " + stays
+		}
+		return s.attribute(cfg, st, s.stillOnline(snap, st, message))
+	}
+
+	verify := s.confirmLogin()
+	if !verify.Online {
+		logging.Log.Warn("the portal accepted the second sign-in as %s and does not list the session as online (%s), raw login reply %s; the next check settles it",
+			a.Entry(), verify.Message, portal.Truncate(res.Raw))
+		return s.attribute(cfg, st, s.stillOnline(snap, st,
+			"signed in again as "+a.Entry()+", not confirmed yet"))
+	}
+
+	logging.Log.Info("signed in again in %d ms, the session is now %s, since %s",
+		elapsedMS(start), a.Entry(), verify.OnlineSince)
+	return s.signedIn(snap, a, verify, "switched to")
+}
+
+// entryLabel names the entry the portal says the session is on, for a message a
+// reader has to make sense of. It is empty when the account names no entry.
+func (s *Service) entryLabel(cfg *config.Config, st portal.Status) string {
+	index, isp := cfg.Match(st.Account)
+	if index < 0 {
+		return ""
+	}
+	return cfg.EntryLabel(index, isp)
+}
+
+// stillOnline is the snapshot for a round that found the session up and did not
+// move it, either because the portal would not sign in again or because that is
+// not known yet. The session is still a working one, so it is reported as online
+// with the reason written into the message.
+func (s *Service) stillOnline(snap Snapshot, st portal.Status, message string) Snapshot {
+	s.mu.Lock()
+	s.lastOnlineAt = time.Now()
+	s.failStreak = 0
+	s.mu.Unlock()
+
+	snap.State = StateOnline
+	snap.Message = message
+	snap.OnlineSince = st.OnlineSince
+	return snap
 }
 
 // allRefused is the snapshot for a round in which every entry is either refused

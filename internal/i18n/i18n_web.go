@@ -44,6 +44,18 @@ var webText = map[string]text{
 	"acct.summaryOnly": {"{0} 个账号", "{0} accounts"},
 	"acct.allDisabled": {"所有账号都已停用，不会尝试登录。", "All accounts are disabled; nothing will be signed in."},
 
+	// Shown on the card whose account the session is on, when the session is on
+	// a service type the entry does not put first.
+	"acct.preferred": {
+		"会话已在线，但不在本账号的首选服务类型上（{0}）。改用首选重新登录会替换当前会话；门户不接受时，会话维持原样。",
+		"The session is up, but not on the service type this account puts first ({0}). Signing in again replaces the session; if the portal refuses, the session stays as it is."},
+	"acct.preferred.btn":   {"用首选重新登录", "Sign in again as the preferred type"},
+	"acct.preferred.none":  {"会话无需切换（已不在线，或已在首选服务类型上）。", "Nothing to move: the session is down, or already on the first service type."},
+	"acct.preferred.moved": {"已用 {0} 重新登录。", "Signed in again as {0}."},
+	"acct.preferred.failed": {
+		"门户没有换：{0}。会话维持原样。",
+		"The portal would not sign in again: {0}. The session stays as it is."},
+
 	"field.account":       {"账号", "Account"},
 	"field.account.hint":  {"学号、用户名或邮箱均可", "Student id, user name or mail address"},
 	"field.password":      {"密码", "Password"},
@@ -55,12 +67,16 @@ var webText = map[string]text{
 	"field.rememberPassword.hint": {"关闭后密码不写入配置文件；无法无人值守登录。", "With this off, passwords are not written to disk; unattended login is not possible."},
 	"field.autoLogin":             {"掉线后自动登录", "Sign in automatically after a disconnection"},
 	"field.autostart":             {"开机自动运行", "Run at startup"},
-	"field.interval":              {"检测间隔（秒）", "Check interval (seconds)"},
-	"field.interval.hint":         {"最小 5 秒", "Minimum 5 seconds"},
-	"field.checkInternet":         {"同时探测外网可达性（仅用于状态提示）", "Also probe Internet reachability (status only)"},
-	"field.probes":                {"连通性检测地址", "Reachability probe addresses"},
-	"field.probes.hint":           {"任一地址正常返回，即认为外网可用", "The Internet counts as reachable when any of them answers normally"},
-	"field.language":              {"界面语言", "Interface language"},
+	"field.switchService":         {"启动时把已在线的会话换成首选服务类型", "Move a session that is already up onto the first service type"},
+	"field.switchService.hint": {
+		"程序启动前就已登录的会话（例如手动登录的）如果不在账号的首选服务类型上，会重新登录一次换过去；关掉则保持不变，用账号卡片上的按钮手动切换。关掉「掉线后自动登录」时也不会自动切换。",
+		"A session that was up before the program started - one signed in by hand, say - is signed in again when it is not on the first service type of its account. With this off it is left as it is, and the button on its card moves it by hand; nothing is switched on its own either while automatic login is off."},
+	"field.interval":      {"检测间隔（秒）", "Check interval (seconds)"},
+	"field.interval.hint": {"最小 5 秒", "Minimum 5 seconds"},
+	"field.checkInternet": {"同时探测外网可达性（仅用于状态提示）", "Also probe Internet reachability (status only)"},
+	"field.probes":        {"连通性检测地址", "Reachability probe addresses"},
+	"field.probes.hint":   {"任一地址正常返回，即认为外网可用", "The Internet counts as reachable when any of them answers normally"},
+	"field.language":      {"界面语言", "Interface language"},
 
 	"lang.auto": {"跟随系统", "Follow system"},
 	"lang.zh":   {"简体中文", "Chinese (simplified)"},

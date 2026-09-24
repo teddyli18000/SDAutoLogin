@@ -610,6 +610,26 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 			"after":         statusPayload(snapshotFromStatus(test.After)),
 		})
 
+	case "usePreferred":
+		// The button beside the login list, for a session that is up on a
+		// service type the entry does not put first. It is the same answer the
+		// page shows for a login of its own, since that is what this is.
+		logging.Log.Info("the settings page asked for the session to be signed in as the first service type")
+		test, moved := s.state.UsePreferred()
+		if moved {
+			logging.Log.Info("signed in again as %s: %s (ret_code=%s)", test.Attempt.Entry(),
+				test.Result.Message, test.Result.RetCode)
+		}
+		writeJSON(w, map[string]any{
+			"ok":     true,
+			"moved":  moved,
+			"index":  test.Attempt.Index,
+			"isp":    test.Attempt.ISP,
+			"before": statusPayload(snapshotFromStatus(test.Before)),
+			"result": test.Result,
+			"after":  statusPayload(snapshotFromStatus(test.After)),
+		})
+
 	case "reload":
 		next, err := s.state.Reload()
 		if err != nil {

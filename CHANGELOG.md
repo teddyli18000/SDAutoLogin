@@ -78,6 +78,34 @@ and a content column behind them that fills the window.
   in it, and the refusal that came back was shown over the step the reader had not
   reached yet.
 
+### The service type a session is on
+
+The order of an entry's service types is the order they are to be used in, and a
+session that was already up when the program started — one signed in by hand, or
+by a previous run with another order — was simply left where it was. The order
+was a wish rather than what happened, on exactly the machine that had been set up
+by hand.
+
+- Such a session is signed in again as the first service type of its entry. The
+  portal keeps one session per client address, so a login that replaces it is the
+  only way onto another service type. Turning the option off leaves the session
+  alone, and the card of the account in use offers a button that does the same
+  thing by hand. Nothing is signed in on its own while automatic login is off
+  either: moving a session is a sign-in like any other, and one switch already
+  answers whether this program signs in by itself.
+- Moving a session is best effort and never a failure. A portal that will not
+  sign in again while a session is up is reported with the session left as it
+  was, and the entry is not taken out of the running for it. Each session is
+  asked once rather than on every round: a portal that refused is not asked again
+  until the settings are saved or the session is signed in from scratch.
+- Which service type a session is on is read from the account the portal echoes,
+  which is the account a login was submitted with: a suffix the echo does not
+  carry is one that was not sent. An account with no suffix on it used to be read
+  as the first service type of its entry, which named a session on the campus
+  network itself "China Mobile" on the page.
+- The card of the account in use says what the session is on and what its entry
+  puts first, and the button on it is there only while there is something to move.
+
 ### The password
 
 An unattended login needs the password in a form the program can read by itself,
@@ -117,6 +145,16 @@ from the checkout with the same tasks, `go run ./tools/build test`, `packages` a
 A pass over the program for the ways it could fail, rather than for what it does,
 turned up a set of faults that had been shipping. They are fixed here.
 
+- A login the portal accepted is no longer reported as failed. The login endpoint
+  and the online list are written a moment apart, so a portal answers a login with
+  "authentication successful" and, in the same second, answers a query with "the
+  online data is empty": the session is not in the list yet. That one read was
+  taken as the answer to whether the login had worked, so a login that had in fact
+  succeeded was reported as a failure, down to a log line saying the portal had
+  accepted it and still reporting offline. The session is read back over the
+  following second and a half now, and a portal that cannot be read at all is told
+  apart from one that says the client is not signed in: the first leaves the state
+  at "signing in" for the next check to settle rather than calling it a failure.
 - The account the command line writes always has a service type now.
   `--account=user:pass`, which the usage text offers as the campus network itself,
   and `--username` without `--isp`, both left the entry with none, and a run that

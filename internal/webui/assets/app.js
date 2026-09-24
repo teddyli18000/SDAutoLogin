@@ -152,6 +152,7 @@ function applyConfig(cfg) {
   $("f-autologin").checked = !!cfg.autoLogin;
   $("f-internet").checked = !!cfg.checkInternet;
   $("f-verbose").checked = !!cfg.verboseLog;
+  $("f-preferred").checked = !!cfg.switchToPreferredService;
   $("f-language").value = cfg.language || "auto";
   renderProbes(cfg.probeUrls || []);
   renderAccounts(cfg.accounts || []);
@@ -276,6 +277,15 @@ function accountCard(entry, index) {
   test.dataset.act = "test";
   const testResult = el("div", { class: "test-result", hidden: true });
 
+  // Shown only on the card the session is on, and only while that session is on
+  // a service type the entry does not put first; applyStatusBadges decides both
+  // from the status it is handed.
+  const preferredButton = button(t("acct.preferred.btn"), "ghost");
+  preferredButton.dataset.act = "usePreferred";
+  const preferred = el("div", { class: "account-preferred", hidden: true },
+    el("p", { class: "hint" }),
+    preferredButton);
+
   const body = el("div", { class: "account-body" },
     row(usernameID, t("field.account"), username, t("field.account.hint"), "accounts." + index + ".username"),
     row(passwordID, t("field.password"), el("div", { class: "input-row" }, password, show),
@@ -284,7 +294,7 @@ function accountCard(entry, index) {
       chips,
       el("div", { class: "service-add" }, picker, custom),
       el("p", { class: "hint", text: t("acct.services.hint") })), null, null),
-    el("div", { class: "account-foot" }, test, testResult));
+    el("div", { class: "account-foot" }, test, preferred, testResult));
 
   card.append(head, body);
   return card;
@@ -350,6 +360,7 @@ function collect() {
     checkIntervalSeconds: parseInt($("f-interval").value, 10) || 0,
     httpTimeoutSeconds: parseInt($("f-timeout").value, 10) || 0,
     autoLogin: $("f-autologin").checked,
+    switchToPreferredService: $("f-preferred").checked,
     checkInternet: $("f-internet").checked,
     verboseLog: $("f-verbose").checked,
     probeUrls: readProbes(),
@@ -454,16 +465,19 @@ function entryLabel(index, usedSuffix) {
   return (entry.username || t("acct.card", index + 1)) + " (" + isps.map(operatorName).join(", ") + ")";
 }
 
-// activeEntryLabel names the entry the session is on, picking the one service
-// type out when the portal echoed it.
+// activeEntryLabel names the entry the session is on, with the one service type
+// it is on rather than every type the entry may be used with. Which one that is
+// comes from the program, which reads it off the account the portal echoes: a
+// suffix the echo does not carry is one the login did not send, which is how a
+// session on the campus network itself is told apart from one on a carrier.
 function activeEntryLabel(st) {
   if (!st || typeof st.entryIndex !== "number" || st.entryIndex < 0) return "-";
   const cfg = state.config;
   if (!cfg || !cfg.accounts || st.entryIndex >= cfg.accounts.length) return "-";
-  const isps = cfg.accounts[st.entryIndex].isps || [""];
-  const echoed = st.account || "";
-  const used = isps.find((suffix) => suffix !== "" && echoed.includes(suffix));
-  return entryLabel(st.entryIndex, used);
+  if (typeof st.usedIsp === "string") return entryLabel(st.entryIndex, st.usedIsp);
+  // A status that does not carry the service type, which is what the login self
+  // test answers with: the entry is named with the types it may be used with.
+  return entryLabel(st.entryIndex);
 }
 
 function formatWait(seconds) {
@@ -489,6 +503,19 @@ function applyStatusBadges(st) {
         // has never seen is shown as the portal wrote it.
         const reason = state.i18n["retcode." + why.retCode] || why.message;
         skipped.textContent = t("acct.skipped", formatWait(why.retryInS), reason);
+      }
+    }
+    // The session is up on this account but on a service type the entry does not
+    // put first, and the program has something to move it onto. Both the flag
+    // and the service type come from the program: the type it should be on may
+    // be the campus network itself, which is an empty suffix, so the type alone
+    // would not say whether there is anything to do.
+    const preferred = card.querySelector(".account-preferred");
+    if (preferred) {
+      const wanted = st.entryIndex === index && st.moveToPreferred;
+      preferred.hidden = !wanted;
+      if (wanted) {
+        preferred.querySelector(".hint").textContent = t("acct.preferred", operatorName(st.preferredIsp || ""));
       }
     }
   });
@@ -704,6 +731,44 @@ async function testEntry(index, buttonNode) {
   }
 }
 
+/* ---------- the service type the session should be on ---------- */
+
+/* usePreferred asks the program to sign the session in again as the service type
+   its entry puts first. The program says whether there was anything to move: a
+   session that went down in the meantime, or one that is already on the first
+   service type, has nothing to do, and saying so is the whole answer.
+   It works on the configuration the program is running, not on what is on the
+   page, since the session belongs to the running program. */
+async function usePreferred(buttonNode) {
+  if (buttonNode) buttonNode.disabled = true;
+  const res = await api("/api/action", {
+    method: "POST",
+    body: JSON.stringify({ action: "usePreferred" }),
+  });
+  if (buttonNode) buttonNode.disabled = false;
+  if (res.unreachable || !res.ok) {
+    note("the sign-in as the preferred service type did not reach the program (" + res.status + ")");
+    toast(t("msg.stale"), true);
+    return;
+  }
+  const result = res.data.result || {};
+  note("the sign-in as the preferred service type was asked for", {
+    moved: !!res.data.moved,
+    message: result.message,
+  });
+  if (!res.data.moved) {
+    toast(t("acct.preferred.none"));
+  } else if (result.success) {
+    toast(t("acct.preferred.moved", operatorName(res.data.isp || "")));
+  } else {
+    // The portal's reply is localised by its ret_code, the way the login self
+    // test localises it.
+    const reason = state.i18n["retcode." + (result.retCode || "")] || result.message || "";
+    toast(t("acct.preferred.failed", reason), true);
+  }
+  refreshStatus();
+}
+
 /* ---------- probes ---------- */
 
 function renderProbes(list) {
@@ -801,7 +866,7 @@ function wire() {
 
   ["f-interval", "f-timeout", "f-portal", "f-eportal", "f-prefix", "f-jsversion"]
     .forEach((id) => $(id).addEventListener("input", markDirty));
-  ["f-remember", "f-autologin", "f-internet", "f-verbose"]
+  ["f-remember", "f-autologin", "f-internet", "f-verbose", "f-preferred"]
     .forEach((id) => $(id).addEventListener("change", markDirty));
 
   $("f-language").addEventListener("change", () => switchLanguage($("f-language").value));
@@ -932,6 +997,7 @@ function wireAccounts() {
       case "down": moveAccount(index, 1); break;
       case "remove": removeAccount(index); break;
       case "test": testEntry(index, target); break;
+      case "usePreferred": usePreferred(target); break;
       case "unservice":
         target.closest(".chip").remove();
         refreshPicker(card);

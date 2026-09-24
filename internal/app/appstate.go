@@ -151,3 +151,35 @@ func (a *AppState) TestLogin(attempt config.Attempt) LoginTest {
 		After:   client.QueryStatus(),
 	}
 }
+
+// UsePreferred signs in again as the service type its entry puts first, while the
+// session is up on a later one, which is what the settings page's button asks
+// for. The portal keeps one session per client address, so this replaces the
+// session or is refused; either way nothing is logged out on purpose, and the
+// second sign-in is what the session is left to decide.
+//
+// The second return value says whether there was anything to move the session
+// onto. A session that is already down, or one that is on the first service type
+// already, has nothing to do here, and the page says that instead of showing a
+// login reply that was never asked for.
+func (a *AppState) UsePreferred() (LoginTest, bool) {
+	cfg := a.Config()
+	client := portal.NewClient(cfg)
+	before := client.QueryStatus()
+	if !before.Online {
+		// Nothing to move: the session is down, and the next check signs in on
+		// its own - in the order of the list, which is the first service type.
+		return LoginTest{Before: before, After: before}, false
+	}
+	attempt, ok := cfg.PreferredFor(before.Account)
+	if !ok {
+		return LoginTest{Before: before, After: before}, false
+	}
+	result := client.Login(before, attempt)
+	return LoginTest{
+		Attempt: attempt,
+		Before:  before,
+		Result:  result,
+		After:   client.QueryStatus(),
+	}, true
+}

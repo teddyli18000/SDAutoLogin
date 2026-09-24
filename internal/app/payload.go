@@ -66,8 +66,19 @@ type apiStatus struct {
 	// on, so the page can mark it. It is -1 while nothing has signed in. The
 	// page names the entry itself, so that the account is written in the
 	// language of the interface rather than in the one the log is written in.
-	EntryIndex int          `json:"entryIndex"`
-	Skipped    []apiSkipped `json:"skipped"`
+	EntryIndex int `json:"entryIndex"`
+	// UsedISP is the service type of that entry the session is on, and
+	// PreferredISP the one it should be on when it is on another one. Both are
+	// suffixes, empty for the campus network itself, and the page says them in
+	// the language of the interface the way it says the chips.
+	UsedISP      string `json:"usedIsp"`
+	PreferredISP string `json:"preferredIsp"`
+	// MoveToPreferred says whether there is anything to move the session onto,
+	// which is what the button that signs in again is shown for. It is a flag
+	// of its own because the service type to move onto may be the campus
+	// network itself, whose suffix is empty.
+	MoveToPreferred bool         `json:"moveToPreferred"`
+	Skipped         []apiSkipped `json:"skipped"`
 }
 
 // apiSkipped is one entry of the login list that the portal refused, and how
@@ -103,6 +114,9 @@ func statusPayload(s service.Snapshot) apiStatus {
 		InternetChecked: s.InternetChecked,
 		InternetOK:      s.InternetOK,
 		EntryIndex:      s.EntryIndex,
+		UsedISP:         s.UsedISP,
+		PreferredISP:    s.PreferredISP,
+		MoveToPreferred: s.MoveToPreferred,
 		Skipped:         skipped,
 	}
 }

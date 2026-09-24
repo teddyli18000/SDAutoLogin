@@ -33,6 +33,9 @@ func TestLoadConfigCreatesAFileWithDefaults(t *testing.T) {
 	if !cfg.AutoLogin || !cfg.CheckInternet || !cfg.VerboseLog || !cfg.RememberPassword || !cfg.LogToFile {
 		t.Errorf("every boolean default is meant to be on: %+v", cfg)
 	}
+	if !cfg.SwitchToPreferredService {
+		t.Error("SwitchToPreferredService is off by default, so the order of an entry's service types would not be followed for a session that is already up")
+	}
 	if len(cfg.ProbeURLs) != 3 {
 		t.Errorf("ProbeURLs = %v, want the three default probes", cfg.ProbeURLs)
 	}
@@ -516,6 +519,81 @@ func TestMatchIsNotFooledByAnEntryWithoutAService(t *testing.T) {
 	}
 	if index, isp := cfg.Match(",0,23D001@zgyd"); index != -1 || isp != "" {
 		t.Errorf("Match of a suffixed account = %d %q, want no match", index, isp)
+	}
+}
+
+// TestMatchReadsABareAccountAsTheServiceTypeWithoutASuffix covers what the portal
+// echoes: the account a login was submitted with, written back as it was sent. An
+// account with no suffix on it is therefore a session that was signed in without
+// one - which is what the campus network itself is - and naming the entry's first
+// service type instead would put another operator's name on a session that is not
+// on it, which is exactly the name a reader would then act on.
+func TestMatchReadsABareAccountAsTheServiceTypeWithoutASuffix(t *testing.T) {
+	cfg := &Config{AccountPrefix: ",0,", Accounts: []Account{
+		{Username: "23D001", Password: "p", ISPs: []string{"@zgyd", ""}},
+	}}
+
+	if index, isp := cfg.Match("23D001"); index != 0 || isp != "" {
+		t.Errorf("Match of a bare account = %d %q, want the entry and the campus network", index, isp)
+	}
+	if index, isp := cfg.Match(",0,23D001@zgyd"); index != 0 || isp != "@zgyd" {
+		t.Errorf("Match of a suffixed account = %d %q, want that service type", index, isp)
+	}
+}
+
+// TestPreferredForNamesWhatASessionShouldBeMovedOnto covers what the order of an
+// entry's service types means for a session that is already up: the first one of
+// that entry. Nothing is named when there is nothing to move onto, which is the
+// answer that keeps a working session from being signed in again for no reason.
+func TestPreferredForNamesWhatASessionShouldBeMovedOnto(t *testing.T) {
+	campus := func() Account {
+		return Account{Username: "23D001", Password: "p", ISPs: []string{"", "@zgyd"}}
+	}
+	mobile := func() Account {
+		return Account{Username: "23D001", Password: "p", ISPs: []string{"@zgyd", ""}}
+	}
+
+	cases := []struct {
+		name     string
+		entry    Account
+		reported string
+		want     string
+		moved    bool
+	}{
+		{"a session on the campus network, China Mobile first", mobile(), "23D001", "@zgyd", true},
+		{"a session on China Mobile, the campus network first", campus(), "23D001@zgyd", "", true},
+		{"a session already on the first one", mobile(), "23D001@zgyd", "", false},
+		{"an entry with one service type, so nothing to move onto", Account{
+			Username: "23D001", Password: "p", ISPs: []string{"@zgyd"},
+		}, "23D001", "", false},
+		{"an entry with no password", Account{
+			Username: "23D001", ISPs: []string{"@zgyd", ""},
+		}, "23D001", "", false},
+		{"an entry that is switched off", Account{
+			Username: "23D001", Password: "p", Disabled: true, ISPs: []string{"@zgyd", ""},
+		}, "23D001", "", false},
+		{"an account the list does not name", mobile(), "stranger", "", false},
+		{"no account reported at all", mobile(), "", "", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := &Config{AccountPrefix: ",0,", Accounts: []Account{c.entry}}
+
+			got, ok := cfg.PreferredFor(c.reported)
+			if ok != c.moved {
+				t.Fatalf("PreferredFor(%q) moved = %v, want %v", c.reported, ok, c.moved)
+			}
+			if !c.moved {
+				return
+			}
+			if got.Index != 0 || got.Username != c.entry.Username || got.ISP != c.want {
+				t.Errorf("PreferredFor(%q) = %+v, want entry 0 as %s", c.reported, got, c.want)
+			}
+			if got.Password != c.entry.Password {
+				t.Errorf("PreferredFor(%q) = %+v, want the entry's own password", c.reported, got)
+			}
+		})
 	}
 }
 
