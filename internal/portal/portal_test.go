@@ -433,10 +433,7 @@ func TestTruncateCutsOnACharacterBoundary(t *testing.T) {
 
 func TestLoggedURLsNeverContainThePassword(t *testing.T) {
 	// The login request carries the password in its query string and that URL is
-	// written to the log, so it has to be masked first. It masks the parameter
-	// rather than one particular password, since the login list may hold several
-	// accounts and the one being submitted is the one that must not reach the
-	// log.
+	// written to the log, so it has to be masked first; see MaskSecrets.
 	client := NewClient(&config.Config{})
 	secret := "p@ss@word"
 	raw := "http://portal/eportal/?a=login&user_password=" + url.QueryEscape(secret)
@@ -456,9 +453,8 @@ func TestLoggedURLsNeverContainThePassword(t *testing.T) {
 }
 
 func TestLoginTruncatesALongPortalMessage(t *testing.T) {
-	// The portal's wording is logged and shown on the page and the tooltip, so
-	// a portal that answers with a whole page must not put it all there. The
-	// raw reply is already cut this way; the message has to match.
+	// A portal that answers with a whole page must not put it all on the page and
+	// in the tooltip, so the message goes through the same cut as the raw reply.
 	long := strings.Repeat("z", 400)
 	s := &stubPortal{loginReply: `{"result":0,"ret_code":"99","msg":"` + long + `"}`}
 

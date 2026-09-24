@@ -30,9 +30,8 @@ type stubPortal struct {
 	// session state is unknown.
 	omitResult bool
 	// lag is how many online_list replies after a login still answer what the
-	// portal said before it, which is how the online list lags behind the login
-	// endpoint: it is written a moment later, and a query in between is answered
-	// with "the online data is empty".
+	// portal said before it: the online list is written a moment behind the login
+	// endpoint.
 	lag int
 	// omitResultAfterLogin leaves the result field out of the online_list reply
 	// once a login has been submitted, so the session cannot be read back after
@@ -119,11 +118,9 @@ func (s *stubPortal) start(t *testing.T) *config.Config {
 		if s.online {
 			result = "1"
 		}
-		// The portal echoes the account a login was submitted with, so the stub
-		// does too: which service type the session is on is read off that echo,
-		// and a stub that always named the same account would not show it. Only a
-		// login the stub accepted changes it, since one the portal refused leaves
-		// the session exactly as it was.
+		// The portal echoes the account a login was submitted with, and the stub
+		// does too, since which service type the session is on is read off that
+		// echo. Only an accepted login changes it.
 		account := "s1234567"
 		if s.accepted && len(s.attempted) > 0 {
 			account = strings.TrimPrefix(s.attempted[len(s.attempted)-1], ",0,")
@@ -251,12 +248,9 @@ func fastConfirm(t *testing.T) {
 	t.Cleanup(func() { confirmDelay = previous })
 }
 
-// TestTickSignsInWhenTheOnlineListLagsBehindTheLogin covers the reply that made a
-// login which had worked look like a failure: the portal accepts the login and,
-// in the same second, answers the query about the session with "the online data
-// is empty", because the session is not in the list yet. One read is therefore
-// not an answer to the question, and it is asked again for a moment before the
-// login is called a failure.
+// TestTickSignsInWhenTheOnlineListLagsBehindTheLogin covers the portal that
+// accepts a login and answers the session query before the session is in the
+// list, so one read is not an answer and the login is not called a failure.
 func TestTickSignsInWhenTheOnlineListLagsBehindTheLogin(t *testing.T) {
 	fastConfirm(t)
 	sp := &stubPortal{online: false, afterLogin: boolPtr(true), lag: 1,
@@ -283,10 +277,8 @@ func TestTickSignsInWhenTheOnlineListLagsBehindTheLogin(t *testing.T) {
 }
 
 // TestTickDoesNotCallALoginFailedWhenTheSessionCannotBeReadBack covers the other
-// half of the same report: the portal accepted the login and then cannot be asked
-// about the session at all. Nothing is known about that login, so it is not a
-// failure, and the state says what is true instead - signed in, not confirmed yet
-// - which the next check settles.
+// half of the same report: the portal accepted the login and cannot be asked
+// about the session, so the state says signed in, not confirmed yet.
 func TestTickDoesNotCallALoginFailedWhenTheSessionCannotBeReadBack(t *testing.T) {
 	fastConfirm(t)
 	sp := &stubPortal{online: false, omitResultAfterLogin: true,
@@ -307,12 +299,9 @@ func TestTickDoesNotCallALoginFailedWhenTheSessionCannotBeReadBack(t *testing.T)
 	}
 }
 
-// TestTickMovesASessionOntoTheServiceTypeTheEntryPutsFirst covers the session
-// that was already up when the program started, on a service type the entry does
-// not put first. The portal keeps one session per client address, so following the
-// order of the list means signing in again; the echo of the account is what says
-// which service type the session is on, since the portal writes back what a login
-// was submitted with.
+// TestTickMovesASessionOntoTheServiceTypeTheEntryPutsFirst covers a session that
+// was already up on a service type the entry does not put first. The portal keeps
+// one session per client address, so following the list means signing in again.
 func TestTickMovesASessionOntoTheServiceTypeTheEntryPutsFirst(t *testing.T) {
 	sp := &stubPortal{online: true, loginBody: `{"result":1,"ret_code":"0"}`}
 	cfg := sp.start(t)
@@ -369,9 +358,8 @@ func TestTickLeavesASessionAloneWhenTheOrderIsNotToBeEnforced(t *testing.T) {
 		t.Errorf("logins = %d, want none while the order is not enforced", logins)
 	}
 	// What the page renders the offer from: the service type the session is on,
-	// the one it should be on, and whether there is anything to move at all. The
-	// last of those is a flag of its own because the campus network itself is a
-	// service type with an empty suffix.
+	// the one it should be on, and whether there is anything to move at all, the
+	// last being a flag of its own because the campus network has an empty suffix.
 	if snap.UsedISP != "" || snap.PreferredISP != "@zgyd" || !snap.MoveToPreferred {
 		t.Errorf("the snapshot offers used=%q preferred=%q move=%v, want the campus network moved onto China Mobile",
 			snap.UsedISP, snap.PreferredISP, snap.MoveToPreferred)
@@ -379,9 +367,8 @@ func TestTickLeavesASessionAloneWhenTheOrderIsNotToBeEnforced(t *testing.T) {
 }
 
 // TestTickLeavesASessionAloneWhenAutoLoginIsOff covers the other switch that
-// answers whether this program signs in on its own. Moving a session is a
-// sign-in, so a reader who turned automatic login off is not logged in for it;
-// the page's button is offered either way.
+// answers whether this program signs in on its own: moving a session is a
+// sign-in, so automatic login off leaves it to the page's button.
 func TestTickLeavesASessionAloneWhenAutoLoginIsOff(t *testing.T) {
 	sp := &stubPortal{online: true, loginBody: `{"result":1,"ret_code":"0"}`}
 	cfg := sp.start(t)
@@ -406,11 +393,9 @@ func TestTickLeavesASessionAloneWhenAutoLoginIsOff(t *testing.T) {
 }
 
 // TestTickAsksAgainWhenThePortalWillNotSignInAgainWhileTheSessionIsUp covers the
-// portal that refuses a second sign-in. The session is left as it is, what the
-// portal said is kept so the page and the tray can report it, and the entry is
-// not put out of the running for it - the account was not what was refused. The
-// portal is asked again, but not on every check: a login every interval against a
-// session the portal is happy with is not something to do.
+// portal that refuses a second sign-in: the session is left as it is, the refusal
+// is kept for the interface, and the entry stays usable. It is not asked every
+// check.
 func TestTickAsksAgainWhenThePortalWillNotSignInAgainWhileTheSessionIsUp(t *testing.T) {
 	sp := &stubPortal{online: true,
 		loginBody: `{"result":0,"ret_code":"1","msg":"wrong account or password"}`}
@@ -851,11 +836,8 @@ func TestStartAndStopCanBeCalledTwice(t *testing.T) {
 }
 
 // TestStopWaitsForTheCheckThatIsRunning covers what a restart does: saving the
-// settings stops the loop and starts another one, and the loop that was stopped
-// has to be gone before the new configuration and client are handed over. A loop
-// that is in the middle of a check would otherwise finish that check with the
-// old passwords and the new endpoints, and both loops would be talking to the
-// portal at once.
+// settings stops the loop and starts another one, and the stopped loop has to be
+// gone before the new configuration and client are handed over.
 func TestStopWaitsForTheCheckThatIsRunning(t *testing.T) {
 	entered := make(chan struct{})
 	finished := make(chan struct{})

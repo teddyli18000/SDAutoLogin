@@ -1,10 +1,10 @@
 // The packaging half of the task runner: the formats this repository publishes,
 // and the pieces they share.
 //
-// An ipk and a deb are the same container, a plain ar archive of a version
-// marker and two tar archives, so that layout is written once, here, and the two
-// formats only describe what goes into it. The rpm and the pacman format are
-// their own thing and live in their own files next to this one.
+// An ipk and a deb are the same container, a plain ar archive of a version marker
+// and two tar archives, so that layout is written once here and the two formats
+// only describe what goes into it. The rpm and the pacman formats live in their
+// own files next to this one.
 
 package main
 
@@ -29,9 +29,9 @@ import (
 const (
 	// pkgDir is where the packages are written, inside distDir.
 	pkgDir = "packages"
-	// pkgName is the name the packages carry. It is lower case, as OpenWrt and
-	// the Debian archive want it, and it is also the name of the UCI
-	// configuration and of the init script in the OpenWrt package.
+	// pkgName is the name the packages carry. It is lower case, as OpenWrt and the
+	// Debian archive want it, and it is also the name of the UCI configuration and
+	// of the init script in the OpenWrt package.
 	pkgName = "sdautologin"
 	// pkgRelease is the revision of the packaging, bumped when only the files
 	// around the binary change. Every one of these formats spells a version
@@ -48,9 +48,8 @@ const (
 	pkgCopyright = "2026 Zhiqiang Lan"
 	// pkgSection is how Debian and OpenWrt classify the package.
 	pkgSection = "net"
-	// unitFile is the systemd unit every package installs: the same file the
-	// README tells an administrator to copy by hand, since one file used twice
-	// is one file that cannot drift.
+	// unitFile is the systemd unit every package installs, and the same file the
+	// README tells an administrator to copy by hand, so the two cannot drift.
 	unitFile = "packaging/systemd/system/sdautologin.service"
 	// sysusersFile declares the system user the service runs as, so that no
 	// maintainer script has to run adduser. systemd reads the directory it is
@@ -180,11 +179,11 @@ const (
 // ext is the file name ending an archive with this compression carries.
 func (c compression) ext() string { return "tar." + string(c) }
 
-// tarPack packs entries into a tar archive with the named compression, writing
-// the directories the files live in as entries of their own. A Debian package
-// and an Arch one both carry them, and a package manager takes away only the
-// directories it was told about: an archive that names none leaves every one of
-// them behind, empty.
+// tarPack packs entries into a tar archive with the named compression, writing the
+// directories the files live in as entries of their own. A Debian package and an
+// Arch one both carry them, since a package manager takes away only the
+// directories it was told about: an archive that names none leaves them behind,
+// empty.
 func tarPack(entries []pkgEntry, c compression) ([]byte, error) {
 	return tarData(entries, c)
 }
@@ -236,9 +235,9 @@ func tarData(entries []pkgEntry, c compression) ([]byte, error) {
 }
 
 // compressWith runs an external compressor over an archive. The standard library
-// can write gzip and nothing else, and a missing tool is named in the error: a
-// packaging run should not fail with a bare "executable file not found", and the
-// reader has to know what to install.
+// writes gzip and nothing else, and a missing tool is named in the error: a run
+// should not fail with a bare "executable file not found", and the reader has to
+// know what to install.
 func compressWith(tool string, args []string, data []byte) ([]byte, error) {
 	path, err := exec.LookPath(tool)
 	if err != nil {
@@ -418,13 +417,14 @@ func writePackage(root, name string, data []byte) error {
 
 // checksumsFile is the list of digests written next to the packages, in the
 // spelling the sha256sum tool reads and writes: the digest, two spaces and the
-// name. A downloaded release is checked against it, and it is the one part of a
-// release that is useful even when nothing is signed.
+// name. A downloaded release is checked against it, which is useful even when
+// nothing is signed.
 const checksumsFile = "SHA256SUMS"
 
 // writeChecksums writes the digest of every package into SHA256SUMS. The order is
 // the one the file names sort in, so the file itself comes out the same on every
-// run.
+// run. Every task that writes packages calls this as it finishes, so an archive
+// and the file that describes it cannot disagree.
 func writeChecksums(root string) error {
 	dir := filepath.Join(root, distDir, pkgDir)
 	entries, err := os.ReadDir(dir)
@@ -488,8 +488,8 @@ func gzipFile(path string) ([]byte, error) {
 
 // gzipBytes compresses data with gzip, the one compression the standard library
 // writes. The level is the best one rather than the default, since the largest
-// thing this repository compresses is the program a router keeps on its flash,
-// where the few percent it saves are worth the time it takes to pack once.
+// thing compressed here is the program a router keeps on its flash, where the few
+// percent saved are worth the time to pack once.
 func gzipBytes(data []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	gz, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
@@ -508,9 +508,9 @@ func gzipBytes(data []byte) ([]byte, error) {
 // appVersion is the version of the release being built, which is the git tag the
 // checkout is at, so every package is named after the tag that published it and
 // there is one place to change a version. A tree that was unpacked rather than
-// checked out has no tag to read, and the Version variable in the sources is what
-// it falls back on; the release step refuses a tag that disagrees with it, which
-// is what keeps that fallback from drifting.
+// checked out has no tag to read and falls back on the Version variable in the
+// sources; a check refuses a tag that disagrees with it, which keeps the fallback
+// from drifting.
 //
 // A checkout past its tag keeps naming that release, which is what the commit
 // that goes into the program with the version is for.

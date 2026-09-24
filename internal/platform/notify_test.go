@@ -35,9 +35,8 @@ func TestNotifyCommandFollowsTheSystem(t *testing.T) {
 }
 
 func TestAppleScriptStringQuotesWhatWouldEndTheLiteral(t *testing.T) {
-	// A quote would end the literal and a backslash would start an escape of
-	// its own, so both are escaped; everything else, Chinese included, is left
-	// as it is.
+	// A quote would end the literal and a backslash start an escape, so both are
+	// escaped; everything else, Chinese included, is left as it is.
 	got := appleScriptString(`say "hi" \ 完成`)
 	want := `"say \"hi\" \\ 完成"`
 	if got != want {

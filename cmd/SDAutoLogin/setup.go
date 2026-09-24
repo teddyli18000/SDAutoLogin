@@ -38,9 +38,8 @@ func currentLanguageChoice() int {
 }
 
 // runSetupWizard asks for the account details on stdin. It backs the "config"
-// command, which is the only way in on a machine that has neither a desktop nor
-// a browser; a background run is given its account beforehand or through the
-// settings page, since nobody is there to answer questions.
+// command, the only way in on a machine with neither a desktop nor a browser; a
+// background run is given its account beforehand, since nobody is there to answer.
 func runSetupWizard(cfg *config.Config) error {
 	in := bufio.NewReader(os.Stdin)
 	fmt.Println("=== campus network auto login: first run setup ===")

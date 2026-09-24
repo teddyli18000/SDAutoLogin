@@ -11,12 +11,9 @@ import (
 )
 
 // TestTheDirectoryProbeTellsWhatCanBeWritten covers the question the fallback
-// rests on. The directory is probed rather than read off its mode bits, since
-// what makes a temporary directory unusable is usually a mount option or a
-// policy that the mode does not show, so the probe has to be right about the
-// three shapes a machine can be in: a directory of its own, something that is not
-// a directory, and a path that is not there at all. A probe that answered true
-// for the last two would leave the lock file in a directory that cannot hold it.
+// rests on. The probe has to be right about the three shapes a machine can be in:
+// a directory of its own, something that is not a directory, and a path that is not
+// there, since true for the last two would leave the lock file where it cannot go.
 func TestTheDirectoryProbeTellsWhatCanBeWritten(t *testing.T) {
 	dir := t.TempDir()
 	if !dirIsWritable(dir) {

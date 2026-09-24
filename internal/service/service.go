@@ -41,9 +41,9 @@ func (s State) String() string {
 	}
 }
 
-// Code is the stable identifier of a state. It travels as the "state" field of
-// the settings API and as the suffix of the i18n key "state.<code>", so the page
-// and the tray label the same state the same way.
+// Code is the stable identifier of a state: the "state" field of the settings
+// API and the suffix of the i18n key "state.<code>", so the page and the tray
+// label one state one way.
 func (s State) Code() string {
 	switch s {
 	case StateOnline:
@@ -71,36 +71,33 @@ type Snapshot struct {
 	InternetChecked bool
 	InternetOK      bool
 
-	// Entry names the configured account the session was signed in with, and
-	// EntryIndex is its position in the login list, so the settings page can
-	// mark the entry in use. EntryIndex is -1 while nothing has signed in.
+	// Entry names the account the session was signed in with and EntryIndex is
+	// its position in the login list, so the page can mark the entry in use.
+	// EntryIndex is -1 while nothing has signed in.
 	Entry      string
 	EntryIndex int
 	// UsedISP is the service type of that entry the portal says the session is
-	// on: the suffix the entry is submitted with, empty for the campus network
-	// itself. The page names the one the session is on with it, rather than
-	// every type the entry may be used with, which is the difference between
-	// "the campus network" and "one of these two".
+	// on: the suffix the entry was submitted with, empty for the campus network
+	// itself. The page names that one rather than every type the entry may be
+	// used with, which is the difference between "the campus network" and "one
+	// of these two".
 	UsedISP string
-	// Skipped lists the entries that are being left alone for a while: the
-	// portal refused them for a reason time will not fix by itself.
+	// Skipped lists the entries being left alone for a while: the portal refused
+	// them for a reason time will not fix.
 	Skipped []Skipped
-	// PreferredISP is the service type of that entry the session should be on
-	// when it is on another one, which is the first one the entry names, and
-	// MoveToPreferred says whether there is anything to move it onto at all.
-	// The page shows that service type with a button that signs in again, for a
-	// reader who would rather move the session than wait for the next run.
+	// PreferredISP is the service type the session should be on when it is on
+	// another one, which is the first one its entry names, and MoveToPreferred
+	// says whether there is anything to move it onto at all.
 	//
-	// The two are told apart because the service type to move the session onto
-	// may be the campus network itself, which is an empty suffix: the value
-	// alone would say the same thing as "nothing to do".
+	// They are told apart because the type to move onto may be the campus
+	// network itself, an empty suffix: the value alone would say the same thing
+	// as "nothing to do".
 	PreferredISP    string
 	MoveToPreferred bool
 	// SwitchRefused is what the portal answered when it would not sign in again
 	// to move the session, or nil when no such sign-in is outstanding: none was
 	// tried, the one that was tried worked, or the session is already where its
-	// entry puts first. It is what says the session is being left as it is and
-	// that moving it is now up to a reader.
+	// entry puts first. It is what says the session is being left as it is.
 	SwitchRefused *Refusal
 }
 
@@ -115,48 +112,32 @@ type Refusal struct {
 // much of the wait is left.
 type Skipped struct {
 	Index int
-	// Message is what the portal said, and RetCode is the number it answered
-	// with, so the settings page can say the same thing in the language of its
-	// own interface.
+	// Message is what the portal said and RetCode is the number it answered
+	// with, so the page can say the same thing in its own interface language.
 	Message  string
 	RetCode  string
 	RetryInS int
 }
 
 // cooldownPeriod is how long an entry the portal definitively refused is left
-// alone. Submitting a wrong password every check interval would hammer the
-// portal and fill the log for as long as the account stays broken, while a fix
-// behind it (the password was changed, the account was topped up) is noticed
-// when the wait is over, or at once when the settings are saved.
+// alone: long enough not to hammer the portal with a wrong password, short
+// enough to pick up a fix. A save or a manual check clears it at once.
 const cooldownPeriod = 10 * time.Minute
 
 // confirmTries is how many times the session is read back after a login the
-// portal accepted.
-//
-// The login endpoint and the online list are written a moment apart. A portal
-// answers a login with "authentication successful" and, in the same second,
-// answers a query with "the online data is empty", because the session is not in
-// the list yet. One read is therefore not an answer to the question "did it
-// work", and taking it for one reported logins that had in fact succeeded as
-// failures, down to the log line saying the portal accepted the login and still
-// reported offline. Reading it back over the next second and a half costs
-// nothing, since this happens only after a login the portal has already
-// accepted.
+// portal accepted. The login endpoint and the online list are written a moment
+// apart, so one read is not an answer to "did it work" — see confirmLogin.
 const confirmTries = 3
 
 // confirmDelay is how long those reads are spaced. It is a variable so that a
 // test which has to go through this wait does not spend it.
 var confirmDelay = 750 * time.Millisecond
 
-// switchRetryPeriod is how long a move onto the service type an entry puts first
-// is left alone after the portal refused one.
-//
-// A refusal is not the end of it: a portal that will not sign in again while a
-// session is up may be that way about one service type and not another, or a
-// session signed in by hand may be dropped and taken over later, so the move is
-// asked about again. Asking every check would submit a login every fifteen
-// seconds against a session the portal is happy with, which is why the period is
-// this long, and it is a variable so a test does not have to spend it.
+// switchRetryPeriod is how long a move onto the service type an entry puts
+// first is left alone after the portal refused one. A refusal is not final —
+// the answer may change, and a session signed in by hand may be dropped later —
+// but asking every check would submit a login against a session the portal is
+// happy with.
 var switchRetryPeriod = time.Hour
 
 // rejection is a definitively refused attempt and the moment it may be tried
@@ -194,14 +175,13 @@ type Service struct {
 	activeEntry string
 	// rejected holds the attempts the portal refused for a reason of its own,
 	// keyed by config.Attempt.Key, so the check walks past a broken account
-	// instead of submitting it again every interval.
+	// instead of submitting it every interval.
 	rejected map[string]rejection
-	// switchAskedAt is when this session was last signed in again to move it onto
-	// the service type its entry puts first, and switchRefused is what the portal
-	// answered when it would not. A portal that will not sign in while a session
-	// is up is not asked again until switchRetryPeriod has passed, and its answer
-	// is kept so the page and the tray can say the session is being left as it is.
-	// Both are cleared for a new session and when the settings are saved.
+	// switchAskedAt is when this session was last signed in again to move it
+	// onto the service type its entry puts first, and switchRefused is what the
+	// portal answered when it would not. The portal is not asked again until
+	// switchRetryPeriod has passed, and the answer is kept so the page and the
+	// tray can say the session is being left as it is.
 	switchAskedAt time.Time
 	switchRefused *Refusal
 }
@@ -252,14 +232,10 @@ func (s *Service) Start() {
 	logging.Log.Info("service started: %s", cfg.Summary())
 }
 
-// Stop ends the check loop and waits for it to have finished. Waiting is what
-// keeps a restart from running two loops at once: a loop that is in the middle of
-// a check would otherwise carry on with the configuration and the client the
-// restart has just replaced, so both of them would be talking to the portal at
-// the same time, and the one that finished last would publish its own view of a
-// configuration that is no longer in use.
-//
-// It must not be called from the loop itself, since it waits for that loop.
+// Stop ends the check loop and waits for it to have finished: a loop in the
+// middle of a check would otherwise carry on with the configuration and the
+// client the restart has just replaced, and both would talk to the portal at
+// once. It must not be called from the loop itself.
 func (s *Service) Stop() {
 	s.mu.Lock()
 	if !s.running {
@@ -271,10 +247,7 @@ func (s *Service) Stop() {
 	done := s.done
 	s.mu.Unlock()
 
-	// Waited for outside the lock: the loop takes it again on its way out. The
-	// wait is measured, since a check that is in the middle of talking to the
-	// portal is the whole reason this waits at all: a stop that returns at once
-	// is a loop that had nothing in flight.
+	// Waited for outside the lock: the loop takes it again on its way out.
 	asked := time.Now()
 	<-done
 
@@ -299,9 +272,9 @@ func (s *Service) Restart(cfg *config.Config) {
 	s.cfg = cfg
 	s.client = portal.NewClient(cfg)
 	s.rejected = map[string]rejection{}
-	// The settings may be what was wrong: a service type was added, the order
-	// was changed, or the option that moves a session onto the first one was
-	// turned on. A session that was left alone is asked about again at once.
+	// The settings may be what was wrong — a service type was added, the order
+	// changed, the option turned on — so a session that was left alone is asked
+	// about again at once.
 	s.switchAskedAt = time.Time{}
 	s.switchRefused = nil
 	s.mu.Unlock()
@@ -377,9 +350,9 @@ func (s *Service) tick() {
 		}
 
 	case !st.Known:
-		// The portal answered but the session state could not be read. Reading
-		// that as a dropped session would fire a pointless login on every
-		// transient failure, so skip the reconnect for this round.
+		// The portal answered but the state could not be read. Taking that for a
+		// dropped session would fire a pointless login on every transient
+		// failure, so this round does not reconnect.
 		snap.State = StateError
 		snap.Message = "session state unknown: " + st.Message
 		snap.LastError = snap.Message
@@ -391,9 +364,9 @@ func (s *Service) tick() {
 		}
 
 	case st.Online:
-		// A session that is up on another service type of the same entry is
-		// signed in again as the first one, when the configuration asks for it
-		// and when this is the round that first saw it. See switchToPreferred.
+		// A session up on another service type of the same entry is signed in
+		// again as the first one, when the configuration asks for it. See
+		// switchToPreferred.
 		if a, ok := s.preferredPending(cfg, st); ok {
 			snap = s.switchToPreferred(cfg, st, snap, a)
 			break
@@ -420,7 +393,7 @@ func (s *Service) tick() {
 			}
 		}
 		if internetFailed {
-			// Only on the transition, otherwise an unreachable probe host would
+			// Only on the transition: an unreachable probe host would otherwise
 			// warn once per check.
 			if prev.State != StateOnline || prev.InternetOK {
 				logging.Log.Warn("portal reports online but no probe host answered without interception")
@@ -447,8 +420,8 @@ func (s *Service) tick() {
 		snap.State = StateError
 		snap.Message = "no account configured, open the settings window"
 		snap.LastError = snap.Message
-		// Compared by message as well: the previous round may already have been
-		// an Error for a different reason, which would hide this one.
+		// Compared by message too: the round before may already have been an
+		// Error for another reason, which would hide this one.
 		if prev.State != StateError || prev.Message != snap.Message {
 			logging.Log.Warn("%s%s", snap.Message, offline)
 		}
@@ -457,8 +430,8 @@ func (s *Service) tick() {
 		snap = s.signIn(cfg, st, snap, offline)
 	}
 
-	// The entries that are being left alone go into every snapshot, whatever
-	// this round ended up doing, so the page can mark them.
+	// The entries being left alone go into every snapshot, whatever this round
+	// ended up doing, so the page can mark them.
 	snap.Skipped = s.skipped(time.Now())
 
 	logging.Log.Debug("check #%d finished in %d ms: %s", checks, elapsedMS(start), DescribeSnapshot(snap))
@@ -466,18 +439,16 @@ func (s *Service) tick() {
 }
 
 // signIn walks the login list and submits the first attempt that is not being
-// skipped.
-//
-// The two kinds of failure are handled differently. A refusal that blames the
-// account moves on to the next entry; a busy portal, a timeout or an unreadable
-// reply ends the round here, so that a temporary problem does not mark every
-// account as broken at once.
+// skipped. The two kinds of failure are handled differently: a refusal that
+// blames the account moves on to the next entry, while a busy portal, a timeout
+// or an unreadable reply ends the round here, so a temporary problem does not
+// mark every account as broken at once.
 func (s *Service) signIn(cfg *config.Config, st portal.Status, snap Snapshot, offline string) Snapshot {
 	now := time.Now()
 	s.pruneRejected(now)
 
-	// A session is being signed in from scratch, so whatever was tried to move
-	// the one before it does not apply to this one.
+	// This is a session signed in from scratch, so a move asked for on the one
+	// before does not apply to it.
 	s.mu.Lock()
 	s.switchAskedAt = time.Time{}
 	s.switchRefused = nil
@@ -527,8 +498,8 @@ func (s *Service) signIn(cfg *config.Config, st portal.Status, snap Snapshot, of
 				return snap
 			}
 
-			// The portal refused this account for a reason that waiting will not
-			// fix, so it is left alone for a while and the next entry is tried.
+			// Refused for a reason waiting will not fix, so it is left alone for
+			// a while and the next entry is tried.
 			s.reject(a, res, now)
 			logging.Log.Warn("reconnect attempt #%d as %s was refused: %s (ret_code=%s, raw %s)%s",
 				attempt, a.Entry(), res.Message, res.RetCode, portal.Truncate(res.Raw), offline)
@@ -536,8 +507,8 @@ func (s *Service) signIn(cfg *config.Config, st portal.Status, snap Snapshot, of
 				logging.Log.Warn("entry %d is left alone for %s, moving on to the next account",
 					a.Index+1, shortDuration(cooldownPeriod))
 			} else {
-				// Saying that it moves on when there is nothing left to move on
-				// to would be the one line a single account install ever sees.
+				// Nothing is left to move on to, and saying it does would be the
+				// one line a single-account installation ever sees.
 				logging.Log.Warn("entry %d is left alone for %s, and there is no entry after it",
 					a.Index+1, shortDuration(cooldownPeriod))
 			}
@@ -548,18 +519,15 @@ func (s *Service) signIn(cfg *config.Config, st portal.Status, snap Snapshot, of
 			continue
 		}
 
-		// The login endpoint can report success while the portal still shows
-		// the client as offline, so confirm before declaring victory. See
-		// confirmLogin for why that is asked more than once.
+		// The login endpoint can report success while the portal still shows the
+		// client as offline, so confirm before declaring victory.
 		verify := s.confirmLogin()
 		if !verify.Online {
 			if !verify.Known {
-				// The portal could not be asked whether the login took, so
-				// nothing is known about it. That is not a failure, and calling
-				// it one would be a warning the next check has to take back:
-				// the session is left as "signing in" and the next check
-				// settles it, which is the same thing a status that cannot be
-				// read does on the way in.
+				// Nothing is known about the login, and that is not a failure:
+				// calling it one would be a warning the next check has to take
+				// back. The state stays "signing in" and the next check settles
+				// it.
 				snap.State = StateLoggingIn
 				snap.Message = "signed in as " + a.Entry() + ", not confirmed yet"
 				logging.Log.Warn("reconnect attempt #%d as %s: the login was accepted and the session could not be read back within %s (%s), the next check settles it, raw login reply %s",
@@ -592,7 +560,7 @@ func (s *Service) signIn(cfg *config.Config, st portal.Status, snap Snapshot, of
 	return s.allRefused(snap, now, offline)
 }
 
-// confirmLogin reads the session back after a login the portal accepted, and
+// confirmLogin reads the session back after a login the portal accepted and
 // hands back what the portal said. See confirmTries.
 func (s *Service) confirmLogin() portal.Status {
 	verify := s.client.QueryStatus()
@@ -604,9 +572,8 @@ func (s *Service) confirmLogin() portal.Status {
 }
 
 // signedIn is what a login the portal confirmed leaves behind: the snapshot the
-// interface is shown, and the session facts every later snapshot is built from.
-// verb is how the log and the page word it, "signed in as" for a sign-in and
-// "switched to" for a session that was moved onto another service type.
+// interface is shown and the session facts every later snapshot is built from.
+// verb is how the log and the page word it: "signed in as" or "switched to".
 func (s *Service) signedIn(snap Snapshot, a config.Attempt, verify portal.Status, verb string) Snapshot {
 	last := time.Now().Format("01-02 15:04:05")
 	entry := a.Entry()
@@ -615,8 +582,8 @@ func (s *Service) signedIn(snap Snapshot, a config.Attempt, verify portal.Status
 	s.failStreak = 0
 	s.lastOnlineAt = time.Now()
 	s.activeIndex, s.activeEntry = a.Index, entry
-	// The session is a new one, so a refusal to move the one before it is neither
-	// reported any more nor worth waiting on.
+	// A new session: a refusal to move the one before it is neither reported any
+	// more nor worth waiting on.
 	s.switchRefused = nil
 	s.switchAskedAt = time.Time{}
 	s.mu.Unlock()
@@ -627,10 +594,8 @@ func (s *Service) signedIn(snap Snapshot, a config.Attempt, verify portal.Status
 	snap.ClientIP = verify.ClientIP
 	snap.OnlineSince = verify.OnlineSince
 	snap.Entry, snap.EntryIndex = entry, a.Index
-	// The login went out with this service type appended to the account, and the
-	// portal echoes what it was given, so this is the type the session is on. The
-	// switch is left with nothing to do: it has just been made, or was asked
-	// once for this session already.
+	// The portal echoes the account it was given, so the type the login went out
+	// with is the type the session is on. The switch has nothing left to do.
 	snap.UsedISP = a.ISP
 	snap.MoveToPreferred = false
 	snap.Message = verb + " " + entry + " at " + last
@@ -638,13 +603,13 @@ func (s *Service) signedIn(snap Snapshot, a config.Attempt, verify portal.Status
 }
 
 // attribute records which entry of the list the portal says the session is on,
-// so the interface can mark it, including a session this program did not sign in
-// itself. It also says which service type that entry puts first when the session
-// is not on it, which is what the page offers the button for.
+// so the interface can mark it, a session this program did not sign in itself
+// included. It also says which service type that entry puts first when the
+// session is not on it, which is what the page offers a button for.
 func (s *Service) attribute(cfg *config.Config, st portal.Status, snap Snapshot) Snapshot {
 	if st.Account == "" {
-		// A session the portal will not put an account name on cannot be
-		// matched to an entry, so nothing is marked and no move is offered.
+		// Without an account name from the portal there is no entry to match, so
+		// nothing is marked and no move is offered.
 		logging.Log.Debug("the portal reports a session with no account name on it, so it cannot be matched to an entry of the login list")
 		return snap
 	}
@@ -667,16 +632,13 @@ func (s *Service) attribute(cfg *config.Config, st portal.Status, snap Snapshot)
 	if !ok {
 		// The session is where its entry puts first, so a refusal to move it is
 		// no longer news: it is forgotten rather than kept to be reported the
-		// next time the session is somewhere else. The wait is forgotten with
-		// it, since there is nothing being waited on.
+		// next time the session is somewhere else, and the wait with it.
 		s.mu.Lock()
 		hadRefused := s.switchRefused != nil
 		s.switchRefused = nil
 		s.switchAskedAt = time.Time{}
 		s.mu.Unlock()
 		if hadRefused {
-			// A refusal that was on its way to the page and the tray stops
-			// being reported here, so the moment it is dropped is worth a line.
 			logging.Log.Info("the session is on the service type its entry puts first, forgetting the earlier refusal to move it")
 		}
 		return snap
@@ -687,7 +649,7 @@ func (s *Service) attribute(cfg *config.Config, st portal.Status, snap Snapshot)
 	refused := s.switchRefused
 	s.mu.Unlock()
 	if refused != nil {
-		// Read back on every round the session is up, which is what keeps the
+		// Read back every round the session is up, which is what keeps the
 		// page's warning and the tray's tooltip saying the same thing.
 		logging.Log.Debug("the session is still on %s and has not been moved onto %s: the portal refused it (%s, ret_code=%s), the settings page and the tray say so",
 			config.OperatorName(snap.UsedISP), config.OperatorName(a.ISP), refused.Message, refused.RetCode)
@@ -697,26 +659,19 @@ func (s *Service) attribute(cfg *config.Config, st portal.Status, snap Snapshot)
 }
 
 // preferredPending reports the attempt a session that is already up should be
-// moved onto, and false when there is nothing to do.
-//
-// A move is only ever inside one entry of the list: a session on an account the
-// list names, on a service type other than the first one of that entry. Signing
-// in as another entry's account would replace a session that works with one that
-// the order of the list says nothing about - the list is the failover order for
-// signing in, not a ranking of who should be online.
+// moved onto, and false when there is nothing to do. A move only ever happens
+// inside one entry: signing in as another entry's account would replace a
+// working session with one the order of the list says nothing about.
 func (s *Service) preferredPending(cfg *config.Config, st portal.Status) (config.Attempt, bool) {
 	if !cfg.SwitchToPreferredService {
-		// Every "why is my session not being moved" report ends here or at one
-		// of the three returns below, and they look the same from the outside:
-		// the session is online and stays where it is.
 		logging.Log.Debug("not moving the session off %s: the option that moves a session onto the first service type of its entry is off",
 			st.Account)
 		return config.Attempt{}, false
 	}
 	if !cfg.AutoLogin {
-		// Moving a session is a sign-in, and one switch already answers whether
-		// this program signs in on its own. A reader who turned that off is left
-		// to the button on the page, which is offered either way.
+		// Moving a session is a sign-in like any other, and one switch already
+		// answers whether this program signs in on its own. A reader who turned
+		// that off is left to the button on the page.
 		logging.Log.Debug("not moving the session off %s: automatic login is off, so only the button on the settings page asks for it",
 			st.Account)
 		return config.Attempt{}, false
@@ -725,20 +680,15 @@ func (s *Service) preferredPending(cfg *config.Config, st portal.Status) (config
 	askedAt := s.switchAskedAt
 	s.mu.Unlock()
 	if wait := switchRetryPeriod - time.Since(askedAt); !askedAt.IsZero() && wait > 0 {
-		// Asked not long ago, and the portal would not move the session then. It
-		// is asked again when the wait is over: the answer may change, and a
-		// login every check against a session the portal is happy with is not
-		// something to do in the meantime.
 		logging.Log.Debug("not moving the session off %s: it was asked about %s ago and refused, asking again in %s",
 			st.Account, shortDuration(time.Since(askedAt)), shortDuration(wait))
 		return config.Attempt{}, false
 	}
 	a, ok := cfg.PreferredFor(st.Account)
 	if !ok {
-		// Two things look alike here: the session is already on the service
-		// type its entry puts first, so there is nothing to move it onto, or
-		// its account names no entry of the list at all. The entry label tells
-		// them apart, because it is empty for the second one.
+		// Two things look alike: the session is already on the type its entry
+		// puts first, or its account names no entry at all. The entry label tells
+		// them apart, being empty for the second.
 		if stays := s.entryLabel(cfg, st); stays != "" {
 			logging.Log.Debug("not moving the session off %s: that is the service type its entry puts first", stays)
 		} else {
@@ -747,8 +697,8 @@ func (s *Service) preferredPending(cfg *config.Config, st portal.Status) (config
 		return config.Attempt{}, false
 	}
 	if s.cooling(a) {
-		// The first service type is being left alone for a while, so the session
-		// stays where it is rather than moving onto something that was refused.
+		// The session stays where it is rather than moving onto something that
+		// was just refused.
 		logging.Log.Debug("not moving the session off %s onto %s: that attempt is still being left alone after the portal refused it",
 			st.Account, a.Entry())
 		return config.Attempt{}, false
@@ -762,9 +712,9 @@ func (s *Service) preferredPending(cfg *config.Config, st portal.Status) (config
 
 // switchToPreferred signs in again while the session is up, to move it onto the
 // service type its entry puts first. The portal keeps one session per client
-// address, so this either replaces the session or is refused; either way the
-// session is left working, and a refusal is not treated as the account being
-// broken: the entry has to stay usable for when the session does drop.
+// address, so this either replaces the session or is refused. Either way the
+// session is left working and a refusal does not count against the account: the
+// entry has to stay usable for when the session does drop.
 func (s *Service) switchToPreferred(cfg *config.Config, st portal.Status, snap Snapshot, a config.Attempt) Snapshot {
 	s.mu.Lock()
 	s.switchAskedAt = time.Now()
@@ -822,9 +772,8 @@ func (s *Service) entryLabel(cfg *config.Config, st portal.Status) string {
 }
 
 // stillOnline is the snapshot for a round that found the session up and did not
-// move it, either because the portal would not sign in again or because that is
-// not known yet. The session is still a working one, so it is reported as online
-// with the reason written into the message.
+// move it. It is a working session, so it is reported online with the reason in
+// the message.
 func (s *Service) stillOnline(snap Snapshot, st portal.Status, message string) Snapshot {
 	s.mu.Lock()
 	s.lastOnlineAt = time.Now()
@@ -838,15 +787,15 @@ func (s *Service) stillOnline(snap Snapshot, st portal.Status, message string) S
 }
 
 // allRefused is the snapshot for a round in which every entry is either refused
-// or still waiting out a refusal. The refusals themselves were logged when they
-// happened; this says what the next try is waiting for.
+// or still waiting out a refusal. The refusals were logged when they happened;
+// this says what the next try is waiting for.
 func (s *Service) allRefused(snap Snapshot, now time.Time, offline string) Snapshot {
 	snap.State = StateError
 	skipped := s.skipped(now)
 	wait := shortDuration(s.shortestWait(now))
 	if len(skipped) == 1 {
-		// One entry is the common case, and its reason tells the user more than
-		// the news that the list was walked.
+		// One entry is the common case, and its reason says more than the news
+		// that the list was walked.
 		snap.Message = fmt.Sprintf("%s, trying again in %s", skipped[0].Message, wait)
 	} else {
 		snap.Message = fmt.Sprintf("every account was refused by the portal, trying again in %s", wait)
@@ -858,7 +807,7 @@ func (s *Service) allRefused(snap Snapshot, now time.Time, offline string) Snaps
 
 // transient reports whether a rejected login says something about the portal
 // rather than about the account. Only the codes that name the account itself
-// give up on an entry; an answer that does not, or one this program has never
+// give up on an entry; anything else, including a code this program has never
 // seen, is left for the next check instead of being held against the account.
 func transient(res portal.LoginResult) bool {
 	switch res.RetCode {
@@ -900,11 +849,10 @@ func (s *Service) pruneRejected(now time.Time) {
 	logExpired(expired)
 }
 
-// pruneRejectedLocked is pruneRejected with the lock already held. It drops the
-// refusals whose wait is over and appends them to dst rather than making a slice
-// of its own, so a caller that hands it a buffer with room to spare keeps this
-// free of allocation while s.mu is held. A nil dst is fine, and is what the
-// once-per-round caller passes: it then allocates only when a wait really ends.
+// pruneRejectedLocked is pruneRejected with the lock already held. It appends
+// what it drops to dst rather than making a slice of its own, so a caller with a
+// buffer to spare keeps this free of allocation while s.mu is held; a nil dst is
+// fine and allocates only when a wait really ends.
 func (s *Service) pruneRejectedLocked(dst []rejection, now time.Time) []rejection {
 	for key, r := range s.rejected {
 		if !now.Before(r.until) {
@@ -915,11 +863,10 @@ func (s *Service) pruneRejectedLocked(dst []rejection, now time.Time) []rejectio
 	return dst
 }
 
-// logExpired reports the refusals whose wait just ended, in the one place the
-// drop happens: a round that is offline prunes through signIn and one that is
-// online through skipped, so a line in either of them alone would be missing
-// from the other, which is exactly the path an operator watches to tell whether
-// the cleanup ran. The caller runs this after releasing the lock.
+// logExpired reports the refusals whose wait just ended, called after the lock
+// is released. It is one function because both paths that prune — signIn for a
+// round that is offline, skipped for one that is online — have to log it: a line
+// in either alone would be missing from the other.
 func logExpired(expired []rejection) {
 	for _, r := range expired {
 		logging.Log.Info("entry %d is out of its %s cooldown and is tried again (it had been refused: %s, ret_code=%s)",
@@ -929,16 +876,14 @@ func logExpired(expired []rejection) {
 
 // skipped renders the entries that are being left alone, for the interface.
 //
-// The refusals whose wait is over are forgotten here first, so an entry a round
-// that never reached signIn let expire is not reported as still being left alone
-// with no wait left.
+// It prunes first, so an entry a round that never reached signIn let expire is
+// not reported as still being left alone with no wait left.
 //
-// The locked section allocates nothing: the two slices it fills are made in
-// between from a count read under a short lock of its own, so a concurrent
-// Snapshot is never queued behind the allocator. The count can only shrink
-// between the two passes (the one caller that adds a refusal runs on this same
-// goroutine, and the other two only empty the map), so the buffers always have
-// room and the appends never grow.
+// The locked section allocates nothing: the two slices are made in between from
+// a count read under a short lock of its own, so a concurrent Snapshot is never
+// queued behind the allocator. The count can only shrink between the two passes
+// — the one caller that adds a refusal runs on this same goroutine, and the
+// others only empty the map — so the buffers always have room.
 func (s *Service) skipped(now time.Time) []Skipped {
 	s.mu.Lock()
 	size := len(s.rejected)
@@ -952,9 +897,9 @@ func (s *Service) skipped(now time.Time) []Skipped {
 	for _, r := range s.rejected {
 		retryIn := int(r.until.Sub(now).Round(time.Second).Seconds())
 		if retryIn < 1 {
-			// The entry is still being held back, so "0s" would read as "due
-			// now" and a negative value as nonsense. Anything below one second
-			// is rounded up to it.
+			// The entry is still held back, so "0s" would read as "due now" and
+			// a negative value as nonsense. Anything below a second is rounded
+			// up to it.
 			retryIn = 1
 		}
 		out = append(out, Skipped{
@@ -966,9 +911,8 @@ func (s *Service) skipped(now time.Time) []Skipped {
 	}
 	s.mu.Unlock()
 
-	// slices.SortFunc rather than sort.Slice: the latter goes through
-	// reflect.Swapper and allocates on every call, which sort.Slice's own
-	// comparison func does not need.
+	// slices.SortFunc rather than sort.Slice, which goes through
+	// reflect.Swapper and allocates on every call.
 	slices.SortFunc(out, func(a, b Skipped) int { return cmp.Compare(a.Index, b.Index) })
 	logExpired(expired)
 	return out
@@ -1024,8 +968,8 @@ func DescribeSnapshot(s Snapshot) string {
 	if s.Account != "" {
 		out += " (account " + s.Account + ")"
 	}
-	// The entry is left out when the message already names it, as the line
-	// written right after a successful sign-in does.
+	// Left out when the message already names it, as the line written right
+	// after a successful sign-in does.
 	if s.Entry != "" && !strings.Contains(s.Message, s.Entry) {
 		out += fmt.Sprintf(" (entry %d: %s)", s.EntryIndex+1, s.Entry)
 	}
@@ -1050,8 +994,8 @@ func elapsedMS(start time.Time) int64 {
 }
 
 // failStreakErrorLevel is the number of consecutive rejections after which the
-// summary line is raised to ERROR, so a sustained outage stands out from a
-// single transient failure.
+// summary line is raised to ERROR, so a sustained outage stands out from one
+// transient failure.
 const failStreakErrorLevel = 3
 
 // offlineSuffix renders ", offline for 4m10s" once a previous online moment is

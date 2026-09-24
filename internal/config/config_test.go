@@ -259,14 +259,10 @@ func TestNormalizeClampsOutOfRangeValues(t *testing.T) {
 }
 
 // TestNormalizeClampsValuesThatWouldWrapTheDuration covers the other end of the
-// range. Both values become a time.Duration by multiplication, and a large enough
-// one wraps into a negative duration: the check timer then fires at once, which
-// turns the loop into a hot loop against the portal, and the request timeout is
-// already past before the request is sent.
+// range: the upper bounds, whose reason is given at their definitions.
 func TestNormalizeClampsValuesThatWouldWrapTheDuration(t *testing.T) {
-	// A value that fits in an int on every platform the program is built for,
-	// and is far past the bound, so the clamp is what has to hold whatever the
-	// multiplication would do with it here.
+	// A value far past the bound that still fits in an int on every platform
+	// the program is built for, so the clamp is what has to hold here.
 	const tooLarge = 1 << 30
 	cfg := &Config{CheckIntervalSeconds: tooLarge, HTTPTimeoutSeconds: tooLarge}
 
@@ -523,11 +519,10 @@ func TestMatchIsNotFooledByAnEntryWithoutAService(t *testing.T) {
 }
 
 // TestMatchReadsABareAccountAsTheServiceTypeWithoutASuffix covers what the portal
-// echoes: the account a login was submitted with, written back as it was sent. An
-// account with no suffix on it is therefore a session that was signed in without
-// one - which is what the campus network itself is - and naming the entry's first
-// service type instead would put another operator's name on a session that is not
-// on it, which is exactly the name a reader would then act on.
+// echoes: the account a login was submitted with, written back as it was sent. A
+// bare account is therefore a session signed in without a suffix, which is the
+// campus network itself, and naming the entry's first service type instead would
+// put another operator's name on a session that is not on it.
 func TestMatchReadsABareAccountAsTheServiceTypeWithoutASuffix(t *testing.T) {
 	cfg := &Config{AccountPrefix: ",0,", Accounts: []Account{
 		{Username: "23D001", Password: "p", ISPs: []string{"@zgyd", ""}},
@@ -624,11 +619,9 @@ func TestConfiguredNeedsOneEntryThatCanSignIn(t *testing.T) {
 	}
 }
 
-// The settings page is never given a password, so what it sends back carries an
-// empty one for every entry the reader did not type into. That empty field means
-// "the password already stored", and it has to survive a reordering of the list,
-// which is why the entries are matched up by their account rather than by their
-// position.
+// See KeepPasswordsFrom: an empty password from the page means "the password
+// already stored", and it has to survive a reordering of the list, which is why
+// the entries are matched up by their account rather than by their position.
 func TestAnEntryKeepsThePasswordThePageDidNotSend(t *testing.T) {
 	stored := &Config{Accounts: []Account{
 		{Username: "first", Password: "one", ISPs: []string{""}},

@@ -67,10 +67,9 @@ func TestTheOpenWrtPackageNamesTheSameVersion(t *testing.T) {
 }
 
 // TestAValueIsReadFromEitherDeclaration covers the two shapes the payload file
-// declares its strings in: a constant of its own and a block of variables. The
-// value is read with a pattern over the source, so a shape it does not expect
-// reads as a value that is not there, and the packaging stops over a declaration
-// that is fine.
+// declares its strings in: a constant of its own and a block of variables. The value
+// is read with a pattern over the source, so a shape it does not expect reads as a
+// value that is not there, and the packaging stops over a declaration that is fine.
 func TestAValueIsReadFromEitherDeclaration(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "app")
@@ -190,12 +189,11 @@ func TestTheLinkerWritesIntoTheVariablesTheProgramReads(t *testing.T) {
 	}
 }
 
-// TestTheWindowsResourcesCarryTheVersionOfTheSources covers the one generated
-// file that a build links rather than makes: the resource object carries the icon
-// and the version information, the resources task writes it for the tag the tree
-// is at, and nothing regenerates it in the meantime. A tag that moved without that
-// task being run leaves the file version Explorer shows naming the release before
-// it, while the program itself reports the new one.
+// TestTheWindowsResourcesCarryTheVersionOfTheSources covers the one generated file a
+// build links rather than makes. The resources task writes it for the tag the tree is
+// at and nothing regenerates it in the meantime, so a tag that moved without that task
+// being run leaves the version Explorer shows naming the release before it, while the
+// program reports the new one.
 func TestTheWindowsResourcesCarryTheVersionOfTheSources(t *testing.T) {
 	root := testRoot(t)
 	version, err := appSourceString(root, "Version")

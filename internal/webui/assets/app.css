@@ -1,14 +1,12 @@
-/* The settings page: one stylesheet, no framework, no build step. It is an
-   application shell rather than a document — a sidebar, a header and a status
-   strip across the top, and a content column whose panels and fields flow into
-   as many columns as the window has room for, so there is no width at which the
-   page falls between two layouts.
+/* The settings page: one stylesheet, no framework, no build step. An application
+   shell — sidebar, header, status strip and a content column whose panels and
+   fields flow into as many columns as the window has room for.
 
-   Every colour comes from the properties below, every gap is a step of --sp-*,
-   every size of text a step of --fs-*. The accent is spent on the primary
-   action, on links, on focus rings and on the current entry of the sidebar.
-   Everything else is grey: a control panel is read by its numbers, and paint on
-   the rest of it only competes with them. */
+   Every colour comes from the properties below, every gap a step of --sp-*,
+   every text size a step of --fs-*. The accent is spent on the primary action,
+   on links, on focus rings and on the current sidebar entry; everything else is
+   grey, because a control panel is read by its numbers and paint on it only
+   competes with them. */
 
 :root {
   color-scheme: light dark;
@@ -132,9 +130,7 @@ body {
 
 h1 { margin: 0; font-size: var(--fs-lg); font-weight: 600; line-height: 1.25; }
 
-/* A panel title is a small heading over a hairline. It used to be an eyebrow in
-   capitals with a coloured tick in front of it, which is one decoration more
-   than a heading needs. */
+/* A panel title is a small heading over a hairline. */
 h2 {
   margin: 0 0 var(--sp-3);
   padding-bottom: var(--sp-2);
@@ -184,10 +180,9 @@ a:hover { text-decoration: underline; }
 .status-pill[data-state="online"] .dot { background: var(--ok); }
 .status-pill[data-state="loggingIn"] .dot { background: var(--warn); }
 .status-pill[data-state="error"] .dot { background: var(--err); }
-/* A session that is up and that could not be moved where the login list says it
-   should be: the state itself is fine, so the dot is what says there is
-   something to look at. It comes after the rules above, since the state it
-   qualifies is the one they colour. */
+/* A session that is up and could not be moved where the login list says it should
+   be: the state is fine, so the dot is what says there is something to look at.
+   It follows the rules above, since it qualifies the state they colour. */
 .state-pill.attention .dot { background: var(--warn); }
 
 /* ---------- status strip ---------- */
@@ -281,10 +276,8 @@ main { grid-area: main; padding: var(--sp-5); }
 main > section { max-width: var(--content-w); margin: 0 auto; }
 
 .panel { display: none; }
-/* The panels are one column. Laying them out side by side was tried and looked
-   worse: three of them over two columns leave the short one with a hole beside
-   it that never closes, and the width that bought was better spent on more
-   fields per row inside each panel. */
+/* The panels are one column: the width is better spent on more fields per row
+   inside a panel than on laying the panels side by side. */
 .panel.active {
   display: flex;
   flex-direction: column;
@@ -313,10 +306,9 @@ main > section { max-width: var(--content-w); margin: 0 auto; }
 /* ---------- one label and its control ---------- */
 
 /* A pair is stacked rather than a label column beside a field column: the fields
-   of a panel can then flow into two, three or four columns as the window grows,
-   which a fixed label column cannot do. 420px keeps a URL or a path readable
-   without leaving the row half empty, and is what makes the settings panels come
-   out as three columns at the content width. */
+   can then flow into two, three or four columns as the window grows, which a
+   fixed label column cannot do. 420px keeps a URL or a path readable without
+   leaving the row half empty, and gives the settings panels three columns. */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
@@ -416,9 +408,7 @@ input:disabled, select:disabled { opacity: .55; }
 .btn.primary:hover { filter: brightness(1.08); }
 /* No button is drawn without its box, whatever class it carries: a secondary
    action that is only a word among other words does not read as something to
-   press, and the test buttons are the ones nobody finds. The classes stay
-   because the page names them; they differ in colour only — the accent for the
-   one primary action, red for the destructive one. */
+   press. The classes stay because the page names them, and differ in colour. */
 .btn.danger { color: var(--err); }
 .btn.danger:hover { background: var(--err-weak); border-color: var(--err); }
 .btn:disabled { opacity: .5; cursor: default; filter: none; }
@@ -542,9 +532,9 @@ input:disabled, select:disabled { opacity: .55; }
 .switch input:checked::after { transform: translateX(12px); }
 .switch input:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-weak); }
 
-/* The three fields of an account: 340px is the width at which the list of
-   service types still has room for its picker, and it is what lets two of them
-   share a row in the column the accounts panel is given on a wide window. */
+/* The three fields of an account: 340px is the width at which the picker for the
+   service types still fits, and what lets two fields share a row in the column
+   the accounts panel is given on a wide window. */
 .account-body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
@@ -625,9 +615,9 @@ input:disabled, select:disabled { opacity: .55; }
 }
 
 /* The card of the account the session is on, while that entry lists another
-   service type to move it to: where the session is, where the entry says it
-   should be, and the way to move it there. It takes a line of its own under the
-   test button. */
+   service type to move it to: where the session is, where the entry says it should
+   be, and the way to move it there. It takes a line of its own under the test
+   button. */
 .account-preferred { flex: 1 1 100%; }
 .account-preferred .hint { margin: 0 0 var(--sp-2); }
 /* The line the portal's refusal is reported on. The session is up, so this is
@@ -662,11 +652,11 @@ input:disabled, select:disabled { opacity: .55; }
 
 /* ---------- the action bar ---------- */
 
-/* The end of the form, not a bar floating over it: the buttons belong to the
-   thing they save, and a panel that has already been saved does not need to keep
-   them on screen. The padding is what lets the bar span the window while its
-   buttons stay in the column above it — half of whatever the content column is
-   wider than the cap, or the ordinary gutter when it is not. */
+/* The end of the form, not a bar floating over it: the buttons belong to the thing
+   they save, so a panel that has already been saved need not keep them on screen.
+   The padding is what lets the bar span the window while its buttons stay in the
+   column above it — half of whatever the content column is wider than the cap, or
+   the ordinary gutter when it is not. */
 .actionbar {
   grid-area: foot;
   display: flex;
@@ -717,11 +707,10 @@ input:disabled, select:disabled { opacity: .55; }
 
 /* ---------- wide windows ---------- */
 
-/* 常规 is the one tab with a list in it: a list wants width and the settings
-   beside it do not. So its panels stop being three wide bands, one under the
-   other with mostly empty box between them, and become two columns — the
-   accounts panel on the wide side, the two settings panels stacked in a column
-   of their own, where each is narrow enough to be a single column of fields. */
+/* General is the one tab with a list in it, and a list wants width the settings
+   beside it do not: its panels become two columns — the accounts panel on the
+   wide side, the two settings panels stacked in a column of their own, each
+   narrow enough to be a single column of fields. */
 @media (min-width: 1200px) {
   #panel-general.active {
     display: grid;
@@ -737,8 +726,7 @@ input:disabled, select:disabled { opacity: .55; }
 
 /* One breakpoint, and only because a sidebar cannot become a list on its own:
    below this the entries move above the content and scroll sideways. Everything
-   inside the content — panels and fields alike — is already sized by the window
-   and needs nothing here. */
+   inside the content is already sized by the window and needs nothing here. */
 @media (max-width: 860px) {
   body {
     grid-template-columns: minmax(0, 1fr);

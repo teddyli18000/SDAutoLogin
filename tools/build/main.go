@@ -1,12 +1,11 @@
 // Command build is the task runner for this repository. Every build flag lives
 // here, so the wrapper scripts and the CMake targets call these tasks instead of
-// repeating a command line and drifting apart.
+// repeating a command line and drifting apart. It uses the standard library only,
+// so it works offline next to the vendored dependencies and behaves the same on
+// Windows, Linux and macOS.
 //
 //	go run ./tools/build            list the tasks
 //	go run ./tools/build build      build for this platform
-//
-// It only uses the standard library, so it works offline next to the vendored
-// dependencies, and it behaves the same on Windows, Linux and macOS.
 package main
 
 import (
@@ -77,8 +76,8 @@ var tasks = map[string]task{
 }
 
 // taskPackages packs every format this repository publishes, which a release
-// needs. Each format builds the binaries it wants for itself, and the ones that
-// another format already built come out of the cache of the toolchain.
+// needs. Each format builds the binaries it wants, and one another format already
+// built comes out of the toolchain cache.
 //
 // The list is spelled out rather than read from the task map, which would be a
 // cycle: the map holds this function.
@@ -235,12 +234,11 @@ func buildTarget(root string, t target) error {
 
 // targets is every build worth publishing: the Windows one to double click, the
 // Linux one for a server, which also serves the command line, and the small ones
-// that a router or an embedded board has room for. The 64 bit builds come first
-// in each group, the small machine ones last.
+// a router or an embedded board has room for, the 64 bit builds first.
 //
-// Every Linux build is made twice: the second leaves the tray out, for the
-// machines that have no desktop session to put an icon in. A router has no use
-// for one, and the tray is by far the largest thing the binary can do without.
+// Every Linux build is made twice, the second leaving the tray out for the
+// machines with no desktop session to put an icon in: the tray is by far the
+// largest thing the binary can do without.
 func targets() []target {
 	base := []target{
 		{goos: "windows", goarch: "amd64"},
@@ -286,11 +284,10 @@ func taskAll(root string) error {
 	return nil
 }
 
-// ldflagsFor is what go build and the linker need to write the release into the
-// program: the version, which is the git tag the checkout is at, and the commit
-// it was built from, so that a copy which is in front of someone can be named
-// exactly. The version is read here rather than in the program, since a program
-// cannot read the tag it was built at.
+// ldflagsFor is what the linker needs to write the release into the program: the
+// version, which is the git tag the checkout is at, and the commit it was built
+// from, so a copy in front of someone can be named exactly. The version is read
+// here, since a program cannot read the tag it was built at.
 func ldflagsFor(root string, gui bool, goos string) (string, error) {
 	version, err := appVersion(root)
 	if err != nil {
@@ -336,19 +333,16 @@ func taskIcon(root string) error {
 
 func taskResources(root string) error {
 	// go-winres is not a dependency of the program, it only turns the icon and
-	// the version information into an object file. Running it by module path
-	// keeps it out of go.mod, which needs the module mode: the vendor directory
-	// cannot resolve a package that is not a dependency.
+	// the version information into an object file. Running it by module path keeps
+	// it out of go.mod, which needs the module mode: the vendor directory cannot
+	// resolve a package that is not a dependency.
 	//
-	// One file per architecture, named rsrc_windows_<arch>.syso; the toolchain
-	// reads that name to tell which one belongs to which build. Every Windows
-	// architecture that is built needs its own, or that build would be the one
-	// without an icon and version information.
-	//
-	// The version the resource carries is given here rather than written into
-	// winres.json, which is the point: the file a person opens holds no version
-	// that could go stale, and what the resource says comes from the same tag as
-	// everything else.
+	// One object file per architecture, named rsrc_windows_<arch>.syso, since the
+	// toolchain reads that name to tell which build it belongs to: a Windows
+	// architecture without one would be built without an icon or version
+	// information. The version is passed on the command line rather than written
+	// into winres.json, so that the file a person opens holds no version to go
+	// stale.
 	version, err := appVersion(root)
 	if err != nil {
 		return err
@@ -377,9 +371,9 @@ func taskRun(root string) error {
 	return cmd.Run()
 }
 
-// taskClean removes the built executables. The settings and the log live in the
-// same directory, next to the executable, so they are left alone: cleaning a
-// build must not throw away an account.
+// taskClean removes the built executables. The settings and the log live next to
+// the executable, so they are left alone: cleaning a build must not throw away an
+// account.
 func taskClean(root string) error {
 	dir := filepath.Join(root, distDir)
 	matches, err := filepath.Glob(filepath.Join(dir, "SDAutoLogin*"))
@@ -398,8 +392,8 @@ func taskClean(root string) error {
 	}
 	fmt.Printf("  removed %d executable(s) from %s\n", removed, describe(root, dir))
 
-	// The packages are made from those executables, so they go with them: one
-	// left behind would be the previous build in a new one's clothes.
+	// The packages are made from those executables, so they go with them: one left
+	// behind would describe the build before this one.
 	packages := filepath.Join(dir, pkgDir)
 	if _, err := os.Stat(packages); err == nil {
 		shown := describe(root, packages)

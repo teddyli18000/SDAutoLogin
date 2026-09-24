@@ -1,10 +1,10 @@
 // The Windows side of a release: the builds as archives that can be unpacked
 // wherever they land, and the manifests that let Scoop and winget install one.
 //
-// There is no installer here on purpose. The program is a single file that needs
-// nothing else, so an archive serves a desktop, and both of those package managers
-// can install one; an .msi would need a toolchain of its own to build, and would
-// install the same one file.
+// There is no installer here on purpose: the program is a single file that needs
+// nothing else, so an archive serves a desktop and both of those package managers
+// can install one, while an .msi would need a toolchain of its own to build the
+// same one file.
 
 package main
 
@@ -84,9 +84,8 @@ func taskWindows(root string) error {
 	if err := writeWingetManifests(root, version, repo, builds); err != nil {
 		return err
 	}
-	// This task is registered on its own as well as under taskPackages, so the
-	// digests are rewritten here too: an archive and the file that describes it
-	// must not disagree after either.
+	// The digests are rewritten here too, this task being registered on its own as
+	// well as under taskPackages.
 	return writeChecksums(root)
 }
 
@@ -138,9 +137,9 @@ func windowsZip(root string, t target) ([]byte, error) {
 //
 //	<address>/releases/download/<tag>/<file>
 //
-// where the tag of a release is the version with the v this project puts in front
-// of it. Change this function when releases move to another kind of host, and both
-// manifests follow: GitHub uses the same shape, GitLab does not.
+// where the tag is the version with the v this project puts in front of it. GitHub
+// uses the same shape, so both manifests follow a move of this function; GitLab
+// does not.
 func releaseURL(repo, version, file string) string {
 	return fmt.Sprintf("%s/releases/download/v%s/%s", repo, version, file)
 }

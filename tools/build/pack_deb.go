@@ -35,9 +35,8 @@ func taskDeb(root string) error {
 			return err
 		}
 	}
-	// This task is registered on its own as well as under taskPackages, so the
-	// digests are rewritten here too: an archive and the file that describes it
-	// must not disagree after either.
+	// The digests are rewritten here too, this task being registered on its own as
+	// well as under taskPackages.
 	return writeChecksums(root)
 }
 

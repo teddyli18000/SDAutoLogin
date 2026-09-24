@@ -14,9 +14,8 @@ import (
 var markupText = regexp.MustCompile(`data-i18n="([^"]+)"[^>]*>([^<]*)<`)
 
 // TestThePageQuotesTheStringTable keeps the literals in index.html from drifting
-// away from the table they are replaced by. Those literals are only visible
-// before the script runs, or if it never runs, so a stale one is easy to leave
-// behind.
+// away from the table they are replaced by. They are only visible before the
+// script runs, or if it never runs, so a stale one is easy to leave behind.
 func TestThePageQuotesTheStringTable(t *testing.T) {
 	page, err := fs.ReadFile(Assets(), "index.html")
 	if err != nil {
@@ -49,20 +48,18 @@ func TestThePageQuotesTheStringTable(t *testing.T) {
 
 // scriptText holds the two shapes in which the script names a string: t("key"),
 // which may take arguments after it, and state.i18n["key"]. A key the script puts
-// together while it runs, like the ret_code and state ones, matches neither: the
-// quoted part has to be the whole key. That is what keeps this from failing on
-// the composed ones. The word boundary in front of t( is what keeps the calls
-// that merely end in one - closest(".account"), split("; ") - from being read as
-// calls to it.
+// together while it runs, like the ret_code and state ones, matches neither,
+// since the quoted part has to be the whole key. The word boundary in front of
+// t( keeps the calls that merely end in one - closest(".account"), split("; ") -
+// from being read as calls to it.
 var scriptText = []*regexp.Regexp{
 	regexp.MustCompile(`\bt\(["']([^"']+)["'][),]`),
 	regexp.MustCompile(`state\.i18n\[["']([^"']+)["']\]`),
 }
 
 // TestTheScriptQuotesTheStringTable is the other half of
-// TestThePageQuotesTheStringTable. The script names most of the page's strings
-// itself, and a key that was renamed or mistyped in one of the two places shows
-// up on screen as the key rather than as the wording.
+// TestThePageQuotesTheStringTable: the script names most of the page's strings
+// itself, and a renamed or mistyped key shows on screen as the key, not the wording.
 func TestTheScriptQuotesTheStringTable(t *testing.T) {
 	script, err := fs.ReadFile(Assets(), "app.js")
 	if err != nil {

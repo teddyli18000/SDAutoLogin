@@ -11,11 +11,13 @@ import (
 	"math"
 )
 
-// Accent colors. AccentBrand is the fixed application identity: the deep
-// crimson a Chinese university keeps its seal in, with a darker tone of the same
-// colour for the ring around it. The others tint the mark to show the session
-// state, so the tray icon reads at a glance: green online, grey offline, amber
-// while signing in, red on an error, and a lighter grey before the first check.
+// Accent colors. AccentBrand is the fixed application identity: the deep crimson
+// a Chinese university keeps its seal in, with a darker tone of the same colour
+// for the ring around it.
+//
+// The others tint the mark by session state, so the tray icon reads at a glance:
+// green online, grey offline, amber while signing in, red on an error, and a
+// lighter grey before the first check.
 var (
 	AccentBrand   = color.RGBA{R: 0x8C, G: 0x1D, B: 0x2C, A: 0xFF}
 	AccentOnline  = color.RGBA{R: 0x2E, G: 0xA0, B: 0x43, A: 0xFF}
@@ -29,11 +31,9 @@ var (
 // state. It is drawn from primitives at 4x and then box filtered down, so no
 // font or rasteriser dependency is needed.
 //
-// A university seal is two rings around a roundel, and that is what the mark is:
-// an outer ring in a darker tone of the accent, a gap, and the disc inside it,
-// with the padlock knocked out of the disc in white. The proportions are chosen
-// for the 16 px tray icon: the ring stays about a pixel and a half thick and the
-// gap inside it a whole pixel, so both rings still read at the smallest size.
+// A university seal is two rings around a roundel: an outer ring in a darker
+// tone of the accent, a gap, and the disc inside it, with the padlock knocked
+// out in white. The proportions keep both rings readable at the 16 px tray size.
 func Icon(size int, accent color.RGBA) *image.RGBA {
 	const ss = 4
 	n := size * ss

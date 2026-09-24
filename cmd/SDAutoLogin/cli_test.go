@@ -76,9 +76,8 @@ func TestParseOptionsLeavesTheOtherArgumentsAlone(t *testing.T) {
 }
 
 func TestParseOptionsRejectsAnUnknownOption(t *testing.T) {
-	// A misspelled option has to fail rather than be passed on: a monitoring
-	// script that writes --jason would otherwise be handed a plain status report
-	// and read it as the answer it asked for.
+	// A misspelled option has to fail rather than be passed on, so a monitoring
+	// script that writes --jason is not handed a status report instead.
 	for _, args := range [][]string{
 		{"--jason"},
 		{"--username=s1234567", "--savee"},
@@ -93,9 +92,9 @@ func TestParseOptionsRejectsAnUnknownOption(t *testing.T) {
 }
 
 func TestParseOptionsKeepsTheShortcutsAndTheConfigFlag(t *testing.T) {
-	// What begins with a dash without being an option belongs to the caller:
-	// the shortcuts and the flag of the config command, which the program reads
-	// out of what is left. None of them may be mistaken for a typo.
+	// What begins with a dash without being an option belongs to the caller: the
+	// shortcuts and the flag of the config command, which the program reads out of
+	// what is left. None of them may be mistaken for a typo.
 	for _, args := range [][]string{
 		{"-cli"}, {"--cli"}, {"-daemon"}, {"--daemon"}, {"-headless"},
 		{"-h"}, {"--help"}, {"-help"}, {"-v"}, {"--version"},
@@ -255,9 +254,9 @@ func writeSecret(t *testing.T, body string) string {
 	return path
 }
 
-// A password that is read from a file is the form a service uses: the command
-// line of a process is readable by every user that can see the process list, and
-// the configuration file is the file the secret is being kept out of.
+// A password read from a file is the form a service uses: a process's command line
+// is readable by every user that can see the process list, and the configuration
+// file is the file the secret is kept out of.
 func TestApplyToReadsThePasswordFromAFile(t *testing.T) {
 	path := writeSecret(t, "fromthefile\n")
 	cfg := &config.Config{Accounts: []config.Account{
@@ -277,9 +276,8 @@ func TestApplyToReadsThePasswordFromAFile(t *testing.T) {
 	}
 }
 
-// Only the line ending comes off the file. A password may end in a space, and a
-// space that was trimmed away is a password quietly different from the one that
-// was written.
+// Only the line ending comes off the file: a space that was trimmed away is a
+// password quietly different from the one that was written.
 func TestAPasswordFileKeepsEverythingButTheLineEnding(t *testing.T) {
 	path := writeSecret(t, "two spaces  \r\nsecond line\n")
 
@@ -371,9 +369,9 @@ func TestARunWithACredentialHasSomethingToApply(t *testing.T) {
 	}
 }
 
-// The whole way in, not applyTo alone: loadForCLI is what decides whether the
-// options are applied, and a real start has to end up with the password the
-// service manager handed over.
+// The whole way in, not applyTo alone: loadForCLI decides whether the options are
+// applied, and a real start has to end up with the password the service manager
+// handed over.
 func TestLoadForCLITakesThePasswordSystemdHandedOver(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, credentialName), []byte("fromsystemd\n"), 0o600); err != nil {
@@ -405,10 +403,9 @@ func TestLoadForCLITakesThePasswordSystemdHandedOver(t *testing.T) {
 	}
 }
 
-// An account named without a service type is the campus network, and it has to be
+// An account named without a service type is the campus network and has to be
 // usable as it stands: a run given this is not saved, so it never passes through
-// the normalization that would fill the service type in, and an entry without one
-// is an entry nothing can be submitted for.
+// the normalization that fills the service type in.
 func TestAnAccountWithoutAServiceTypeCanSignIn(t *testing.T) {
 	appDir := t.TempDir()
 	cfg, ok := loadForCLI(appDir, options{accounts: []string{"s1234567:topsecret"}})
@@ -428,8 +425,7 @@ func TestAnAccountWithoutAServiceTypeCanSignIn(t *testing.T) {
 }
 
 // A password on its own says nothing about the rest of the list, so the entries
-// after the first are left where they are: the fallback order is not what this
-// run was about.
+// after the first are left where they are.
 func TestAPasswordAloneLeavesTheRestOfTheListAlone(t *testing.T) {
 	password := "onlythis"
 	cfg := &config.Config{Accounts: []config.Account{
@@ -563,9 +559,8 @@ func TestApplyToReplacesTheListWithTheAccountsGiven(t *testing.T) {
 	if got := cfg.Accounts[1].ISPs; len(got) != 2 || got[0] != "@cucc" || got[1] != "@zgyd" {
 		t.Errorf("ISPs = %v, want both service types in the order they were given", got)
 	}
-	// No service type at all is the campus network, and an entry with none
-	// cannot be submitted at all: the suffix is filled in here rather than left
-	// to a normalization that a run without --save never reaches.
+	// No service type at all is the campus network, and the suffix is filled in
+	// here rather than left to a normalization a run without --save never reaches.
 	if got := cfg.Accounts[2].ISPs; len(got) != 1 || got[0] != "" {
 		t.Errorf("ISPs = %v, want the campus network for the entry that named no service", got)
 	}
@@ -784,11 +779,9 @@ func TestCheckOnlyAcceptsAnOptionInTheModeItBelongsTo(t *testing.T) {
 }
 
 // TestTheAutostartEntryRepeatsOnlyTheOptionThatSaysWhereTheSettingsLive covers
-// what an entry is allowed to carry. It outlives the run, in a registry value or
-// a file anyone can read, so the password must not be in it, and the account
-// options belong to the run rather than to the entry. What has to be repeated is
-// --home: an entry without it starts on a fresh configuration beside the
-// executable, which looks from the outside like the account was lost.
+// what an entry is allowed to carry: it outlives the run, in a place anyone can
+// read, so neither a password nor an account option belongs in it, and what has to
+// be repeated is --home, without which the entry starts on a fresh configuration.
 func TestTheAutostartEntryRepeatsOnlyTheOptionThatSaysWhereTheSettingsLive(t *testing.T) {
 	account, secret := "23D001", "hunter2"
 	addr := "127.0.0.1:8088"
@@ -843,9 +836,8 @@ func TestTheAutostartEntryRepeatsOnlyTheOptionThatSaysWhereTheSettingsLive(t *te
 }
 
 // TestTheTrayRefusesAnOptionItCannotHonour covers the mode that names no command.
-// --json and --settings belong to the status and run commands, and a tray run
-// that quietly dropped them would leave a script waiting for a report that never
-// comes, or a caller waiting for a page nothing serves.
+// --json and --settings belong to the status and run commands, and a tray run that
+// quietly dropped them would leave a script waiting for a report that never comes.
 func TestTheTrayRefusesAnOptionItCannotHonour(t *testing.T) {
 	addr := "127.0.0.1:8088"
 	dir := t.TempDir()
@@ -886,15 +878,14 @@ func TestARunWithNothingToSignInWithNeedsTheSettingsPage(t *testing.T) {
 	addr := "127.0.0.1:8088"
 	empty := &config.Config{}
 
-	// A service has nobody to answer the setup wizard, so a run that could only
-	// report the same failure is refused rather than started.
+	// A service has nobody to answer the wizard, so a run that could only report
+	// the same failure is refused rather than started.
 	if err := checkAccountForRun(empty, options{}); err == nil {
 		t.Error("a run with no account and no settings page was accepted")
 	}
 
-	// With the page served it is started: that page is the way in on a machine
-	// whose operator has no other one, and the checks report the missing account
-	// until one is written there.
+	// With the page served it is started: that page is the way in on a machine whose
+	// operator has no other one.
 	if err := checkAccountForRun(empty, options{settings: &addr}); err != nil {
 		t.Errorf("a run serving the settings page was refused: %v", err)
 	}
@@ -911,8 +902,8 @@ func TestARunWithNothingToSignInWithNeedsTheSettingsPage(t *testing.T) {
 func TestCheckTrayOnlyAllowsAppWhereThereIsATray(t *testing.T) {
 	addr := "127.0.0.1:8088"
 
-	// The tray opens a window of its own, so a build that has none has to refuse
-	// the option instead of starting up and ignoring it.
+	// The tray opens a window of its own, so a build that has none refuses the
+	// option instead of starting up and ignoring it.
 	if err := checkTray(options{app: &addr}, false); err == nil {
 		t.Error("--app was accepted in a build without a tray")
 	}

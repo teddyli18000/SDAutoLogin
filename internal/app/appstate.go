@@ -153,17 +153,14 @@ func (a *AppState) TestLogin(attempt config.Attempt) LoginTest {
 }
 
 // SwitchService signs in again with one service type of the entry the session is
-// on, while the session is up on another one, which is what the settings page's
-// button asks for: the first service type of the entry by default, or another one
-// the reader picks when the first is the one the portal will not take. The portal
-// keeps one session per client address, so this replaces the session or is
-// refused; either way nothing is logged out on purpose, and the second sign-in is
-// what the session is left to decide.
+// on while it is up on another, which is what the settings page's button asks
+// for: the first service type by default, or another one the reader picks.
 //
-// The second return value says whether there was anything to do. A session that
-// is already down, one that is on the service type asked for already, and a
-// service type the entry does not list all have nothing to do here, and the page
-// says that instead of showing a login reply that was never asked for.
+// The portal keeps one session per client address, so this replaces the session
+// or is refused, and nothing is logged out on purpose. The second return value
+// says there was nothing to do: a session that is down, one already on the
+// service type asked for, and a service type the entry does not list, which the
+// page reports instead of a login reply that was never asked for.
 func (a *AppState) SwitchService(isp string) (LoginTest, bool) {
 	cfg := a.Config()
 	client := portal.NewClient(cfg)

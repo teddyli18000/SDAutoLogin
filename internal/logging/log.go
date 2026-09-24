@@ -35,9 +35,8 @@ type Logger struct {
 	dir  string
 	file *os.File
 	size int64
-	// rotateDone records that rotation was given up because the rename failed:
-	// retrying it costs a close and a reopen per line, and the rename cannot
-	// start working while whatever holds app.log keeps holding it.
+	// rotateDone records that rotation was given up after the rename failed, so
+	// it is not retried per line. See rotateLocked.
 	rotateDone bool
 	verbose    atomic.Bool
 }
@@ -46,8 +45,7 @@ var Log = &Logger{}
 
 // Init opens the log. dir is where app.log lives, and toFile false keeps the log
 // on the console alone for a machine with a small flash: its syslog already keeps
-// whatever the program writes to stderr, and a rotating file on top of that is
-// the same text written to the flash twice.
+// what the program writes to stderr, so a file would be the same text twice.
 func (l *Logger) Init(dir string, toFile bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -75,9 +73,8 @@ func (l *Logger) Init(dir string, toFile bool) {
 	}
 	l.dir = dir
 	if err := l.openLocked(); err != nil {
-		// Saying nothing here would leave Path() pointing at a file that was
-		// never opened, and the tray, the log tail and the About tab would all
-		// name a file that is not there.
+		// Saying nothing would leave Path() pointing at a file that was never
+		// opened, and the tray, the log tail and the About tab would name it.
 		_, _ = os.Stderr.WriteString(logLine("ERROR", "cannot open the log file %s: %v", filepath.Join(dir, "app.log"), err) + "\n")
 		l.dir = ""
 	}
@@ -156,13 +153,13 @@ func (l *Logger) write(level, format string, args ...any) {
 	}
 }
 
-// rotateLocked moves the full app.log aside to app.log.1 so the next line
-// starts a small file again. A rename that fails leaves the log growing
-// instead of truncating it, and rotation is then given up for the rest of the
-// process: on Windows the rename fails for as long as another program holds
-// app.log open — the tray's own "open log" menu hands it to an editor — and
-// repeating the close and reopen for every following line would cost that work
-// per line without ever succeeding.
+// rotateLocked moves the full app.log aside to app.log.1 so the next line starts
+// a small file again. A failed rename leaves the log growing rather than
+// truncating it, and rotation is given up for the rest of the process.
+//
+// On Windows the rename fails for as long as another program holds app.log open — the
+// tray's own "open log" menu hands it to an editor — so repeating the close and reopen
+// for every following line would cost that work per line without ever succeeding.
 func (l *Logger) rotateLocked() {
 	name := filepath.Join(l.dir, "app.log")
 	// The handle is given up first because Windows refuses to rename an open

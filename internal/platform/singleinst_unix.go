@@ -34,10 +34,9 @@ var instanceTaken bool
 const settingsRequestTimeout = 5 * time.Second
 
 // instanceDir is the directory the two rendezvous names live in: the temporary
-// directory, which is where a second copy of the program looks as well, with the
-// user's own cache directory as the fallback for a machine where nothing can be
-// written there — a service with a private or a read-only /tmp. Both copies run
-// as the same user, so a per-user directory is still a place where they meet.
+// directory, where a second copy looks as well, falling back to the user's cache
+// directory where nothing can be written there, a service with a read-only /tmp
+// being the usual case, both copies running as the same user.
 //
 // It is decided once, so that the socket and the lock cannot end up in two
 // different directories, one of which the other copy never looks in.
@@ -59,10 +58,9 @@ func instanceDir() string {
 	return instanceDirPath
 }
 
-// dirIsWritable reports whether a file can be made in dir at all, which is what
-// the lock file needs. It is probed rather than read off the mode bits: what
-// makes a directory unusable here is usually a mount option or a policy, which
-// the mode does not show.
+// dirIsWritable reports whether a file can be made in dir, which is what the lock
+// file needs. It is probed rather than read off the mode bits, since a mount option
+// or a policy the mode does not show is the usual thing that makes it unusable.
 func dirIsWritable(dir string) bool {
 	f, err := os.CreateTemp(dir, ".sdautologin-*")
 	if err != nil {
@@ -96,12 +94,10 @@ func AcquireSingleInstance(requestSettings bool) bool {
 
 	f, err := os.OpenFile(lockPath(), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		// Nothing to take the lock with, so this copy cannot tell whether
-		// another one is running. Starting anyway is the lesser evil: refusing
-		// would leave the program unusable on a machine whose temporary and cache
-		// directories are both closed off, which is what a container often looks
-		// like. The line has to say what it means, because two copies would both
-		// be signing in and the portal allows one session per address.
+		// Nothing to take the lock with, so this copy cannot tell whether another
+		// is running. Starting anyway is the lesser evil: refusing would leave the
+		// program unusable where both candidate directories are closed off, as a
+		// container often has them, though two copies would both be signing in.
 		logging.Log.Warn("could not open the lock file %s: %v; this run cannot tell whether another instance is already running",
 			lockPath(), err)
 		closeListener(listener)
@@ -129,10 +125,10 @@ func AcquireSingleInstance(requestSettings bool) bool {
 	return true
 }
 
-// listenSettingsSocket binds the socket at path. An address that is already
-// bound and answers belongs to the copy that is running, and is not ours to
-// take; one that answers nothing is a file a crash left behind, which is
-// removed and made again, since nothing else is going to.
+// listenSettingsSocket binds the socket at path. An address already bound and
+// answering belongs to the running copy and is not ours to take; one that answers
+// nothing is a file a crash left behind, removed and made again since nothing else
+// is going to.
 func listenSettingsSocket(path string) (net.Listener, error) {
 	listener, err := net.Listen("unix", path)
 	if err == nil {
@@ -187,10 +183,9 @@ func serveSettingsRequests(listener net.Listener, f func()) {
 }
 
 // readSettingsRequest reports whether a connection carried a request. A copy
-// probes this socket before it knows whether the copy it is looking for is
-// there, which is how a socket file left behind by a crash is told apart from
-// one a running copy answers, so a connection that carries nothing is a probe
-// and not a request.
+// probes this socket before it knows whether the copy it wants is there, which is
+// how a leftover socket file is told apart from one a running copy answers, so a
+// connection that carries nothing is a probe and not a request.
 func readSettingsRequest(conn net.Conn) bool {
 	defer conn.Close()
 	_ = conn.SetReadDeadline(time.Now().Add(settingsRequestTimeout))

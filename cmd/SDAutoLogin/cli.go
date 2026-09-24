@@ -119,10 +119,9 @@ type options struct {
 	home     *string
 	username *string
 	password *string
-	// passwordFile is a path to read the password from instead of naming it
-	// here. It is for the machines where the secret belongs in neither the config
-	// file nor the command line, the command line being readable by every user
-	// that can see the process list.
+	// passwordFile is a path to read the password from instead of naming it here,
+	// for the machines where the secret belongs in neither the config file nor the
+	// command line, which every user that can see the process list can read.
 	passwordFile *string
 	isp          *string
 	// accounts are entries given whole, written as user:password@service, in the
@@ -145,8 +144,8 @@ type options struct {
 	noLog bool
 }
 
-// knownOption reports whether arg is one of the options this program defines.
-// This tells a forgotten value apart from a value that merely starts with a
+// knownOption reports whether arg is one of the options this program defines,
+// which tells a forgotten value apart from a value that merely starts with a
 // dash, such as a password.
 func knownOption(arg string) bool {
 	name, _, _ := strings.Cut(arg, "=")
@@ -169,10 +168,9 @@ func takesValue(name string) bool {
 	return false
 }
 
-// knownWord reports whether arg is one of the arguments that start with a dash
-// without being an option this program reads: the shortcuts, and the flag the
-// config command takes. They are left in the argument list for the command to
-// pick up, so a misspelled option can be told apart from them.
+// knownWord reports whether arg starts with a dash without being an option this
+// program reads: the shortcuts and the flag the config command takes. They are
+// left in the argument list so a misspelled option can be told apart from them.
 func knownWord(arg string) bool {
 	switch arg {
 	case "-h", "--help", "-help", "-v", "--version",
@@ -225,10 +223,9 @@ func (o *options) set(name, value string) bool {
 // parseOptions pulls the options out of args and returns what is left. Every
 // option is accepted as --name=value or as --name value.
 //
-// An argument that starts with a dash, is not an option and is not one of the
-// known words is a typo, and it is reported instead of being passed on: a
-// monitoring script that writes --jason would otherwise be told the session
-// state it never asked about, and read it as an answer.
+// An argument that starts with a dash, is not an option and is not a known word
+// is a typo, reported instead of passed on: a monitoring script that writes
+// --jason would otherwise be handed the session state it never asked about.
 func parseOptions(args []string) (options, []string, error) {
 	var opts options
 	rest := make([]string, 0, len(args))
@@ -326,10 +323,8 @@ func (o options) applyTo(cfg *config.Config) error {
 
 	case givenPassword:
 		// Only a password, which is how a service is handed its secret without
-		// writing the account out again. It belongs to the entry that is already
-		// first, and the rest of the list is left alone: the fallback order was
-		// not what this run was about, and a list cut down to one entry is not
-		// something the reader asked for.
+		// writing the account out again. It belongs to the entry already first, and
+		// the rest of the list is left alone: the fallback order was not its concern.
 		if len(cfg.Accounts) == 0 {
 			cfg.Accounts = []config.Account{{Password: password, ISPs: []string{""}}}
 		} else {
@@ -344,9 +339,8 @@ func (o options) applyTo(cfg *config.Config) error {
 }
 
 // passwordOverride is the password to use in place of the configured one, and
-// whether there is one to use at all. It is named on the command line, or read
-// from a file, or handed over by systemd; a run that was given none of them keeps
-// what the configuration holds, which is what --save then writes.
+// whether there is one at all. It is named on the command line, read from a file,
+// or handed over by systemd; a run given none keeps what --save then writes.
 func (o options) passwordOverride() (string, bool, error) {
 	switch {
 	case o.password != nil && o.passwordFile != nil:
@@ -374,13 +368,12 @@ func (o options) passwordOverride() (string, bool, error) {
 
 // credentialName is the name of the credential a systemd unit is expected to hand
 // over: LoadCredential=password:/some/file puts that file at
-// $CREDENTIALS_DIRECTORY/password, which no other process on the machine can
-// read, and which is not written to disk again by anything here.
+// $CREDENTIALS_DIRECTORY/password, unreadable by any other process and not written again.
 const credentialName = "password"
 
-// credentialPasswordPath is where systemd left the credential for this run, and
-// "" when there is none — which is every run systemd did not start at all, and
-// every unit that does not ask for a credential.
+// credentialPasswordPath is where systemd left the credential for this run, and ""
+// when there is none: every run systemd did not start, and every unit that asks for
+// no credential.
 func credentialPasswordPath() string {
 	dir := os.Getenv("CREDENTIALS_DIRECTORY")
 	if dir == "" {
@@ -394,9 +387,8 @@ func credentialPasswordPath() string {
 }
 
 // readPasswordFile reads the password from the first line of a file, which is how
-// a secret is kept out of both a command line and the configuration file. Only
-// the line ending is dropped: a password may end in a space, and trimming more
-// than the newline would quietly change it.
+// a secret is kept out of both a command line and the configuration file. Only the
+// line ending is dropped, since a password may end in a space.
 func readPasswordFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -414,15 +406,11 @@ func readPasswordFile(path string) (string, error) {
 // user:password@service[+service...], for a script that sets up more than one
 // account.
 //
-// The @ always introduces the services, so an account with a password that holds
-// one has to be given with --username and --password instead. The services are
-// separated by +, the @ of the portal's own spelling in front of each being
-// optional, and an empty element is the campus network itself. Leaving the part
-// after the password out entirely means the campus network as well.
-//
-// A value with more than one @ cannot be read at all and is refused: it would be
-// a guess whether the last one starts a service or belongs to the password. The
-// value is never echoed back in an error, since it holds the password.
+// The @ always introduces the services, so a password holding one has to be given
+// with --username and --password instead; the services are separated by +, each
+// with an optional @ in front, and an empty element is the campus network. A value
+// with more than one @ is refused rather than guessed at, and never echoed back,
+// since it holds the password.
 func parseAccount(raw string) (config.Account, error) {
 	if strings.Count(raw, "@") > 1 {
 		return config.Account{}, fmt.Errorf("--account takes one @ at most, the one that introduces the services; a password holding another needs --username and --password")
@@ -436,12 +424,10 @@ func parseAccount(raw string) (config.Account, error) {
 		return config.Account{}, fmt.Errorf("--account is written as user:password@service, and this value is not")
 	}
 
-	// Leaving the part after the password out entirely means the campus network,
-	// which is what the portal's own dropdown starts with, and an entry with no
-	// service type at all is one nothing can be submitted for: the suffix is
-	// filled in here rather than left to a normalization that a run without
-	// --save never reaches, which would leave a run that has an account and
-	// still cannot sign in.
+	// Leaving the part after the password out means the campus network, and an
+	// entry with no service type cannot be submitted at all: the suffix is filled
+	// in here, since a run without --save never reaches the normalization that
+	// would otherwise supply it.
 	entry := config.Account{Username: strings.TrimSpace(username), Password: password, ISPs: []string{""}}
 	if services != "" {
 		entry.ISPs = nil
@@ -479,8 +465,8 @@ func (o options) check(command string) error {
 }
 
 // checkTray reports an option that needs a tray icon in a build that has none.
-// The tray opens a window of its own, so a build for machines with no desktop
-// session cannot honour --app. Refusing it is better than ignoring it after start.
+// The tray opens a window of its own, so a build with no desktop session cannot
+// honour --app, and refusing it is better than ignoring it after start.
 func checkTray(o options, hasTray bool) error {
 	if o.app != nil && !hasTray {
 		return fmt.Errorf("--app needs the tray, which this build does not have")
@@ -488,10 +474,9 @@ func checkTray(o options, hasTray bool) error {
 	return nil
 }
 
-// checkTrayOptions reports an option that only a command can honour. The tray is
-// the mode that names no command, so an option belonging to one is refused here
-// rather than dropped: `--json` would otherwise put up a tray icon where the
-// caller asked for a report and a script would wait for it.
+// checkTrayOptions reports an option that only a command can honour. The tray
+// names no command, so such an option is refused here rather than dropped:
+// `--json` would otherwise put up a tray icon where a report was asked for.
 func (o options) checkTrayOptions() error {
 	switch {
 	case o.settings != nil:
@@ -503,15 +488,12 @@ func (o options) checkTrayOptions() error {
 }
 
 // exitIfBadOptions refuses a shortcut whose options do not belong to the command
-// it stands for, and otherwise runs that command. The shortcut is only a shorter
-// way to write the command, so the options are held to the same rules: -cli
-// --json is the usage error run --json is, rather than an option that is quietly
-// dropped, which a script would take for a JSON report.
+// it stands for, and otherwise runs that command. A shortcut is a shorter way to
+// write the command, so --json with -cli is the usage error it is with run.
 func exitIfBadOptions(o options, command string, run func(string, options) int, appDir string) {
 	if err := o.check(command); err != nil {
-		// Into the log as well as onto the terminal: the Windows build is linked
-		// as a windowless program, so a start that fails here from a shortcut
-		// leaves nothing on screen and the log is the only trace of it.
+		// Into the log as well as onto the terminal: the Windows build is linked as
+		// a windowless program, so a failure here leaves nothing on screen.
 		logging.Log.Error("%v", err)
 		fmt.Fprintf(os.Stderr, "%v\n\n", err)
 		printUsage(os.Stderr)
@@ -601,10 +583,9 @@ func loadForCLI(appDir string, opts options) (*config.Config, bool) {
 }
 
 // checkAccountForRun reports whether a background run may start with what it was
-// given. A service has nobody to answer the setup wizard, so a run with nothing
-// to sign in with is refused rather than started into a loop that can only
-// report the same failure; the exception is a run that serves the settings page,
-// because that page is the way in on a machine whose operator has no other one.
+// given: a service has nobody to answer the wizard, so a run with nothing to sign
+// in with is refused rather than started into a loop that can only report the same
+// failure, unless it serves the settings page, the way in where there is no other.
 func checkAccountForRun(cfg *config.Config, opts options) error {
 	if cfg.Configured() || opts.settings != nil {
 		return nil
@@ -645,10 +626,9 @@ func cmdRun(appDir string, opts options) int {
 
 		url, err := server.URL()
 		if err != nil {
-			// Into the log too: a port that cannot be bound (one another
-			// program holds, or one this machine has reserved) is the failure
-			// this option meets most often, and it is the one thing the log did
-			// not say when a run stopped right after starting.
+			// Into the log too: a port that cannot be bound, held by another program
+			// or reserved by this machine, is the failure this option meets most
+			// often.
 			logging.Log.Error("settings page: %v", err)
 			fmt.Fprintf(os.Stderr, "settings page: %v\n", err)
 			return 1
@@ -661,10 +641,9 @@ func cmdRun(appDir string, opts options) int {
 		}
 	}
 
-	// A second copy is told where the page is, or that there is none, so the
-	// request is answered rather than dropped in silence. The address is read
-	// when it is asked for rather than kept: the page is opened with one that
-	// works once, and the one it is replaced by is the one to hand out now.
+	// A second copy is told where the page is, or that there is none, so the request
+	// is answered rather than dropped in silence. The address is read when it is
+	// asked for: the page is opened with a one-off one, which is replaced.
 	go platform.WaitForSettingsRequest(func() {
 		if settingsServer == nil {
 			logging.Log.Warn("another copy asked for the settings page, which the background mode does not serve")

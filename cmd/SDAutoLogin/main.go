@@ -21,20 +21,18 @@ import (
 
 func main() {
 	args := os.Args[1:]
-	// The options are read first, before anything is opened or printed: --home
-	// decides where config.json and logs/ live, and a failure still has to be
-	// reported on a console that may not exist yet, see attachConsole.
+	// The options are read before anything is opened: --home decides where
+	// config.json and logs/ live, and a failure still has to be reported on a
+	// console that may not exist yet, see attachConsole.
 	opts, rest, err := parseOptions(args)
 	appDir := resolveAppDir(opts.home)
-	// An autostart entry is written later, by the tray or by the settings page, and
-	// it has to start the program this run is. The option that decides where the
-	// settings live is recorded here; nothing else is, since the rest of the
-	// command line is for this run only, or a password.
+	// The autostart entry written later has to start the program this run is, so
+	// the option deciding where the settings live is recorded here. Nothing else
+	// is, since the rest of the command line is for this run only, or a password.
 	platform.SetAutostartArguments(autostartArguments(opts))
-	// The log is opened before the console is attached, so a console that
-	// cannot be attached is recorded instead of being lost. --no-log is known
-	// here, before the configuration is read, so a run that asks for no log file
-	// does not create one.
+	// The log is opened before the console is attached, so a console that cannot
+	// be attached is recorded instead of being lost; --no-log is known before the
+	// configuration is read, so a run that asks for no log file does not create one.
 	logging.Log.Init(filepath.Join(appDir, "logs"), !opts.noLog)
 	if len(args) > 0 {
 		// Arguments mean a command was asked for, so a terminal is waiting for
@@ -46,7 +44,7 @@ func main() {
 	if err != nil {
 		// The reason also goes to the log: the Windows build is linked as a GUI
 		// program, so a start that fails on an argument leaves nothing on screen
-		// to look at, and app.log is then the only trace of it.
+		// and app.log is the only trace of it.
 		logging.Log.Error("%v", err)
 		fmt.Fprintf(os.Stderr, "%v\n\n", err)
 		printUsage(os.Stderr)
@@ -73,9 +71,9 @@ func main() {
 		}
 	}
 
-	// The tray is the mode that names no command, so an option belonging to one
-	// cannot be honoured here. Refusing it says what is wrong; dropping it would
-	// leave a script waiting for a report that never comes.
+	// The tray names no command, so an option belonging to one cannot be honoured
+	// here. Refusing it says what is wrong; dropping it would leave a script
+	// waiting for a report that never comes.
 	if err := opts.checkTrayOptions(); err != nil {
 		logging.Log.Error("%v", err)
 		fmt.Fprintf(os.Stderr, "%v\n\n", err)
@@ -113,9 +111,8 @@ func runGUI(appDir string, opts options) {
 
 	state := app.New(cfg)
 	if !cfg.Configured() {
-		// Said here rather than by the tray, since both the tray and the fallback
-		// open the page for this reason, and the two of them logging it would be
-		// two lines about one thing.
+		// Said here rather than by the tray, which opens the page for the same
+		// reason, so the two of them do not log it twice.
 		logging.Log.Warn("no account configured yet, opening the settings page")
 	}
 	// --app turns the settings page into a window of its own. Without it the page
@@ -128,11 +125,11 @@ func runGUI(appDir string, opts options) {
 }
 
 // runFallback keeps checking with no tray and no window, which is what happens on
-// a machine where the icon cannot be put up. The page is the only way into such a
-// machine, so it is served here: on the server the tray had already built, or on
-// one made here when there was no tray to build one. Either way its exit button
-// ends this run, rather than posting a message to a window that never got a
-// message loop.
+// a machine where the icon cannot be put up.
+//
+// The page is the only way into such a machine, so it is served here, on the
+// server the tray built or on one made here; its exit button ends this run rather
+// than posting a message to a window that never got a message loop.
 func runFallback(state *app.AppState, opts options, existing *app.Server) {
 	stop := make(chan struct{})
 
@@ -188,11 +185,10 @@ func resolveAppDir(home *string) string {
 	return "."
 }
 
-// autostartArguments is what an autostart entry has to repeat from this run. A
-// --home was given to say where the settings and logs live, and an entry without
-// it would start on a fresh configuration beside the executable, which looks from
-// the outside like the account was lost; it is made absolute because the entry
-// does not run in this working directory.
+// autostartArguments is what an autostart entry has to repeat from this run: the
+// --home that says where the settings live, made absolute because the entry does
+// not run in this working directory. Without it the entry would start on a fresh
+// configuration beside the executable, which looks like the account was lost.
 //
 // Nothing else is repeated, and in particular no password: an entry outlives the
 // run, in a registry value or a file anybody can read.
@@ -211,9 +207,9 @@ func autostartArguments(opts options) []string {
 // ends it early; the settings page quits a background run this way.
 //
 // It never asks anything on stdin: a background run is started by a service
-// manager or a container, where the questions of a wizard would either block the
-// check loop or be answered by end of file, and the settings page is the way in
-// for a machine that has no account yet. `config` is the command that asks.
+// manager or a container, where a wizard's questions would block the check loop or
+// be answered by end of file. The settings page is the way in for a machine with
+// no account yet, and `config` is the command that asks.
 func runHeadless(state *app.AppState, stop <-chan struct{}) {
 	cfg := state.Config()
 	var last service.State

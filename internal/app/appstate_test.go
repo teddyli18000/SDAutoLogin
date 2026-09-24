@@ -13,8 +13,7 @@ import (
 
 // stubPortal is a portal the tests can steer: what it reports the session as,
 // what it answers a login with, and the accounts that were submitted, so a test
-// can tell "nothing was submitted" from "the reply was a refusal" and can read
-// back which service type a sign-in went out as.
+// can tell "nothing was submitted" from "the reply was a refusal".
 type stubPortal struct {
 	cfg *config.Config
 
@@ -36,9 +35,8 @@ func (s *stubPortal) accounts() []string {
 }
 
 // onlineSession and offlineSession are the two sessions the tests care about
-// most: one the portal reports as signed in as the configured account without a
-// suffix, which is the campus network itself, and one it reports as not signed
-// in at all.
+// most: one signed in as the configured account with no suffix, which is the
+// campus network itself, and one not signed in at all.
 const (
 	onlineSession  = "s1234567"
 	offlineSession = ""
@@ -47,9 +45,9 @@ const (
 // newStubPortal starts a portal that answers the two endpoints the client uses.
 //
 // session is the account online_list echoes, which is the account a login was
-// submitted with: the portal echoes what it was given, so a session that reads
-// back with no suffix on it is one that was signed in as the campus network
-// itself. An empty session is a client the portal reports as not signed in.
+// submitted with, so a session that reads back with no suffix on it is one
+// signed in as the campus network itself. An empty session is a client the
+// portal reports as not signed in.
 func newStubPortal(t *testing.T, isps []string, session, loginReply string) *stubPortal {
 	t.Helper()
 
@@ -89,9 +87,8 @@ func newStubPortal(t *testing.T, isps []string, session, loginReply string) *stu
 }
 
 // TestTheLoginTestSubmitsNothingWhileTheClientIsOnline pins the rule the check
-// loop follows. The portal allows one session per address, so a second login on
-// top of one comes back as a refusal that blames the account, and reporting that
-// would tell the user their password is wrong while their session is up.
+// loop follows: the portal allows one session per address, so a second login
+// comes back as a refusal that would tell the user their password is wrong.
 func TestTheLoginTestSubmitsNothingWhileTheClientIsOnline(t *testing.T) {
 	stub := newStubPortal(t, []string{"@zgyd"}, onlineSession, `{"result":0,"ret_code":1}`)
 
@@ -127,9 +124,8 @@ func TestTheLoginTestSubmitsWhileTheClientIsOffline(t *testing.T) {
 }
 
 // TestSwitchServiceSignsInAgainAsTheFirstServiceType is the switch a session that
-// was already up when the program started needs: the portal keeps one session
-// per address, so the only way onto the first service type of an entry is a
-// login that replaces the session, which is what the page's controls ask for.
+// was already up needs: the portal keeps one session per address, so the only way
+// onto the first service type of an entry is a login that replaces the session.
 func TestSwitchServiceSignsInAgainAsTheFirstServiceType(t *testing.T) {
 	// The portal echoes what a login was submitted with, so a session that reads
 	// back as the bare account is one that was signed in as the campus network
@@ -160,10 +156,8 @@ func TestSwitchServiceSignsInAgainAsTheFirstServiceType(t *testing.T) {
 }
 
 // TestSwitchServiceCanPickAnotherServiceTypeOfTheEntry covers the reader who
-// picks one of the other service types, which is what the page offers when the
-// first one is the one the portal will not take. A service type the entry does
-// not list is refused as a request: the page says so instead of submitting
-// something that was never configured for that account.
+// picks one of the other service types, which the page offers when the first one
+// is the one the portal will not take. A type the entry does not list is refused.
 func TestSwitchServiceCanPickAnotherServiceTypeOfTheEntry(t *testing.T) {
 	cases := []struct {
 		name      string

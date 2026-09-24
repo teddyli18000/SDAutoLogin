@@ -61,8 +61,7 @@ var retCodeText = map[string]string{
 	"11": "other error",
 }
 
-// Client talks to the Dr.COM eportal. Both endpoints below are the ones the
-// portal's own pages use:
+// Client talks to the Dr.COM eportal through the endpoints its own pages use:
 //
 //	GET /                     embeds v4ip, the IP the portal sees
 //	GET ?c=Portal&a=online_list   reachable from the LAN even when offline
@@ -337,11 +336,10 @@ func (c *Client) safeURL(rawURL string) string {
 }
 
 // MaskSecrets removes the password from a string before it is logged, so a
-// caller that prints the portal's own reply gets the same protection as a
-// caller that logs a request URL. It masks the parameter rather than a
-// particular password, since the login list may hold several accounts and the
-// one being submitted is the one that must not reach the log. A login name is
-// not a secret, so user_account is deliberately left readable.
+// caller that prints the portal's own reply gets the same protection as a caller
+// that logs a request URL. It masks the parameter rather than a particular
+// password, since the login list may hold several accounts; user_account is a
+// login name and is deliberately left readable.
 func MaskSecrets(s string) string {
 	return rePassword.ReplaceAllString(s, "${1}***")
 }

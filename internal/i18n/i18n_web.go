@@ -52,11 +52,9 @@ var webText = map[string]text{
 	"acct.preferred.same": {
 		"会话当前在 {0}，这也正是本账号的首选。",
 		"The session is on {0}, which is what this account puts first."},
-	// Shown when the portal would not sign in again to move a session that is
-	// up. It says what to do rather than what happened: the program has stopped
-	// trying, so the two buttons beside it are the ways out, and the second one
-	// is the only one that works when the portal refuses any second sign-in
-	// while a session is up.
+	// Shown when the portal would not sign in again to move a session that is up.
+	// It says what to do rather than what happened: the program has stopped
+	// trying, and the second button is the only way out while a session is up.
 	"acct.preferred.refused": {
 		"需手动处理：自动切换到 {0} 被门户拒绝（{1}）。可点「重新登录」再试一次，或点「打开门户页面」注销当前会话后再试。",
 		"Needs doing by hand: the move onto {0} was refused ({1}). Press \"Sign in again\" to try once more, or \"Open the portal\" to log the session out and try again."},

@@ -11,10 +11,10 @@ import (
 const HasTray = false
 
 // Run has no tray on these platforms (for example FreeBSD, or a Linux build made
-// with the notray tag), so it hands straight over to the background mode, with no
-// settings server of its own for the fallback to take over: there is none to build
-// one from. The account is configured through the "config" command, on the command
-// line, or through the settings page of a background run.
+// with the notray tag), so it hands straight over to the background mode with no
+// settings server of its own: these builds make none to take over. The account is
+// configured through the "config" command, on the command line, or through the
+// settings page of a background run.
 func Run(_ *app.AppState, _ Options, fallback func(*app.Server)) {
 	fallback(nil)
 }

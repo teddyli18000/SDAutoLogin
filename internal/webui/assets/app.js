@@ -1,10 +1,9 @@
 ﻿"use strict";
 
-/* The address the page was opened with carried a token, and the server
-   exchanged it for this cookie before serving the page, so what is left in the
-   address bar carries nothing. The page repeats the cookie in a header of its
-   own on every request; a request that changes something is only accepted with
-   both. */
+/* The address the page was opened with carried a token, which the server
+   exchanged for this cookie before serving the page, so the address bar carries
+   nothing. The page repeats the cookie in a header of its own; a request that
+   changes something is accepted only with both. */
 const TOKEN_COOKIE = "sdauth";
 
 function readToken() {
@@ -28,9 +27,9 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 /* Every decision this page makes that a reader could later ask about is written
-   to the browser's console, so a report of "the button did nothing" can be read
-   back in the order it happened. The prefix is what to filter on. Nothing secret
-   goes through here: whether a password is there is said, never the password. */
+   to the browser's console under this prefix, so a report of "the button did
+   nothing" can be read back in the order it happened. Nothing secret goes through
+   here: whether a password is there is said, never the password. */
 function note(what, detail) {
   if (detail === undefined) console.log("[sdautologin] " + what);
   else console.log("[sdautologin] " + what, detail);
@@ -121,11 +120,10 @@ function applyLang(code) {
   document.documentElement.lang = code === "zh" ? "zh-CN" : "en";
 }
 
-/* The string table arrives with the bootstrap response, so a page whose
-   bootstrap failed has to take the language from the browser instead. Both
-   wordings live here rather than in the table, which this page cannot reach,
-   and they say where to open the page again rather than naming a token: there
-   is nowhere on this page to type one. */
+/* The string table arrives with the bootstrap response, so a page whose bootstrap
+   failed has to take the language from the browser instead. Both wordings live
+   here rather than in the table, which this page cannot reach, and say where to
+   open the page again rather than naming a token: there is nowhere to type one. */
 function bootFailedText() {
   if ((navigator.language || "").toLowerCase().startsWith("zh")) {
     return "设置页已失效，请从托盘重新打开，或打开日志里最新的那个地址。";
@@ -169,9 +167,8 @@ function renderAccounts(accounts) {
   updateEntryActions();
 }
 
-// The test button and the switch both ask the running program about the list it
-// is running with, which is keyed by position, so an entry just moved or edited
-// is not what the program would use yet. They therefore wait for a save.
+// The test button and the switch ask the running program, whose list is keyed by
+// position, so an entry just moved or edited is not what it uses yet: both wait for a save.
 function updateEntryActions() {
   Array.from(document.querySelectorAll('#accountList [data-act="test"]')).forEach((node) => {
     const index = Number(node.closest(".account").dataset.index);
@@ -202,8 +199,7 @@ function accountCard(entry, index) {
       text: entry.username || t("acct.card", index + 1),
     }),
     // The three states an entry can be in besides usable: the session is on it,
-    // the portal refused it for a while, or it is switched off. applyStatusBadges
-    // fills in what they say.
+    // the portal refused it for a while, or it is switched off.
     el("span", { class: "badge active", text: t("acct.active"), hidden: true }),
     el("span", { class: "badge skipped", hidden: true }),
     el("span", { class: "badge off", text: t("acct.disabled"), hidden: !entry.disabled }),
@@ -234,16 +230,12 @@ function accountCard(entry, index) {
   });
 
   // The password is the one field the page is never given: an entry that has one
-  // says so instead, and the field is left empty for the reader to replace it
-  // with. Empty is what "keep the stored one" looks like in the request the page
-  // sends back.
+  // says so instead, and the field is left empty, which is what "keep the stored
+  // one" looks like in the request the page sends back.
   //
   // What the reader has typed is put back as the card is rebuilt, because a card
-  // is rebuilt from what is on the page every time the list changes: a password
-  // typed into a card and then lost to a drag, a language change or a refused
-  // save was reported back as a missing one, on an account the reader had just
-  // filled in. The stored password is still never sent to the page, so an entry
-  // that comes from the program arrives with this empty and says so instead.
+  // is rebuilt from the page every time the list changes; the stored password is
+  // still never sent to the page.
   const password = el("input", {
     id: passwordID,
     type: "password",
@@ -282,15 +274,14 @@ function accountCard(entry, index) {
   test.dataset.act = "test";
   const testResult = el("div", { class: "test-result", hidden: true });
 
-  // Shown only on the card the session is on, and only while the entry lists
+  // Shown only on the card the session is on, and only while its entry lists
   // another service type to move it to; applyStatusBadges decides both from the
-  // status it is handed, and fills in the select and the line.
+  // status it is handed.
   const switchButton = button(t("acct.preferred.btn"), "ghost");
   switchButton.dataset.act = "switchService";
   // The one way out the program cannot take itself: the portal's own page, for
-  // signing the session out when the portal will not sign in again while it is
-  // up. It belongs to the refusal, so renderPreferred uncovers it there and it
-  // is created hidden.
+  // signing the session out while the portal refuses to sign in again. It belongs
+  // to the refusal, so it is created hidden and renderPreferred uncovers it there.
   const portalButton = button(t("acct.preferred.portal"), "ghost");
   portalButton.dataset.act = "openPortal";
   portalButton.hidden = true;
@@ -325,9 +316,8 @@ function row(labelID, label, control, hint, errorKey) {
       errorKey ? el("p", { class: "error", dataset: { error: errorKey } }) : null));
 }
 
-// A chip is one service type of one account. They are dragged, or moved with
-// the arrow keys while one has the focus, because their order is the order the
-// portal is asked in.
+// A chip is one service type of one account, dragged or moved with the arrow keys
+// while focused, because their order is the order the portal is asked in.
 function chip(suffix) {
   return el("span", {
     class: "chip",
@@ -481,19 +471,16 @@ function entryLabel(index, usedSuffix) {
   return (entry.username || t("acct.card", index + 1)) + " (" + isps.map(operatorName).join(", ") + ")";
 }
 
-// activeEntryLabel names the entry the session is on, with the one service type
-// it is on rather than every type the entry may be used with. Which one that is
-// comes from the program, which reads it off the account the portal echoes: a
-// suffix the echo does not carry is one the login did not send, which is how a
-// session on the campus network itself is told apart from one on a carrier.
+// activeEntryLabel names the entry the session is on, with the one service type it
+// is on rather than every type of the entry. The program reads that off the account
+// the portal echoes: a suffix the echo does not carry is one the login did not send.
 function activeEntryLabel(st) {
   if (!st || typeof st.entryIndex !== "number" || st.entryIndex < 0) return "-";
   const cfg = state.config;
   if (!cfg || !cfg.accounts || st.entryIndex >= cfg.accounts.length) return "-";
   // The service type is known only while a session has been read, which is the
-  // online state: a session that is gone is not on any of them, and the entry is
-  // named with the types it may be used with instead. So is a status that does
-  // not carry a service type at all, which is what the login self test answers.
+  // online state: otherwise the entry is named with the types it may be used with
+  // instead, as for a status that carries no service type at all.
   if (st.state === "online" && typeof st.usedIsp === "string") {
     return entryLabel(st.entryIndex, st.usedIsp);
   }
@@ -526,10 +513,8 @@ function applyStatusBadges(st) {
       }
     }
     // The card of the account the session is on: where the session is, where the
-    // entry says it should be, and the way to move it there. It is shown
-    // whenever that entry lists another service type, and the line says whether
-    // the program's own attempt was refused, which is the case a reader cannot
-    // see anywhere else: the session is up and working.
+    // entry says it should be, and the way to move it there. The line also says
+    // whether the program's own attempt was refused, visible nowhere else.
     renderPreferred(card, st, index);
   });
   updateSummary();
@@ -539,13 +524,11 @@ function applyStatusBadges(st) {
 function renderPreferred(card, st, index) {
   const block = card.querySelector(".account-preferred");
   if (!block) return;
-  // Only the card of the entry the session is on, and only while it is up: the
-  // block is about a session that exists, and every other card's service types
-  // have nothing to do with where that session is.
+  // Only the card of the entry the session is on, and only while that session is
+  // up: the block is about a session that exists, not about other cards.
   const targets = st.state === "online" && st.entryIndex === index ? switchTargets(st, index) : [];
-  // Written only when the answer changes. This runs for every card on every
-  // refresh of the status, and a line per poll would bury everything else in
-  // the console.
+  // Written only when the answer changes: this runs for every card on every
+  // refresh, and a line per poll would bury everything else in the console.
   const shows = targets.length > 0;
   if (block.hidden === shows) {
     note(shows
@@ -563,11 +546,9 @@ function renderPreferred(card, st, index) {
   if (!shows) return;
 
   const select = block.querySelector(".preferred-isp");
-  // What the reader picked is kept while it is still one of the ways out: the
-  // status is refreshed every few seconds, and the list is rebuilt with it. An
-  // empty value is the campus network itself, which is a way out like any other,
-  // so the first render is told apart by the options the select does not have
-  // yet rather than by an empty value.
+  // What the reader picked is kept while it is still one of the ways out, because
+  // the list is rebuilt on every status refresh. An empty value is the campus
+  // network itself, so the first render is told apart by the select having no options.
   const picked = select.options.length ? select.value : null;
   select.replaceChildren(...targets.map((suffix) =>
     el("option", { value: suffix, text: operatorName(suffix) })));
@@ -580,8 +561,7 @@ function renderPreferred(card, st, index) {
   const refused = st.switchRefused;
   line.classList.toggle("attention", !!refused);
   // The portal page is offered with the refusal and nowhere else: without one
-  // there is nothing on the portal to go and do, and a second button beside
-  // "Sign in again" would only be a question of which one to press.
+  // there is nothing on the portal to go and do.
   const portalButton = block.querySelector('[data-act="openPortal"]');
   if (portalButton) portalButton.hidden = !refused;
   if (refused) {
@@ -598,8 +578,7 @@ function renderPreferred(card, st, index) {
 }
 
 // switchTargets is the service types of one entry that the session is not on,
-// which are the ones it can be moved to. The one it is on is left out: a login
-// as that would ask the portal for what it already has.
+// which are the ones it can be moved to; the one it is on is left out.
 function switchTargets(st, index) {
   const cfg = state.config;
   if (!cfg || !cfg.accounts || index < 0 || index >= cfg.accounts.length) return [];
@@ -622,16 +601,13 @@ function renderStatus(st) {
   const code = st.state || "checking";
   $("statePill").dataset.state = code;
   // A session that is up and that the program could not move where the order of
-  // the login list says it should be needs a reader, and nothing else in the
-  // strip says so: the state is Online, which reads as "nothing to do". The pill
-  // carries the words and the strip carries the sentence, so the news is where
-  // the state is looked at as well as beside the account it is about.
+  // the login list says it should be needs a reader, and nothing else says so:
+  // the state reads as "nothing to do". Hence the pill and the strip both carry it.
   const refused = st.switchRefused;
   $("statePill").classList.toggle("attention", !!refused);
-  // The pill carries the state and, once something is signed in, who it is
-  // signed in as: the account and the service type the session is on. That is
-  // the question the strip of readings answers, and the strip is a row lower
-  // than it needs to be for the one reading looked at most.
+  // The pill carries the state and, once something is signed in, who it is signed
+  // in as: the account and the service type the session is on. That is the reading
+  // looked at most, and the strip of readings is a row lower than it needs to be.
   const stateWord = state.i18n["state." + code] ? t("state." + code) : t("msg.noStatus");
   const who = activeEntryLabel(st);
   let pill = who === "-" ? stateWord : stateWord + " · " + who;
@@ -677,11 +653,9 @@ function applyErrors() {
   const generic = state.errors["_"];
   if (generic) toast(t(generic), true);
 
-  // The wizard lies over the whole page, so a message that belongs to a field
-  // underneath it cannot be seen: while it is open, the wizard carries the first
-  // one itself. Without this a save the server refused looks like nothing
-  // happened at all, which is what the first run does when its account has not
-  // been filled in.
+  // The wizard lies over the whole page, so a message belonging to a field
+  // underneath it cannot be seen: while it is open it carries the first one
+  // itself, or a refused save would look like nothing happened.
   if (!$("wizard").hidden) {
     const first = Object.values(state.errors)[0];
     const slot = document.querySelector('[data-error="wizard"]');
@@ -765,16 +739,12 @@ async function refreshStatus() {
   const res = await api("/api/status");
   if (res.unreachable || !res.ok) {
     // Both mean this page's session is gone: the program quit, or the settings
-    // service shut itself down while the tab was idle, which is what a browser
-    // does to a tab in the background. A refusal used to be passed over in
-    // silence, leaving a page that kept showing the numbers it last saw and
-    // could change nothing; saying it once is the whole remedy, since the way
-    // back is to open the page again from the tray.
+    // service shut down while the tab was idle. The way back is to open the page
+    // again from the tray, so saying it once is the whole remedy.
     if (!warnedStale) {
       warnedStale = true;
-      // Said once per page, in the console as well as on screen: what the reader
-      // sees is a page that has stopped answering, and the line says which of the
-      // two it was.
+      // Said once per page, in the console as well as on screen: the line says
+      // which of the two it was.
       note("this page's session is gone: the status request was refused, the program has quit or its settings service has shut down");
       toast(t("msg.stale"), true);
     }
@@ -835,12 +805,9 @@ async function testEntry(index, buttonNode) {
 /* ---------- the service type the session is on ---------- */
 
 /* switchService asks the program to sign the session in again with the service
-   type picked on the card, which replaces the session the portal is holding: one
-   session per client address is what the portal allows, so that is the only way
-   onto another one. The program says whether there was anything to do - the
-   session may have gone down in the meantime, or it may be on that service type
-   already - and the answer is shown the way the login self test shows one.
-   It works on the configuration the program is running, not on what is on the
+   type picked on the card, which replaces the session the portal holds: the
+   portal allows one session per client address, so that is the only way onto
+   another one. It works on the configuration the program is running, not on the
    page, since the session belongs to the running program. */
 async function switchService(card, buttonNode) {
   const select = card.querySelector(".preferred-isp");
@@ -875,10 +842,9 @@ async function switchService(card, buttonNode) {
   refreshStatus();
 }
 
-/* The way out of a session the portal will not sign in again while it is up:
-   the session has to be signed out on the portal's own page, which the program
-   cannot do, and the switch is asked for again afterwards. The address is the
-   one the program is configured with, so the request carries nothing. */
+/* The way out of a session the portal will not sign in again while it is up: the
+   session has to be signed out on the portal's own page, which the program cannot
+   do. The address is the one the program is configured with, so it carries nothing. */
 async function openPortal() {
   note("asking the program to open the portal page");
   const res = await api("/api/action", { method: "POST", body: JSON.stringify({ action: "openPortal" }) });
@@ -943,11 +909,8 @@ async function switchLanguage(lang) {
   fillWizardSelect(state.operators);
   markDirty();
   // Nothing is saved while the wizard is open: the account it is about is not in
-  // the list yet, so the save would be refused with "at least one account" over
-  // a step the reader has not reached, and that refusal was what the first run
-  // showed when only the language had been picked. The wizard's own button saves
-  // the language along with the account, and a reader who skips it changes the
-  // language again on the page behind, where saving is what that means.
+  // the list yet, so the save would be refused. The wizard's own button saves the
+  // language with the account, and one who skips it changes it on the page behind.
   if (!$("wizard").hidden) {
     note("the language was changed while the wizard is open, not saving it yet");
     return;
@@ -1082,11 +1045,9 @@ function wire() {
       isps: [$("w-isp").value],
       disabled: false,
     };
-    // What is saved is the list the cards hold, so the account the wizard is
-    // about has to be a card before anything is submitted. On a first run the
-    // list is empty, and a request built from it carries no account at all,
-    // which the server refuses as a missing account. The card keeps the password
-    // it is given, see accountCard, so it is in the request as well.
+    // What is saved is the list the cards hold, so the account the wizard is about
+    // has to be a card first: on a first run the list is empty, and a request built
+    // from it would carry no account. The card keeps the password it is given.
     redraw(accounts);
     note("the wizard's account was put in the list as card 1, saving it");
     // submit hides the wizard once the server has taken the configuration, and
@@ -1164,9 +1125,8 @@ function wireAccounts() {
     refreshPicker(card);
   });
 
-  // Drag and drop: only the grip starts a card drag, because a card that is
-  // draggable everywhere would be dragged out of the middle of a password
-  // selection. A chip is draggable itself, within its own row.
+  // Only the grip starts a card drag, because a card draggable everywhere would be
+  // dragged out of the middle of a password selection. A chip is draggable itself.
   let dragging = null;
   let draggingChip = null;
 
@@ -1199,8 +1159,7 @@ function wireAccounts() {
       if (!over || over === draggingChip) return;
       const box = draggingChip.parentElement;
       // A service type belongs to one account, so a chip dragged over another
-      // account's chip has nowhere to go: inserting it there is not something the
-      // browser allows, and asking for it throws rather than doing nothing.
+      // account's chip has nowhere to go: asking for it would throw.
       if (over.parentElement !== box) return;
       const rect = over.getBoundingClientRect();
       const after = event.clientX > rect.left + rect.width / 2;
@@ -1230,11 +1189,9 @@ function wireAccounts() {
     dragging.classList.remove("dragging");
     dragging.draggable = false;
     dragging = null;
-    // The cards were moved one over the other as the pointer went across them, so
-    // the list is already in the order the reader dropped it in; it is read back
-    // out of the DOM the way every other edit reads it. Putting the cards back
-    // into the position they came from would apply the move a second time, and a
-    // dropped card would either jump home or land somewhere else entirely.
+    // The cards were moved one over the other as the pointer crossed them, so the
+    // list is already in the order it was dropped in and is read back out of the
+    // DOM like every other edit.
     state.status = Object.assign({}, state.status, { entryIndex: -1, skipped: [] });
     const dropped = collect().accounts;
     note("the list was dropped in this order", accountsBrief(dropped));

@@ -34,20 +34,18 @@ var (
 	instanceTaken bool
 )
 
-// AcquireSingleInstance reports whether this is the only running copy. When
-// another copy owns the name and requestSettings is set, that copy is asked to
-// open its settings page, so starting the program twice brings up the existing
-// window instead of adding a second tray icon.
+// AcquireSingleInstance reports whether this is the only running copy. When another
+// copy owns the name and requestSettings is set, that copy is asked for its settings
+// page, so starting twice brings up the existing window, not a second tray icon.
 func AcquireSingleInstance(requestSettings bool) bool {
 	if instanceTaken {
 		return true
 	}
 
-	// The event is created before the mutex on purpose. A second copy can only
-	// find this process by finding the mutex, and it can only find the mutex once
-	// it exists, so by that point the event is guaranteed to exist as well. The
-	// other order would let a quick second copy signal an event that has not been
-	// created yet, and the request would be lost with it.
+	// The event is created before the mutex on purpose. A second copy can only find
+	// this process by finding the mutex, so by the time it does, the event is
+	// guaranteed to exist as well; the other order would let a quick second copy
+	// signal an event that is not created yet and lose the request.
 	if ev, _, err := procCreateEventW.Call(0, 1, 0, uintptr(unsafe.Pointer(UTF16Ptr(showSettingsEventName)))); ev != 0 {
 		showSettingsEvent = syscall.Handle(ev)
 	} else {
@@ -71,10 +69,10 @@ func AcquireSingleInstance(requestSettings bool) bool {
 	return true
 }
 
-// requestSettingsPage hands the request to the copy that is already running.
-// The event is manual reset, so it stays signalled until that copy looks at it.
-// A request therefore survives until the running copy is ready, which a posted
-// message could not promise while its window is still being created.
+// requestSettingsPage hands the request to the copy that is already running. The
+// manual reset event stays signalled until that copy looks at it, so the request
+// survives until it is ready, which a posted message could not promise while its
+// window is still being created.
 func requestSettingsPage() {
 	if showSettingsEvent == 0 {
 		logging.Log.Warn("the running instance cannot be asked for its settings page")

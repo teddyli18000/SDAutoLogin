@@ -21,12 +21,9 @@ func AutostartEnabled() bool {
 	return cmd.Run() == nil
 }
 
-// SetAutostart adds or removes the HKCU Run entry. reg runs hidden, otherwise
-// a console window would flash on every toggle.
-//
-// What is written is the command this run was started with, so an entry set up
-// from a run given --home starts that directory's configuration rather than a
-// fresh one beside the executable.
+// SetAutostart adds or removes the HKCU Run entry, holding the command this run
+// was started with (see SetAutostartArguments). reg runs hidden, otherwise a
+// console window would flash on every toggle.
 func SetAutostart(on bool) bool {
 	command := autostartCommand()
 	if on && command == "" {

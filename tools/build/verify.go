@@ -1,15 +1,14 @@
-// Checking what the packaging wrote, with the tool of every format.
+// Checking what the packaging wrote, with the tool of every format: this is the
+// automated form of the checks the formats were written against. dpkg reads the deb
+// and the ipk, rpm verifies the four digests it carries, bsdtar reads the Arch
+// package and its listing, and the Windows archives are compared with the builds
+// they were made from and the manifests that point at them. Packing everything a
+// second time then says whether the result is the same bytes, so a release built
+// twice is the same release.
 //
-// This is the automated form of the checks the formats were written against:
-// dpkg reads the deb and the ipk, rpm verifies the four digests it carries,
-// bsdtar reads the Arch package and its listing, and the Windows archives are
-// compared with the builds they were made from and with the manifests that point
-// at them. Packing everything a second time then says whether the result is the
-// same bytes, so a release built twice is the same release.
-//
-// A tool that is not installed is named and counted, rather than passed over:
-// a run that reports success without having looked at anything is worse than one
-// that names what it could not look at.
+// A tool that is not installed is named and counted, rather than passed over: a run
+// that reports success without having looked at anything is worse than one that
+// names what it could not look at.
 
 package main
 

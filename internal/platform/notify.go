@@ -2,10 +2,9 @@ package platform
 
 import "strings"
 
-// notifyCommand is how a desktop is asked for a desktop notification, or
-// ("", nil) when there is no helper for it. It is kept apart from Notify, which
-// each system provides for itself, so the wording of the command can be tested
-// without running one.
+// notifyCommand is how a desktop is asked for a notification, or ("", nil) when
+// there is no helper for it. It is kept apart from Notify, which each system
+// provides for itself, so the command can be tested without running one.
 func notifyCommand(goos, title, body string) (string, []string) {
 	switch goos {
 	case "darwin":

@@ -1,11 +1,11 @@
 // The RPM package: one .rpm per architecture, for the distributions that read
 // this format.
 //
-// The header of an rpm is a tagged binary structure rather than an archive, so
-// it is written here tag by tag, and the payload is a cpio archive inside a gzip
-// stream. Every tag number and every layout rule below was read back out of a
-// package built by rpmbuild and then checked by having rpm itself read, verify
-// and install what this file writes.
+// The header of an rpm is a tagged binary structure rather than an archive, so it
+// is written here tag by tag, and the payload is a cpio archive inside a gzip
+// stream. Every tag number and layout rule below was read back out of a package
+// built by rpmbuild and checked by having rpm read, verify and install what this
+// file writes.
 
 package main
 
@@ -152,9 +152,8 @@ func taskRpm(root string) error {
 			return err
 		}
 	}
-	// This task is registered on its own as well as under taskPackages, so the
-	// digests are rewritten here too: an archive and the file that describes it
-	// must not disagree after either.
+	// The digests are rewritten here too, this task being registered on its own as
+	// well as under taskPackages.
 	return writeChecksums(root)
 }
 
@@ -190,10 +189,9 @@ func packageRpm(root string, t target) error {
 // directories the files live in, then the files themselves.
 //
 // The directories are listed because rpm only takes away what it knows it
-// installed. A package that names no directory leaves every one of them behind
-// once it is removed, empty, and `rpm -ql` does not show them either. The ones
-// the system already has are named as well: a directory can belong to more than
-// one package, which is not true of a file.
+// installed: a package that names none leaves them all behind, empty, once it is
+// removed, and `rpm -ql` does not show them either. A directory the system already
+// has is named as well, since one can belong to more than one package.
 func rpmFiles(root string, t target) ([]rpmFile, error) {
 	entries, err := systemdFiles(root, filepath.Join(root, distDir, t.name()))
 	if err != nil {

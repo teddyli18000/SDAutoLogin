@@ -1,24 +1,20 @@
-// The tests of the packaging half of the task runner.
+// The tests of the packaging half of the task runner, which run with nothing
+// installed. The formats are the kind that fail quietly: an ar member whose size
+// field is one byte out, a tar entry without the directory that holds it, a tag
+// written at an offset a reader aligns differently. `verify` reads every package
+// back with the tool of its format, which is the check that matters, but it needs
+// a toolchain and those tools installed to run at all.
 //
-// Every container this repository publishes is written here, by hand, and the
-// formats are the kind that fail quietly: an ar member whose size field is one
-// byte out, a tar entry without the directory that holds it, a tag written at an
-// offset a reader aligns differently. `verify` reads every package back with the
-// tool of its format, which is the check that matters, and it needs a toolchain
-// and those tools installed to run at all.
-//
-// These tests are the local half of that, and they run with nothing installed:
-//
-//   - the layout of a container is compared with the expected one, written out
-//     in full, so that a change to a format shows up as a difference rather than
-//     as a package that installs wrongly;
+//   - the layout of a container is compared with the expected one, written out in
+//     full, so that a change to a format shows up as a difference rather than as a
+//     package that installs wrongly;
 //   - every container is packed twice from the same input and the two have to be
-//     the same bytes, which is what a release published with a digest next to it
-//     depends on.
+//     the same bytes, which a release published with a digest next to it depends
+//     on.
 //
-// The expected layout is written out rather than recorded as a digest of the
-// package: a digest says that something changed and not what, and it moves when
-// the compressor is updated, which has nothing to do with the format.
+// The expected layout is written out rather than recorded as a digest, which would
+// say that something changed and not what, and would move when the compressor is
+// updated rather than when the format changes.
 package main
 
 import (
@@ -39,8 +35,8 @@ import (
 
 // The version and the address the packages below are made of. Neither is taken
 // from the tree: a golden that moved with every release would have to be written
-// again for every release, and what is being held here is the layout of a
-// container, not what is in it.
+// again for every release, and what is held here is the layout of a container, not
+// what is in it.
 const (
 	goldenVersion = "1.2.3"
 	goldenRepo    = "https://example.invalid/SDAutoLogin"

@@ -14,9 +14,9 @@ const (
 	// installs next to the binary, and the maintainer scripts.
 	openwrtDir = "packaging/openwrt"
 	// The four files the package installs, named as the router sees them. The
-	// configuration file is listed as one, so an upgrade keeps the account that
-	// was put in it. The program itself goes to /usr/lib compressed, and what
-	// the router runs is the wrapper, which unpacks it into memory.
+	// configuration file is listed as one, so an upgrade keeps the account in it.
+	// The program goes to /usr/lib compressed, and what the router runs is the
+	// wrapper, which unpacks it into memory.
 	uciFile        = "/etc/config/sdautologin"
 	initFile       = "/etc/init.d/sdautologin"
 	openwrtWrapper = "/usr/bin/SDAutoLogin"
@@ -44,9 +44,8 @@ func taskOpenwrt(root string) error {
 			return err
 		}
 	}
-	// This task is registered on its own as well as under taskPackages, so the
-	// digests are rewritten here too: an archive and the file that describes it
-	// must not disagree after either.
+	// The digests are rewritten here too, this task being registered on its own as
+	// well as under taskPackages.
 	return writeChecksums(root)
 }
 
@@ -60,10 +59,10 @@ func packageOpenwrt(root string, t target) error {
 	}
 	arch := openwrtArch(t.goarch)
 
-	// The program is installed compressed, and a wrapper unpacks it into memory
-	// on the first start: a router has little flash and a fair amount of memory,
-	// and this way the package takes about a third of the flash it would
-	// otherwise, at the cost of the unpacked copy living in /tmp.
+	// The program is installed compressed, and a wrapper unpacks it into memory on
+	// the first start: a router has little flash and a fair amount of memory, so
+	// the package takes about a third of the flash it otherwise would, at the cost
+	// of the unpacked copy living in /tmp.
 	bin, err := readBinary(filepath.Join(root, distDir, t.name()))
 	if err != nil {
 		return err

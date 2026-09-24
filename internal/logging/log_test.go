@@ -35,9 +35,8 @@ func TestInitWithAFileWritesAndCloses(t *testing.T) {
 }
 
 func TestInitWithoutAFileKeepsTheLogOnTheConsole(t *testing.T) {
-	// A machine with a small flash asks for this: what the program writes to the
-	// console is collected by its service manager already, and the file would be
-	// the same text on the flash a second time.
+	// A machine with a small flash asks for this: its service manager already
+	// collects the console output, so the file would be the same text twice.
 	dir := filepath.Join(t.TempDir(), "logs")
 
 	Log.Init(dir, false)
@@ -74,7 +73,7 @@ func TestTheLogAndItsDirectoryBelongToTheirOwner(t *testing.T) {
 	}
 
 	// A file an earlier version left readable by everyone is tightened when the
-	// log is opened again.
+	// log is opened again; see openLocked.
 	Log.CloseFile()
 	if err := os.Chmod(file, 0o644); err != nil {
 		t.Fatal(err)
@@ -116,9 +115,8 @@ func TestASecondInitReplacesTheFirst(t *testing.T) {
 }
 
 func TestInitDoesNotReportAFileItCouldNotOpen(t *testing.T) {
-	// A directory where app.log belongs makes the open fail. Path() feeds the
-	// tray's "open log" item, the log tail and the About tab, so it must not
-	// name a file that was never opened.
+	// A directory where app.log belongs makes the open fail, and Path() must not
+	// then name a file that was never opened.
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "app.log"), 0o700); err != nil {
 		t.Fatal(err)

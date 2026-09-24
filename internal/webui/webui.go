@@ -1,6 +1,5 @@
 // Package webui holds the settings page that is compiled into the executable.
-// The page is served over loopback by the app package, so it is embedded here
-// and read from there through Assets.
+// The app package serves it over loopback, reading it through Assets.
 package webui
 
 import (

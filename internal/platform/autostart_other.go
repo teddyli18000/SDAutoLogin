@@ -15,9 +15,8 @@ import (
 const appID = "sdautologin"
 
 // autostartPath is the file the desktop reads, and "" when there is nowhere to
-// put it: without a home directory the path would be relative, which lands the
-// entry in whatever directory the program happened to start in, where the desktop
-// never looks for it. An entry that cannot work is not written.
+// put it: without a home directory the path would be relative, landing the entry
+// where the desktop never looks. An entry that cannot work is not written.
 func autostartPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
@@ -40,11 +39,8 @@ func AutostartEnabled() bool {
 	return err == nil
 }
 
-// SetAutostart writes a desktop entry on Linux or a LaunchAgent on macOS.
-//
-// What it writes is the command this run was started with, so an entry set up from
-// a run given --home starts that directory's configuration rather than a fresh one
-// beside the executable.
+// SetAutostart writes a desktop entry on Linux or a LaunchAgent on macOS, holding
+// the command this run was started with (see SetAutostartArguments).
 func SetAutostart(on bool) bool {
 	path := autostartPath()
 	if path == "" {

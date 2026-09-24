@@ -20,15 +20,13 @@ import (
 // says no is made for the machines that have no desktop session to put one in.
 const HasTray = true
 
-// Run provides the Linux / macOS tray through fyne.io/systray, since the
-// standard library cannot create one, and blocks until the tray quits. On Linux
-// the library uses a pure Go D-Bus StatusNotifierItem backend, on macOS it needs
-// cgo and therefore the Xcode command line tools at build time.
+// Run provides the Linux / macOS tray through fyne.io/systray, which the
+// standard library cannot, and blocks until the tray quits. On Linux the library
+// uses a pure Go D-Bus StatusNotifierItem backend; on macOS it needs cgo and the
+// Xcode command line tools at build time.
 //
-// A machine with no session bus has no tray to put up, and the toolkit does not
-// say so: it starts the program and then waits for a quit that nothing can ask
-// for. That is what the caller's fallback is for, and it is taken here rather
-// than left to a caller that cannot see the difference.
+// A machine with no session bus has no tray to put up and the toolkit does not
+// say so, so the caller's fallback is taken here (see sessionBusError).
 func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
 	if err := sessionBusError(); err != nil {
 		logging.Log.Warn("no session bus to put a tray icon on (%v), running without one", err)
@@ -38,10 +36,9 @@ func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
 		return
 	}
 
-	// The tap handler is registered before the event loop starts on purpose.
-	// The Linux backend reads it while it exports the status notifier item, so a
-	// handler set from the ready callback can arrive too late: the item would be
-	// marked as menu only and the desktop would never report a click.
+	// The tap handler is registered before the event loop starts on purpose: the
+	// Linux backend reads it while it exports the item, so one set from the ready
+	// callback can arrive too late, leaving the item menu only with no clicks.
 	var tray atomic.Pointer[unixTray]
 	systray.SetOnTapped(func() {
 		if t := tray.Load(); t != nil {
@@ -175,11 +172,10 @@ func trayReady(state *app.AppState, opts Options) *unixTray {
 	t.state.SetListener(t.onStatus)
 	t.state.Start()
 
-	// A second start is a request to see the settings page, which the copy that
-	// is already running answers through the socket it published beside its
-	// lock file. The listener is already bound by the time the tray is built,
-	// so a request that arrives while the icon is still being made waits in the
-	// socket until this loop reads it, rather than being lost.
+	// A second start is a request for the settings page, which the running copy
+	// answers through the socket published beside its lock file. The listener is
+	// already bound, so a request arriving while the icon is still being made
+	// waits in the socket rather than being lost.
 	go platform.WaitForSettingsRequest(t.answerSettingsRequest)
 
 	// A page opened for a machine with nothing written down yet is logged by the
@@ -244,11 +240,10 @@ func (t *unixTray) onStatus(s service.Snapshot) {
 	}
 	t.mu.Unlock()
 
-	// The transitions worth telling the user about, the same ones the Windows
-	// tray shows as a balloon tip. This runs outside the lock, since it starts a
-	// helper process and the tray state has no part in that. The refusal is one
-	// of them because the program has stopped trying: the session is being left
-	// as it is and moving it is the reader's to do.
+	// The transitions worth telling the user about, as the Windows tray does with
+	// a balloon tip. It runs outside the lock since it starts a helper process.
+	// The refusal is one of them: the program has stopped trying, and moving the
+	// session is the reader's to do.
 	switch {
 	case previous == service.StateLoggingIn && s.State == service.StateOnline:
 		platform.Notify(i18n.L("app.name"), i18n.L("balloon.loggedIn"))
@@ -266,9 +261,8 @@ func (t *unixTray) tooltip(s service.Snapshot) string {
 		out += " (" + s.Message + ")"
 	}
 	// The session is up and the program could not move it where the order of the
-	// login list says it should be, so the reader is told the session is theirs
-	// to move. It is a line of its own because the state is Online: there is no
-	// error to read here, only something left to do.
+	// login list says, so the reader is told it is theirs to move. It is a line of
+	// its own because the state is Online: there is no error, only something to do.
 	if s.SwitchRefused != nil {
 		out += "\n" + i18n.L("tray.switchRefused")
 	}

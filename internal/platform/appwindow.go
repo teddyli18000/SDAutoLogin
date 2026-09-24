@@ -13,10 +13,9 @@ import (
 // browser chrome, so the settings page looks like an application of its own
 // rather than a tab among everything else the user has open.
 //
-// Only the Chromium family can do that, and which member of it is installed is
-// not something this program can know, so the ones that are usually there are
-// tried in turn. When none of them is found, or the one that was found refuses
-// to start, the page goes to the default browser instead: a tab is worse than a
+// Only the Chromium family can do that, and which member is installed cannot be
+// known, so the usual ones are tried in turn. When none is found, or the one found
+// refuses to start, the page goes to the default browser: a tab is worse than a
 // window of its own, but better than a program that appears to do nothing.
 func OpenAppWindow(target string) error {
 	browser := findAppBrowser(
@@ -54,9 +53,8 @@ func appWindowCommand(goos, browser, target string) (string, []string) {
 }
 
 // appBrowserCandidates lists the browsers that can open a window of their own,
-// the ones to try first coming first. A candidate is either an absolute path,
-// on the systems that install into a known place, or a bare name to be looked
-// up on PATH.
+// most preferred first. A candidate is an absolute path on the systems that
+// install into a known place, or a bare name to be looked up on PATH.
 func appBrowserCandidates(goos string, getenv func(string) string) []string {
 	switch goos {
 	case "windows":
@@ -66,9 +64,8 @@ func appBrowserCandidates(goos string, getenv func(string) string) []string {
 				bases = append(bases, base)
 			}
 		}
-		// Chrome first: it is the one people install on purpose. Edge comes
-		// next because it is already on every Windows that has not been stripped
-		// of it, so it is what most machines will end up using.
+		// Chrome first, being the one installed on purpose; Edge next, being
+		// already on every Windows that has not been stripped of it.
 		var out []string
 		for _, rel := range []string{
 			filepath.Join("Google", "Chrome", "Application", "chrome.exe"),

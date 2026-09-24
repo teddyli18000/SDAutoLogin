@@ -7,11 +7,9 @@ import (
 )
 
 // TestTheAutostartCommandIsTheExecutableAndTheArguments covers what an entry
-// starts: this program, named by its full path, and the arguments this run was
-// told to repeat. Both halves matter. An entry does not run in any particular
-// directory, so a bare name would start whatever the desktop finds first, and an
-// entry with no arguments starts on a different configuration than the run that
-// wrote it.
+// starts: this program by its full path, since an entry runs in no particular
+// directory, and the arguments this run was told to repeat, without which the
+// entry would start a different configuration.
 func TestTheAutostartCommandIsTheExecutableAndTheArguments(t *testing.T) {
 	t.Cleanup(func() { SetAutostartArguments(nil) })
 
@@ -44,9 +42,8 @@ func TestTheAutostartCommandIsTheExecutableAndTheArguments(t *testing.T) {
 }
 
 // TestAnArgumentIsQuotedOnlyWhereItNeedsToBe documents the other half of the
-// command line: a value with a space in it has to be quoted or it becomes two
-// arguments, and one without a space is left as it is, since an entry is read by
-// a person as well.
+// command line: a value with a space has to be quoted or it becomes two arguments,
+// and one without is left as it is, since a person reads the entry too.
 func TestAnArgumentIsQuotedOnlyWhereItNeedsToBe(t *testing.T) {
 	for _, c := range []struct{ arg, want string }{
 		{`--home=C:\sda`, `--home=C:\sda`},

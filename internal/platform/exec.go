@@ -9,8 +9,7 @@ import (
 // a path with spaces. It is what the autostart entry stores.
 //
 // It is empty when the program cannot name its own executable, which every caller
-// treats as "there is no command to write down" rather than storing an entry that
-// starts nothing.
+// treats as nothing to write down rather than storing an entry that starts nothing.
 func executablePath() string {
 	exe, err := os.Executable()
 	if err != nil || exe == "" {

@@ -21,15 +21,14 @@ const (
 	attachParentProcess = 0xffffffff
 )
 
-// attachConsole gives the output of a command somewhere to appear. The
-// executable is linked as a GUI program so a double click does not flash a
-// console window, which also means it has no console of its own and anything it
-// prints is discarded. Started from a terminal it attaches to that terminal
-// here. A process that was handed handles, for a pipe or a redirected file, is
-// left alone so its output keeps going where the caller put it.
+// attachConsole gives the output of a command somewhere to appear. The executable
+// is linked as a GUI program so a double click does not flash a console window,
+// which also means it has no console of its own; started from a terminal it
+// attaches to that terminal here. A process handed handles for a pipe or a
+// redirected file is left alone, so its output keeps going where the caller put it.
 //
-// The caller opens the log first, so the warning below still reaches the log
-// file when the console itself is missing.
+// The caller opens the log first, so the warning below still reaches the log file
+// when the console itself is missing.
 func attachConsole() {
 	if validStdHandle(stdOutputHandle) || validStdHandle(stdErrorHandle) {
 		return

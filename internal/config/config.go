@@ -19,14 +19,14 @@ import (
 // may be used with, in the order they are to be tried.
 //
 // The portal allows one session per client address, so these accounts can never
-// be online together. The list is therefore a failover order rather than a set
-// of sessions running side by side: an account that is out of credit, whose
-// password changed or that was closed is skipped for the next one.
+// be online together: the list is a failover order rather than sessions running
+// side by side, and an account that is out of credit, whose password changed or
+// that was closed is skipped for the next one.
 type Account struct {
 	Username string `json:"username"`
-	// Password is empty in the file when the password is not remembered, and it
-	// is empty in what the settings page is given: the page writes this field and
-	// never reads it, so a secret that is stored is never sent to a browser.
+	// Password is empty in the file when the password is not remembered, and
+	// empty in what the settings page is given: the page writes this field and
+	// never reads it, so a stored secret is never sent to a browser.
 	Password string `json:"password,omitempty"`
 	// HasPassword is not part of the file. It is what the page is told instead of
 	// the password, so that it can say whether one is stored without being handed
@@ -56,9 +56,9 @@ type Config struct {
 	Password      string `json:"password,omitempty"`
 	AccountSuffix string `json:"accountSuffix,omitempty"`
 
-	// RememberPassword decides whether the passwords are written to disk. It is
-	// one switch for the whole list: a switch per entry would be a row of the
-	// same checkbox, and the mode the program is for needs them all on.
+	// RememberPassword decides whether the passwords are written to disk. One
+	// switch covers the whole list, since the mode the program is for needs them
+	// all on.
 	RememberPassword bool `json:"rememberPassword"`
 
 	// PortalBaseURL is the portal home page, which embeds the client IP the
@@ -85,12 +85,11 @@ type Config struct {
 	// SwitchToPreferredService signs in again when the session is up on a
 	// service type other than the first one of its entry.
 	//
-	// The order of the service types of an entry is the order they are to be
-	// used in, and the portal keeps one session per client address, so a session
-	// that was already up when the program started - one signed in by hand, or
-	// by a previous run with another order - stays where it is unless something
-	// moves it. Turning this off leaves such a session alone and only reports
-	// which service type it is on; the page has a button to move it then.
+	// The order of an entry's service types is the order they are to be used in,
+	// but the portal keeps one session per client address, so a session that is
+	// already up - signed in by hand, or by a previous run with another order -
+	// stays where it is unless something moves it. Turning this off only reports
+	// which service type such a session is on; the page has a button to move it.
 	SwitchToPreferredService bool     `json:"switchToPreferredService"`
 	ProbeURLs                []string `json:"probeUrls"`
 	JsVersion                string   `json:"jsVersion"`
@@ -101,10 +100,9 @@ type Config struct {
 }
 
 // The bounds normalize holds every value to, whatever the page or a hand edited
-// file asked for. The upper ones matter because both of these are multiplied
-// into a time.Duration: a value large enough to wrap it becomes negative, and a
-// negative interval fires the timer at once, which turns the check loop into a
-// hot loop against the portal.
+// file asked for. The upper ones matter: both values are multiplied into a
+// time.Duration, and one large enough to wrap it becomes negative, which fires
+// the timer at once and turns the check loop into a hot loop against the portal.
 const (
 	// A check a day apart is already far past useful.
 	maxCheckIntervalSeconds = 24 * 60 * 60
@@ -197,11 +195,8 @@ func (c *Config) normalize() {
 	if c.HTTPTimeoutSeconds < 2 {
 		c.HTTPTimeoutSeconds = 2
 	}
-	// The upper bounds are not a matter of taste. Both values become a
-	// time.Duration by multiplication, and a large enough one wraps into a
-	// negative duration: the timer then fires at once and the check loop turns
-	// into a hot loop against the portal, with the timeout expiring before the
-	// request is made. A day between checks is already far past useful.
+	// The upper bounds are the ones at their definitions above: a larger value
+	// would wrap the time.Duration and fire the timer at once.
 	if c.CheckIntervalSeconds > maxCheckIntervalSeconds {
 		c.CheckIntervalSeconds = maxCheckIntervalSeconds
 	}
@@ -360,9 +355,8 @@ func (c *Config) AttemptFor(index int, isp string) (Attempt, bool) {
 // the first service type.
 //
 // It is what the order of an entry's service types means for a session that is
-// already up. The portal keeps one session per client address, so moving one is a
-// sign-in that replaces it rather than something that happens by itself, which is
-// why the caller decides whether to act on this.
+// already up. Moving one is a sign-in that replaces it rather than something
+// that happens by itself, which is why the caller decides whether to act on it.
 func (c *Config) PreferredFor(reported string) (Attempt, bool) {
 	index, isp := c.Match(reported)
 	if index < 0 || len(c.Accounts[index].ISPs) == 0 {
@@ -464,13 +458,12 @@ func (c *Config) marshal() ([]byte, error) {
 // KeepPasswordsFrom fills in the passwords an in-memory configuration was handed
 // without, taking them from the one it was built from.
 //
-// The settings page is never given a stored password, so an entry that comes back
-// with that field empty means "the password already there": the page leaves it
-// empty for every entry the reader did not type into. An entry with no
-// counterpart in the stored list — one just added, or one whose account was
-// renamed — has nothing to inherit and stays empty, which the validation then
-// reports as a missing password. Nothing here is reached by an entry that carried
-// a password of its own: what the reader typed always wins.
+// The settings page is never given a stored password, so an empty field on the
+// way back means "the password already there". An entry the stored list does not
+// name - one just added, or one whose account was renamed - has nothing to
+// inherit and stays empty, which the validation then reports as a missing
+// password. An entry that carried a password of its own is left alone: what the
+// reader typed always wins.
 func (c *Config) KeepPasswordsFrom(stored *Config) {
 	if stored == nil {
 		return

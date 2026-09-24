@@ -57,9 +57,8 @@ func taskPacman(root string) error {
 			return err
 		}
 	}
-	// This task is registered on its own as well as under taskPackages, so the
-	// digests are rewritten here too: an archive and the file that describes it
-	// must not disagree after either.
+	// The digests are rewritten here too, this task being registered on its own as
+	// well as under taskPackages.
 	return writeChecksums(root)
 }
 
@@ -92,10 +91,9 @@ func packagePacman(root string, t target, c compression) error {
 	// package manager reads the archive in. The listing of the files travels
 	// compressed, the same way the Arch tools store it.
 	//
-	// The archive carries the directories the files live in as well, and the
-	// listing names them, because pacman only takes away what both of them know
-	// about: without them a removal leaves every directory the package made
-	// behind, empty.
+	// The archive carries the directories the files live in, and the listing names
+	// them, because pacman only takes away what both of them know about: without
+	// them a removal leaves every directory the package made behind, empty.
 	mtree, err := gzipBytes(pacmanMtree(relative))
 	if err != nil {
 		return err

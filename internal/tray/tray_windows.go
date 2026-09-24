@@ -55,10 +55,9 @@ type trayApp struct {
 	hwnd syscall.Handle
 	nid  notifyIconData
 
-	// uiUp is set while the message loop runs. It is what tells the settings
-	// request handler whether a click can be replayed as a message or whether
-	// the page has to be opened straight away, and it is the only field of this
-	// struct another goroutine reads.
+	// uiUp is set while the message loop runs. It tells the settings request
+	// handler whether a click can be replayed as a message or the page opened
+	// straight away, and it is the only field another goroutine reads.
 	uiUp atomic.Bool
 
 	mu   sync.Mutex
@@ -90,8 +89,7 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 		mouse := uint32(lparam) & 0xffff
 		switch mouse {
 		case wmLButtonUp:
-			// A primary click opens the settings page, the way the instant
-			// messengers this program mimics behave.
+			// A primary click opens the settings page, as instant messengers do.
 			logging.Log.Debug("tray: click, opening the settings page")
 			trayInstance.openSettingsFromClick()
 		case wmRButtonUp:
@@ -132,9 +130,8 @@ const HasTray = true
 
 // Run puts the tray icon up and blocks on the message loop. fallback is used when
 // the tray cannot be created, so the program keeps checking in the background
-// instead of quitting. It is handed the settings server, since the page does not
-// depend on the icon and is the only way in on a machine whose icon could not be
-// made.
+// instead of quitting; it is handed the settings server, the page being the only
+// way in on a machine whose icon could not be made.
 func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
 	// The tray window and its message loop must stay on one OS thread.
 	runtime.LockOSThread()
@@ -148,10 +145,9 @@ func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
 		}
 	})
 
-	// Started before the icon exists on purpose. A request arriving while the
-	// tray is still being built stays in the signalled event until the loop
-	// runs, and one arriving after a failed start is answered by opening the
-	// page directly, since the page does not depend on the tray.
+	// Started before the icon exists on purpose: a request arriving while the tray
+	// is still being built stays in the signalled event until the loop runs, and
+	// one arriving after a failed start is answered by opening the page directly.
 	go platform.WaitForSettingsRequest(a.answerSettingsRequest)
 
 	if err := a.create(); err != nil {
@@ -159,8 +155,8 @@ func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
 		// The half built window must not be offered as somewhere to post to.
 		trayInstance = nil
 		if a.opts.AppWindow {
-			// The page does not need the tray, so the window that was asked for
-			// can still be opened on a machine where the icon could not be.
+			// The page does not need the tray, so the window asked for can still
+			// be opened here.
 			a.openSettings()
 		}
 		// The server goes with it: the page it serves is the way in on a machine
@@ -296,9 +292,8 @@ func (a *trayApp) refresh() {
 			s.State, s.InternetChecked, s.InternetOK)
 	}
 	// Tell the user about the transitions that matter; staying quiet about the
-	// rest keeps balloon tips from becoming noise. The refusal is one of them
-	// because the program has stopped trying: the session is being left as it is
-	// and moving it is the reader's to do.
+	// rest keeps balloon tips from becoming noise. The refusal is one because the
+	// program has stopped trying and moving the session is the reader's to do.
 	switch {
 	case previous == service.StateLoggingIn && s.State == service.StateOnline:
 		a.notify(i18n.L("app.name"), i18n.L("balloon.loggedIn"))
@@ -439,8 +434,8 @@ func (a *trayApp) handleCommand(cmd uint32) {
 
 // openSettingsFromClick opens the settings page for a primary click. Windows
 // sends down, up, double click, up for a double click, so the second up would
-// open the page a second time; a repeat inside the double click interval is
-// therefore treated as the same click. Only the UI thread reaches this.
+// open the page again; a repeat inside the double click interval is therefore
+// treated as the same click. Only the UI thread reaches this.
 func (a *trayApp) openSettingsFromClick() {
 	if time.Since(a.lastClick) < doubleClickWindow() {
 		logging.Log.Debug("tray: ignoring the second click of a double click")
@@ -452,8 +447,8 @@ func (a *trayApp) openSettingsFromClick() {
 
 // doubleClickWindow is how long Windows itself waits for the second click of a
 // double click, the interval in which a repeat is not a new request. The first
-// click compares against a zero timestamp, which time.Since reports as far more
-// than any interval, so it always gets through.
+// click compares against a zero timestamp, which time.Since reports as far beyond
+// any interval, so it always gets through.
 func doubleClickWindow() time.Duration {
 	ms, _, _ := procGetDoubleClickTime.Call()
 	if ms == 0 {

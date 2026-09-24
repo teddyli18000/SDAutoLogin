@@ -93,10 +93,9 @@ func TestServerRefusesARequestWithoutTheToken(t *testing.T) {
 	}
 }
 
-// TestTheAddressIsExchangedForASessionCookie covers what happens to the token
-// the tray hands out. The address bar, the history and the Referer of anything
-// the page links to are all the same string, so the token is taken out of it as
-// soon as the page is served, and what the page goes on using is another value.
+// TestTheAddressIsExchangedForASessionCookie covers what happens to the token the
+// tray hands out: the address bar, the history and the page's Referer are the same
+// string, so the token is taken out of it as soon as the page is served.
 func TestTheAddressIsExchangedForASessionCookie(t *testing.T) {
 	server, url := startedServer(t, "127.0.0.1:0")
 
@@ -146,8 +145,7 @@ func TestTheAddressIsExchangedForASessionCookie(t *testing.T) {
 
 // TestTheAddressIsGoodForOneOpening covers what one-opening addresses are for:
 // what a browser was left with, and what someone read out of a log or a history,
-// is not a way in a second time. The server makes the next one as it spends this
-// one, which is what the tray hands out afterwards.
+// is not a way in a second time. The server makes the next one as it spends this.
 func TestTheAddressIsGoodForOneOpening(t *testing.T) {
 	server, url := startedServer(t, "127.0.0.1:0")
 
@@ -272,11 +270,10 @@ func TestAWriteNeedsTheHeaderAsWellAsTheCookie(t *testing.T) {
 	}
 }
 
-// TestTheExitButtonReachesTheCallbackThatWasSetLast covers the run that took
-// over the server the tray had built. The callback the tray gave it posts a
-// message to a window that never got a message loop, so the fallback replaces it
-// with one that ends this run, and the page's exit button has to reach the new
-// one rather than the old.
+// TestTheExitButtonReachesTheCallbackThatWasSetLast covers the run that took over
+// the tray's server: the callback the tray gave it posts to a window that never
+// got a message loop, so the fallback replaces it with one that ends this run, and
+// the page's exit button must reach the new one.
 func TestTheExitButtonReachesTheCallbackThatWasSetLast(t *testing.T) {
 	state := New(&config.Config{Accounts: []config.Account{{Username: "s1234567", Password: "p@ss"}}})
 
@@ -367,11 +364,10 @@ func TestTheReplyDeadlineFollowsTheRequestTimeout(t *testing.T) {
 }
 
 func TestEveryAnswerCarriesTheSecurityHeaders(t *testing.T) {
-	// The page is opened with the token in its address, so an answer must keep
-	// that address from travelling out in a Referer, must not let another page
-	// frame it, and must name what it may load rather than trust its own markup.
-	// The refusal is the answer a caller without the token reads, so it carries
-	// them too.
+	// The page is opened with the token in its address, so an answer must keep that
+	// address out of a Referer, must not be framed by another page, and must name
+	// what it may load rather than trust its own markup. The refusal a caller
+	// without the token reads carries them too.
 	_, url := startedServer(t, "127.0.0.1:0")
 
 	// One client that has been through the exchange and holds the cookie, since
@@ -420,10 +416,9 @@ func TestEveryAnswerCarriesTheSecurityHeaders(t *testing.T) {
 }
 
 func TestAMissingTokenIsOneNothingMatches(t *testing.T) {
-	// The comparison is a constant time one and an empty pair of them matches,
-	// so a token that was never made has to be refused before the comparison
-	// runs: a server that was never started must not accept a caller who sends
-	// no token at all.
+	// The comparison is a constant time one and an empty pair matches, so a token
+	// that was never made is refused before the comparison runs: a server that was
+	// never started must not accept a caller who sends no token at all.
 	if tokenEqual("", "") {
 		t.Error("an empty token matched a token that was never made")
 	}
@@ -692,9 +687,8 @@ func postAction(t *testing.T, server *Server, body string) *httptest.ResponseRec
 
 // TestThePageCanAskForTheServiceTypeTheSessionShouldBeOn covers the reply the
 // controls on the page are rendered from: whether there was anything to do, and
-// when there was, what the sign-in went out as. A session that is already on the
-// service type asked for is answered the same way as one that is not up at all -
-// with nothing to do - rather than with a login reply nobody asked for.
+// what the sign-in went out as. A session already on the service type asked for is
+// answered with nothing to do, like one that is not up at all.
 func TestThePageCanAskForTheServiceTypeTheSessionShouldBeOn(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -755,10 +749,9 @@ func TestThePageCanAskForTheServiceTypeTheSessionShouldBeOn(t *testing.T) {
 	}
 }
 
-// TestASwitchWithoutAServiceTypeIsRefused covers the difference the request
-// keeps: the campus network itself is a service type with no suffix, so a
-// request that names no service type at all is a malformed one rather than a
-// request for the campus network.
+// TestASwitchWithoutAServiceTypeIsRefused covers the difference the request keeps:
+// the campus network itself is a service type with no suffix, so a request naming
+// no service type is malformed rather than a request for the campus network.
 func TestASwitchWithoutAServiceTypeIsRefused(t *testing.T) {
 	stub := newStubPortal(t, []string{"@zgyd", ""}, onlineSession, `{"result":1,"ret_code":0}`)
 	state := New(stub.cfg)
@@ -779,10 +772,9 @@ func TestASwitchWithoutAServiceTypeIsRefused(t *testing.T) {
 }
 
 // TestThePortalPageOpenedIsTheConfiguredOne covers the way out of a session the
-// portal will not sign in again: the page asks for the portal's own page, and
-// what reaches the desktop is the address the program is configured with. The
-// address in the request is ignored on purpose - a page that could name one
-// would be a page that can hand the shell anything it likes.
+// portal will not sign in again: the page asks for the portal's own page, and what
+// reaches the desktop is the configured address. The address in the request is
+// ignored on purpose, so no page can hand the shell one of its choosing.
 func TestThePortalPageOpenedIsTheConfiguredOne(t *testing.T) {
 	cfg := portalPageConfig()
 	server, opened := portalPageServer(t, cfg, nil)
@@ -811,9 +803,8 @@ func TestThePortalPageOpenedIsTheConfiguredOne(t *testing.T) {
 }
 
 // TestAPortalPageThatCannotBeOpenedIsReported covers the other half of that
-// button: when the desktop will not take the address, the request is answered as
-// a failure with a message key, so the page says the button did nothing instead
-// of reporting a browser that never came up.
+// button: when the desktop will not take the address, the request is answered as a
+// failure with a message key, so the page says the button did nothing instead.
 func TestAPortalPageThatCannotBeOpenedIsReported(t *testing.T) {
 	server, opened := portalPageServer(t, portalPageConfig(), errors.New("nothing here takes http addresses"))
 
@@ -899,14 +890,12 @@ func TestASaveCarriesThePreferredServiceSwitch(t *testing.T) {
 	}
 }
 
-// TestAFirstSaveFromThePage covers what the page sends when nothing is
-// configured yet, which is what the wizard does. The list a save carries is the
-// list of cards, so an account that has not been put in it is an account the
-// request does not have, and a password that was not put in the card is one the
-// request does not carry either. Both are refused by name, and the refusal is
-// what the page shows next to the field it is about: the one a reader met was
-// "password is required" on an account whose password had just been typed into a
-// card that was rebuilt underneath it.
+// TestAFirstSaveFromThePage covers what the page sends when nothing is configured
+// yet, which is what the wizard does. The list a save carries is the list of cards,
+// so an account that has not been put in it is an account the request does not
+// have, and a password that was not put in the card is one the request does not
+// carry either. Both are refused by name, and the refusal is what the page shows
+// next to the field it is about.
 func TestAFirstSaveFromThePage(t *testing.T) {
 	cases := []struct {
 		name string
