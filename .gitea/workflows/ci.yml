@@ -192,6 +192,21 @@ jobs:
       # a derivation that quietly fell back on the sources would attach files
       # under names the manifests do not name. Whether the sources still carry the
       # version of the tag is a test in the other job.
+      #
+      # This instance keeps two attachments of the same name rather than replacing
+      # the first, so a tag that is pushed twice - a release cut again after the
+      # sources were fixed, a job re-run after a failure - used to leave the
+      # release with two of every file. Each name is therefore looked for among
+      # the attachments the release already carries and deleted before the upload,
+      # which makes this step leave one of each however many times it runs. It is
+      # not skipped when the release is already there, since a run that stopped
+      # halfway must be able to finish, and a tag that was moved needs what it
+      # published replaced rather than kept.
+      #
+      # Something already attached is the one sign that this tag has been
+      # published before, and it is said out loud: the usual reason is a tag that
+      # was moved and pushed again, which is a release wearing the version of the
+      # one before it.
       - name: publish the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -218,15 +233,19 @@ jobs:
           api="$INSTANCE/api/v1/repos/$REPO/releases"
 
           # The release of this tag, or a new one. Pushing a tag twice, or
-          # creating the release by hand first, must not fail the run.
-          id=$(curl -sS -H "$auth" "$api/tags/$TAG" | jq -r '.id // empty')
+          # creating the release by hand first, must not fail the run. The answer
+          # is kept whole rather than read for its id alone, since the attachments
+          # it already carries are read out of it below.
+          release=$(curl -sS -H "$auth" "$api/tags/$TAG")
+          id=$(printf '%s' "$release" | jq -r '.id // empty')
           if [ -z "$id" ]; then
-            id=$(curl -sS -X POST \
+            release=$(curl -sS -X POST \
               -H "$auth" -H "Content-Type: application/json" \
               -d "$(jq -n --arg tag "$TAG" \
                     '{tag_name: $tag, name: $tag, draft: false, prerelease: false,
                       body: "See CHANGELOG.md in the repository for what changed."}')" \
-              "$api" | jq -r '.id // empty')
+              "$api")
+            id=$(printf '%s' "$release" | jq -r '.id // empty')
           fi
           if [ -z "$id" ]; then
             echo "no release of $TAG could be reached or created:"
@@ -234,11 +253,37 @@ jobs:
             exit 1
           fi
 
-          # The packages and SHA256SUMS as the attachments of the release,
-          # where the two manifests say they are.
+          # Said before anything is replaced, because it is the only sign of the
+          # thing that used to leave two of every file behind.
+          already=$(printf '%s' "$release" | jq -r '.assets | length')
+          if [ "$already" != "0" ]; then
+            echo "$TAG has been published before: the release already carries $already attachment(s)"
+            printf '%s' "$release" | jq -r '"  newest of them: " + (.assets | map(.created_at) | max)'
+            echo "  the files below replace the ones of the same name, and the release is left with one of each"
+          fi
+
+          # The packages and SHA256SUMS as the attachments of the release, where
+          # the two manifests say they are.
+          attached=0
+          replaced=0
           for file in dist/packages/*; do
             [ -f "$file" ] || continue
             name=$(basename "$file")
+
+            # Every attachment already carrying this name goes. There is normally
+            # one, when a tag has been published more than once; a release that
+            # was doubled before this step replaced rather than deleted has two,
+            # and both of them go.
+            for old in $(printf '%s' "$release" | jq -r --arg name "$name" '.assets[] | select(.name == $name) | .id'); do
+              code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "$auth" "$api/$id/assets/$old")
+              case "$code" in
+                200|204) replaced=$((replaced + 1)) ;;
+                *) echo "the attachment $old of $name could not be deleted (HTTP $code): the upload below may leave two of it" ;;
+              esac
+            done
+
             curl -sS -H "$auth" -F "attachment=@$file" "$api/$id/assets?name=$name" \
               | jq -r '"  " + (.name // .message)'
+            attached=$((attached + 1))
           done
+          echo "attached $attached file(s), replacing $replaced earlier attachment(s) of the same names"
