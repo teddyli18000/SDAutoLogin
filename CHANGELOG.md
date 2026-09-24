@@ -5,7 +5,7 @@ the interface wording is bilingual.
 
 **English** | [简体中文](CHANGELOG.zh-CN.md)
 
-## Unreleased
+## v1.2.0 - 2026-09-24
 
 ### The mark
 
@@ -115,6 +115,14 @@ all four formats and verify them by packing a second time, which is a lot of the
 runner's time for a change that is often one line of prose. A branch is checked
 from the checkout with the same tasks: `go run ./tools/build test`, `packages`,
 `verify`.
+
+- What a release says is read out of `CHANGELOG.md`: the section for the tag becomes
+  its body, and a tag with no section is refused rather than published with nothing
+  to read.
+- The wiki is written from the repository on every release. The manual and the
+  changelog are copied into it with their relative links pointed at the repository,
+  which is what a page outside it can resolve, and the landing page and the sidebar
+  come from `docs/wiki/`.
 
 ### Defects
 

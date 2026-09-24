@@ -434,7 +434,9 @@ commit 一起报告），以及 Windows 构建的版本资源里；源码里也�
 是各存一条、并不覆盖。运行发现 release 上已经有附件时会明说：标签被重推通常意味着它被移动
 过，也就是一个新版本顶着旧版本的版本号。
 [.gitea/scripts/dedupe-release-assets.sh](.gitea/scripts/dedupe-release-assets.sh) 用来
-收拾此前已经挂成两份的 release，保留每个名字下最新的那份附件。
+收拾此前已经挂成两份的 release，保留每个名字下最新的那份附件。release 的正文就是
+`CHANGELOG.md` 里该标签那一节——运行会从中读出它，找不到就拒绝发布；wiki 也在同一次运行里
+从仓库重写：使用手册与更新日志被复制进去，`docs/wiki/` 放的是只有 wiki 才有的页面。
 
 ### Debian、Fedora、RHEL、openSUSE 与 Arch
 
@@ -650,7 +652,9 @@ make menuconfig          # Network -> sdautologin
 | `tools/build/` | 任务入口，脚本与 CMake 目标都用它 |
 | `packaging/systemd/` | systemd 单元，系统服务与 `systemctl --user` 各一份 |
 | `packaging/openwrt/` | OpenWrt 包、它的 procd 启动脚本和 UCI 配置 |
+| `docs/wiki/` | 不是仓库里某个文件的拷贝的 wiki 页面：首页与侧栏 |
 | `.gitea/workflows/` | 推送时 Gitea Actions 跑的东西：测试、打包以及对这些包的检查 |
+| `.gitea/scripts/` | 那些步骤调用的脚本：wiki 页面生成与 release 附件清理 |
 | `Dockerfile` | 容器镜像，从 vendor 的源码构建 |
 | `CMakeLists.txt` | 任务入口的 CMake 前端 |
 | `dist/` | 构建产物，以及从那里启动的构建所用的设置与日志 |

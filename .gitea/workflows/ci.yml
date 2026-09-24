@@ -224,6 +224,24 @@ jobs:
             exit 1
           fi
 
+          # What the release says is the section CHANGELOG.md holds for this tag,
+          # read out of it rather than written down a second time. A tag with no
+          # section is refused: a release whose notes are empty is worse than a
+          # run that stops and says what to add.
+          notes=$(awk -v want="$TAG" '
+            $1 == "##" {
+              if (seen) exit
+              if ($2 == want) { seen = 1; next }
+            }
+            seen && !started && $0 ~ /^[[:space:]]*$/ { next }
+            seen { started = 1; print }
+          ' CHANGELOG.md)
+          if [ -z "$notes" ]; then
+            echo "CHANGELOG.md holds no section for $TAG:"
+            echo "the body of the release is read out of it, so add one and push the tag again"
+            exit 1
+          fi
+
           token="${TOKEN_CONTEXT:-${TOKEN_SECRET:-${TOKEN_GITEA:-}}}"
           if [ -z "$token" ]; then
             echo "this run has no token to write a release with"
@@ -241,11 +259,19 @@ jobs:
           if [ -z "$id" ]; then
             release=$(curl -sS -X POST \
               -H "$auth" -H "Content-Type: application/json" \
-              -d "$(jq -n --arg tag "$TAG" \
+              -d "$(jq -n --arg tag "$TAG" --arg body "$notes" \
                     '{tag_name: $tag, name: $tag, draft: false, prerelease: false,
-                      body: "See CHANGELOG.md in the repository for what changed."}')" \
+                      body: $body}')" \
               "$api")
             id=$(printf '%s' "$release" | jq -r '.id // empty')
+          else
+            # A release that is already there keeps the id it has and is told what
+            # the changelog says now: a tag pushed again after its notes were
+            # corrected would otherwise go on showing the text of the first run.
+            curl -sS -X PATCH \
+              -H "$auth" -H "Content-Type: application/json" \
+              -d "$(jq -n --arg body "$notes" '{body: $body}')" \
+              "$api/$id" >/dev/null
           fi
           if [ -z "$id" ]; then
             echo "no release of $TAG could be reached or created:"
@@ -287,3 +313,48 @@ jobs:
             attached=$((attached + 1))
           done
           echo "attached $attached file(s), replacing $replaced earlier attachment(s) of the same names"
+
+      # The wiki is a repository of its own, so its pages are written from here:
+      # the manual and the changelog are the files the repository already holds,
+      # and the landing page and the sidebar come from docs/wiki/. It is best
+      # effort - a wiki that cannot be written to is not a reason to fail a release
+      # that has been published already - but it says what happened either way.
+      - name: update the wiki
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TOKEN_CONTEXT: ${{ github.token }}
+          TOKEN_SECRET: ${{ secrets.GITHUB_TOKEN }}
+          TOKEN_GITEA: ${{ secrets.GITEA_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          token="${TOKEN_CONTEXT:-${TOKEN_SECRET:-${TOKEN_GITEA:-}}}"
+          host=${INSTANCE#http://}
+          host=${host#https://}
+          url="https://oauth2:${token}@${host}/${REPO}.wiki.git"
+
+          if ! git clone --quiet "$url" /tmp/wiki; then
+            echo "the wiki could not be cloned: is it enabled, and may this run write to it?"
+            exit 0
+          fi
+
+          sh ./.gitea/scripts/wiki-pages.sh . /tmp/wiki
+
+          cd /tmp/wiki
+          # A wiki nobody has written to yet comes back with no branch at all, and
+          # the push is what creates it; one that has been written to is on the
+          # branch Gitea made for it.
+          branch=$(git symbolic-ref --short -q HEAD || echo master)
+          git add -A
+          if git diff --cached --quiet; then
+            echo "the wiki is already up to date"
+            exit 0
+          fi
+          git -c user.name=SDAutoLogin -c user.email=sdautologin@localhost \
+            commit --quiet -m "Pages from $TAG"
+          if git push --quiet origin "HEAD:$branch"; then
+            echo "the wiki was updated from $TAG"
+          else
+            echo "the wiki could not be pushed to: the token of this run may not write to it"
+          fi

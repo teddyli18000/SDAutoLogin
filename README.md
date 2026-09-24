@@ -523,7 +523,10 @@ published twice usually means it was moved, which is a new release wearing the
 version of the old one.
 [.gitea/scripts/dedupe-release-assets.sh](.gitea/scripts/dedupe-release-assets.sh)
 clears up a release that was doubled before that, keeping the newest attachment
-of each name.
+of each name. What the release says is the section of `CHANGELOG.md` for that tag,
+which the run reads out of it and refuses to publish without, and the wiki is
+written from the repository at the same time: the manual and the changelog are
+copied into it, and `docs/wiki/` holds the pages that are for the wiki alone.
 
 ### Debian, Fedora, RHEL, openSUSE and Arch
 
@@ -780,7 +783,9 @@ the command line and the settings page.
 | `tools/build/` | task runner, used by the scripts and the CMake targets |
 | `packaging/systemd/` | systemd units, for a system service and for `systemctl --user` |
 | `packaging/openwrt/` | the OpenWrt package, its procd init script and its UCI configuration |
+| `docs/wiki/` | the wiki pages that are not a copy of a file here: the landing page and the sidebar |
 | `.gitea/workflows/` | what Gitea Actions runs on a push: the tests, the packages and the checks on them |
+| `.gitea/scripts/` | the scripts those steps run: the wiki pages and the release cleanup |
 | `Dockerfile` | container image, built from the vendored sources |
 | `CMakeLists.txt` | CMake front end for the task runner |
 | `dist/` | build results, plus the settings and log of a build started from there |
