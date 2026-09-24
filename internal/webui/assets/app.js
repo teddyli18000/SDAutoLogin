@@ -380,19 +380,6 @@ function moveAccount(index, delta) {
   redraw(accounts);
 }
 
-// applyOrder rewrites the list from the order the cards are in after a drag,
-// where order[i] is the position the card at i came from.
-function applyOrder(order) {
-  const accounts = collect().accounts;
-  const sorted = order.map((from) => accounts[from]).filter(Boolean);
-  if (sorted.length !== accounts.length) {
-    renderAccounts(accounts);
-    return;
-  }
-  state.status = Object.assign({}, state.status, { entryIndex: -1, skipped: [] });
-  redraw(sorted);
-}
-
 function renumber() {
   Array.from($("accountList").children).forEach((card, i) => {
     const badge = card.querySelector(".account-no");
@@ -535,6 +522,17 @@ function applyErrors() {
 
   const generic = state.errors["_"];
   if (generic) toast(t(generic), true);
+
+  // The wizard lies over the whole page, so a message that belongs to a field
+  // underneath it cannot be seen: while it is open, the wizard carries the first
+  // one itself. Without this a save the server refused looks like nothing
+  // happened at all, which is what the first run does when its account has not
+  // been filled in.
+  if (!$("wizard").hidden) {
+    const first = Object.values(state.errors)[0];
+    const slot = document.querySelector('[data-error="wizard"]');
+    if (first && slot) slot.textContent = t(first);
+  }
 }
 
 let toastTimer = null;
@@ -606,7 +604,13 @@ let warnedStale = false;
 
 async function refreshStatus() {
   const res = await api("/api/status");
-  if (res.unreachable) {
+  if (res.unreachable || !res.ok) {
+    // Both mean this page's session is gone: the program quit, or the settings
+    // service shut itself down while the tab was idle, which is what a browser
+    // does to a tab in the background. A refusal used to be passed over in
+    // silence, leaving a page that kept showing the numbers it last saw and
+    // could change nothing; saying it once is the whole remedy, since the way
+    // back is to open the page again from the tray.
     if (!warnedStale) {
       warnedStale = true;
       toast(t("msg.stale"), true);
@@ -838,7 +842,16 @@ function wire() {
       isps: [$("w-isp").value],
       disabled: false,
     };
-    state.config.accounts = accounts;
+    // What is saved is the list the cards hold, so the account the wizard is
+    // about has to be a card before anything is submitted. On a first run the
+    // list is empty, and a request built from it carries no account at all,
+    // which the server refuses as a missing account.
+    redraw(accounts);
+    // A card renders its password field empty on purpose — what is stored is
+    // never written into the page — so the password the wizard was just given has
+    // to be put in it, or the save would carry an account with no password.
+    const card = $("accountList").firstElementChild;
+    if (card) card.querySelector('[data-field="password"]').value = $("w-password").value;
     if (await submit()) $("wizard").hidden = true;
   });
 
@@ -939,6 +952,10 @@ function wireAccounts() {
       const over = event.target.closest(".chip");
       if (!over || over === draggingChip) return;
       const box = draggingChip.parentElement;
+      // A service type belongs to one account, so a chip dragged over another
+      // account's chip has nowhere to go: inserting it there is not something the
+      // browser allows, and asking for it throws rather than doing nothing.
+      if (over.parentElement !== box) return;
       const rect = over.getBoundingClientRect();
       const after = event.clientX > rect.left + rect.width / 2;
       box.insertBefore(draggingChip, after ? over.nextSibling : over);
@@ -967,7 +984,13 @@ function wireAccounts() {
     dragging.classList.remove("dragging");
     dragging.draggable = false;
     dragging = null;
-    applyOrder(Array.from(list.children).map((card) => Number(card.dataset.index)));
+    // The cards were moved one over the other as the pointer went across them, so
+    // the list is already in the order the reader dropped it in; it is read back
+    // out of the DOM the way every other edit reads it. Putting the cards back
+    // into the position they came from would apply the move a second time, and a
+    // dropped card would either jump home or land somewhere else entirely.
+    state.status = Object.assign({}, state.status, { entryIndex: -1, skipped: [] });
+    redraw(collect().accounts);
   });
 
   // The arrow keys move what has the focus: a chip within its account, a card
