@@ -5,9 +5,12 @@ this file's code stay English; the interface wording is bilingual.
 
 **English** | [简体中文](CHANGELOG.zh-CN.md)
 
-## Unreleased
+## v1.1.0 - 2026-09-24
 
-What has landed since v1.0.0.
+A release for what v1.0.0 could not reach: the machines that are not a desktop,
+a package for every system, a session that can be watched and provisioned from a
+script, a window of its own for the settings page, several accounts to fall back
+on, and the two things the tray had only done on Windows.
 
 ### Where there is no screen
 

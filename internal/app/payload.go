@@ -18,7 +18,7 @@ const Repo = "https://git.zqlhub.com/zqlan/SDAutoLogin"
 // passes both to the linker. What stands here is what a build that has neither
 // falls back on, so the two are kept in step with the tag by the release step.
 var (
-	Version = "1.0.0"
+	Version = "1.1.0"
 	Commit  = ""
 )
 
