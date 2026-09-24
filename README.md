@@ -38,7 +38,8 @@ dependency, so it can be copied to another machine and started by double click.
 - Options are split into General and Advanced, so the everyday switches
   (account, interval, probes) are not mixed up with the portal endpoints.
 - A separate command line mode for machines without a desktop.
-- Balloon tip when the session was signed back in, or when signing in failed.
+- A notification when the session was signed back in, or when signing in failed:
+  a balloon tip on Windows, the desktop's own notification on Linux and macOS.
 - Run at startup, one switch per platform (registry, desktop entry or
   LaunchAgent).
 - Detailed per-check logging with rotation, so a dropped session can be

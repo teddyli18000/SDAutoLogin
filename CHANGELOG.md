@@ -76,6 +76,50 @@ answer the setup wizard on them, so the program had no way in on those machines.
 - The window is also opened when the tray icon could not be created, since the
   page does not depend on the tray.
 
+### Telling the user
+
+The tray reported a reconnect through a balloon tip. That is a Windows feature,
+so on Linux and macOS the two pieces of news this program has to give - the
+session is back, or signing back in failed - arrived nowhere.
+
+- Linux and macOS are told as well now, through what each desktop already has:
+  `notify-send` on Linux and `osascript` on macOS. The toolkit the tray is built
+  on has no notification of its own, which is why a helper is started rather
+  than an API called, and the wording comes from the string table the tray and
+  the settings page share, so the notification cannot say something the tray
+  would not.
+- Sending one is best effort. A machine with no desktop session, a session with
+  no notification daemon, or a helper that is not installed is not a failure of
+  the program: the only trace of it is a debug line, and the reconnect it was
+  reporting goes on regardless.
+- Which transitions are worth interrupting someone for is the pair the Windows
+  tray had already chosen: a session that came back, and a reconnect that
+  failed. Everything else stays quiet, so a notification still means something.
+
+### Asking the running copy for its page
+
+Starting the program a second time is a request to see the settings page. On
+Windows the second copy signals the first through a named event; on Linux and
+macOS that request went nowhere, and the second copy only said that another
+instance was already running.
+
+- The copy that holds the lock now publishes a socket beside it in the temporary
+  directory, and a later copy connects to it to ask for the page, so a double
+  start brings the page up on all three systems.
+- The socket is made before the lock is taken, so a copy that finds the lock
+  taken is certain to find the socket as well: its request cannot be lost in the
+  moment between the two.
+- A socket file a crash left behind is told apart from one a copy answers by
+  connecting to it. One that answers belongs to the copy that is running and is
+  left alone; one that answers nothing is removed and made again, since nothing
+  else is going to.
+- That same probe is why a connection that carries no request opens no page, and
+  a connection that says nothing for long enough is closed rather than being
+  allowed to hold the loop.
+- The request is best effort. A copy that cannot connect records it and exits as
+  before, and a copy that holds the lock but could not publish the socket says
+  so, since it is the one a later copy would have talked to.
+
 ### Building
 
 - `go run ./tools/build all` produces the 32 bit builds and the small machine ones
@@ -383,7 +427,7 @@ that implies.
 
 ### Tests
 
-131 cases, up from 52.
+135 cases, up from 52.
 
 - `internal/app` (16): the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use,
@@ -426,8 +470,10 @@ that implies.
   to the console, with the path it reports saying which it is, a second start
   replacing the first rather than leaving a file behind, and the modes the file
   and its directory are made with.
-- `internal/platform` (3): the command each system is started with, the order
-  the browsers are preferred in, and the places each system looks in.
+- `internal/platform` (7): the command each system is started with, the order
+  the browsers are preferred in, the places each system looks in, the
+  notification each desktop is asked for, and the socket a later copy asks the
+  running one for its settings page through.
 - `internal/service` (21): the check loop against a portal the test steers: an
   online session, a dropped one that is signed back into, a reply that cannot be
   read, auto login switched off, a missing account, and the failover the list is

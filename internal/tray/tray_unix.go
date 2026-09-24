@@ -162,6 +162,13 @@ func trayReady(state *app.AppState, opts Options) *unixTray {
 	t.state.SetListener(t.onStatus)
 	t.state.Start()
 
+	// A second start is a request to see the settings page, which the copy that
+	// is already running answers through the socket it published beside its
+	// lock file. The listener is already bound by the time the tray is built,
+	// so a request that arrives while the icon is still being made waits in the
+	// socket until this loop reads it, rather than being lost.
+	go platform.WaitForSettingsRequest(t.answerSettingsRequest)
+
 	if !t.state.Config().Configured() {
 		logging.Log.Warn("no account configured yet, opening the settings page")
 		t.openSettings()
@@ -170,6 +177,14 @@ func trayReady(state *app.AppState, opts Options) *unixTray {
 	}
 	logging.Log.Debug("tray ready, menu items registered")
 	return t
+}
+
+// answerSettingsRequest opens the settings page because a later copy of the
+// program asked for it. It runs on the goroutine that reads the socket, and
+// touches nothing the tray mutex guards.
+func (t *unixTray) answerSettingsRequest() {
+	logging.Log.Info("opening the settings page for another copy that asked for it")
+	t.openSettings()
 }
 
 // openSettings serves the settings page and hands it to the browser, in a window
@@ -188,10 +203,10 @@ func (t *unixTray) openSettings() {
 
 func (t *unixTray) onStatus(s service.Snapshot) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
+	previous := t.lastState
+	t.lastState = s.State
 
-	if s.State != t.lastState {
-		t.lastState = s.State
+	if s.State != previous {
 		logging.Log.Debug("tray icon updated to %s (internet checked=%v ok=%v)", s.State, s.InternetChecked, s.InternetOK)
 		switch s.State {
 		case service.StateOnline:
@@ -209,6 +224,17 @@ func (t *unixTray) onStatus(s service.Snapshot) {
 	if s.LastLoginAt != "" {
 		t.mSince.SetTitle(i18n.Lf("tray.lastLogin", s.LastLoginAt))
 		t.mSince.Show()
+	}
+	t.mu.Unlock()
+
+	// The two transitions worth telling the user about, the same pair the
+	// Windows tray shows as a balloon tip. This runs outside the lock, since it
+	// starts a helper process and the tray state has no part in that.
+	switch {
+	case previous == service.StateLoggingIn && s.State == service.StateOnline:
+		platform.Notify(i18n.L("app.name"), i18n.L("balloon.loggedIn"))
+	case s.State == service.StateError && previous != service.StateError:
+		platform.Notify(i18n.L("app.name"), i18n.L("balloon.reconnectFailed")+": "+s.Message)
 	}
 }
 
