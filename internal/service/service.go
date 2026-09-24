@@ -100,6 +100,24 @@ type Skipped struct {
 // when the wait is over, or at once when the settings are saved.
 const cooldownPeriod = 10 * time.Minute
 
+// confirmTries is how many times the session is read back after a login the
+// portal accepted.
+//
+// The login endpoint and the online list are written a moment apart. A portal
+// answers a login with "authentication successful" and, in the same second,
+// answers a query with "the online data is empty", because the session is not in
+// the list yet. One read is therefore not an answer to the question "did it
+// work", and taking it for one reported logins that had in fact succeeded as
+// failures, down to the log line saying the portal accepted the login and still
+// reported offline. Reading it back over the next second and a half costs
+// nothing, since this happens only after a login the portal has already
+// accepted.
+const confirmTries = 3
+
+// confirmDelay is how long those reads are spaced. It is a variable so that a
+// test which has to go through this wait does not spend it.
+var confirmDelay = 750 * time.Millisecond
+
 // rejection is a definitively refused attempt and the moment it may be tried
 // again.
 type rejection struct {
@@ -472,9 +490,30 @@ func (s *Service) signIn(cfg *config.Config, st portal.Status, snap Snapshot, of
 		}
 
 		// The login endpoint can report success while the portal still shows
-		// the client as offline, so confirm before declaring victory.
+		// the client as offline, so confirm before declaring victory - and ask
+		// more than once, because the online list is written a moment behind
+		// the login endpoint. See confirmTries.
 		verify := s.client.QueryStatus()
+		for i := 1; i < confirmTries && !verify.Online; i++ {
+			time.Sleep(confirmDelay)
+			verify = s.client.QueryStatus()
+		}
 		if !verify.Online {
+			if !verify.Known {
+				// The portal could not be asked whether the login took, so
+				// nothing is known about it. That is not a failure, and calling
+				// it one would be a warning the next check has to take back:
+				// the session is left as "signing in" and the next check
+				// settles it, which is the same thing a status that cannot be
+				// read does on the way in.
+				snap.State = StateLoggingIn
+				snap.Message = "signed in as " + a.Entry() + ", not confirmed yet"
+				logging.Log.Warn("reconnect attempt #%d as %s: the login was accepted and the session could not be read back within %s (%s), the next check settles it, raw login reply %s",
+					attempt, a.Entry(), shortDuration(time.Duration(confirmTries-1)*confirmDelay),
+					verify.Message, portal.Truncate(res.Raw))
+				return snap
+			}
+
 			s.mu.Lock()
 			s.failStreak++
 			streak := s.failStreak
@@ -483,8 +522,9 @@ func (s *Service) signIn(cfg *config.Config, st portal.Status, snap Snapshot, of
 			snap.State = StateError
 			snap.Message = "portal accepted the login but still reports offline"
 			snap.LastError = snap.Message
-			logging.Log.Warn("reconnect attempt #%d as %s: the login was accepted but the follow-up query says offline (portal reachable=%v, detail %q), raw login reply %s",
-				attempt, a.Entry(), verify.Reachable, verify.Message, portal.Truncate(res.Raw))
+			logging.Log.Warn("reconnect attempt #%d as %s: the login was accepted and the session is not in the portal's online list after %d reads over %s (%s), raw login reply %s",
+				attempt, a.Entry(), confirmTries,
+				shortDuration(time.Duration(confirmTries-1)*confirmDelay), verify.Message, portal.Truncate(res.Raw))
 			logReconnectFailure(attempt, streak, cfg.CheckIntervalSeconds, offline)
 			return snap
 		}

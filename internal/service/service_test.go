@@ -29,6 +29,15 @@ type stubPortal struct {
 	// omitResult leaves the result field out of the online_list reply, so the
 	// session state is unknown.
 	omitResult bool
+	// lag is how many online_list replies after a login still answer what the
+	// portal said before it, which is how the online list lags behind the login
+	// endpoint: it is written a moment later, and a query in between is answered
+	// with "the online data is empty".
+	lag int
+	// omitResultAfterLogin leaves the result field out of the online_list reply
+	// once a login has been submitted, so the session cannot be read back after
+	// a login the portal accepted.
+	omitResultAfterLogin bool
 	// loginBody is the raw reply of the login endpoint.
 	loginBody string
 	// loginBodies are the replies of the login endpoint, one per attempt, the
@@ -84,9 +93,13 @@ func (s *stubPortal) start(t *testing.T) *config.Config {
 		}
 		s.queries++
 		if s.afterLogin != nil && s.logins > 0 {
-			s.online = *s.afterLogin
+			if s.lag > 0 {
+				s.lag--
+			} else {
+				s.online = *s.afterLogin
+			}
 		}
-		if s.omitResult {
+		if s.omitResult || (s.omitResultAfterLogin && s.logins > 0) {
 			_, _ = io.WriteString(w, `{"msg":"no result field in this reply"}`)
 			return
 		}
@@ -190,7 +203,9 @@ func TestTickSignsBackInAfterADisconnection(t *testing.T) {
 
 func TestTickKeepsReportingOfflineWhenTheLoginDidNotHelp(t *testing.T) {
 	// The login endpoint can accept a request while the portal still reports the
-	// client as offline, and that must not be shown as success.
+	// client as offline, and that must not be shown as success - not even after
+	// the session has been asked for again.
+	fastConfirm(t)
 	sp := &stubPortal{online: false, afterLogin: boolPtr(false), loginBody: `{"result":1,"ret_code":"0"}`}
 	svc := NewService(sp.start(t))
 
@@ -202,6 +217,72 @@ func TestTickKeepsReportingOfflineWhenTheLoginDidNotHelp(t *testing.T) {
 	}
 	if snap.Message != "portal accepted the login but still reports offline" {
 		t.Errorf("Message = %q", snap.Message)
+	}
+}
+
+// fastConfirm shortens the wait between the reads of the session that follow a
+// login, so a test which has to go through it does not spend the second and a
+// half the program waits.
+func fastConfirm(t *testing.T) {
+	t.Helper()
+	previous := confirmDelay
+	confirmDelay = time.Millisecond
+	t.Cleanup(func() { confirmDelay = previous })
+}
+
+// TestTickSignsInWhenTheOnlineListLagsBehindTheLogin covers the reply that made a
+// login which had worked look like a failure: the portal accepts the login and,
+// in the same second, answers the query about the session with "the online data
+// is empty", because the session is not in the list yet. One read is therefore
+// not an answer to the question, and it is asked again for a moment before the
+// login is called a failure.
+func TestTickSignsInWhenTheOnlineListLagsBehindTheLogin(t *testing.T) {
+	fastConfirm(t)
+	sp := &stubPortal{online: false, afterLogin: boolPtr(true), lag: 1,
+		loginBody: `{"result":1,"ret_code":"0"}`}
+	svc := NewService(sp.start(t))
+
+	svc.tick()
+
+	snap := svc.Snapshot()
+	if snap.State != StateOnline {
+		t.Fatalf("State = %v, want Online (message %q)", snap.State, snap.Message)
+	}
+	if snap.LastLoginAt == "" {
+		t.Error("the login that the lag hid was not recorded")
+	}
+	if svc.failStreak != 0 {
+		t.Errorf("failStreak = %d, want a reply that lagged to leave no failure behind", svc.failStreak)
+	}
+	// The check's own query, the one that lagged, and the one that confirmed
+	// the session.
+	if queries, logins := sp.counts(); logins != 1 || queries < 3 {
+		t.Errorf("queries=%d logins=%d, want the session asked for again after the login", queries, logins)
+	}
+}
+
+// TestTickDoesNotCallALoginFailedWhenTheSessionCannotBeReadBack covers the other
+// half of the same report: the portal accepted the login and then cannot be asked
+// about the session at all. Nothing is known about that login, so it is not a
+// failure, and the state says what is true instead - signed in, not confirmed yet
+// - which the next check settles.
+func TestTickDoesNotCallALoginFailedWhenTheSessionCannotBeReadBack(t *testing.T) {
+	fastConfirm(t)
+	sp := &stubPortal{online: false, omitResultAfterLogin: true,
+		loginBody: `{"result":1,"ret_code":"0"}`}
+	svc := NewService(sp.start(t))
+
+	svc.tick()
+
+	snap := svc.Snapshot()
+	if snap.State != StateLoggingIn {
+		t.Fatalf("State = %v, want it to stay at signing in (message %q)", snap.State, snap.Message)
+	}
+	if !strings.Contains(snap.Message, "not confirmed yet") {
+		t.Errorf("Message = %q, want it to say the login is not confirmed", snap.Message)
+	}
+	if svc.failStreak != 0 {
+		t.Errorf("failStreak = %d, want a login that could not be read back to be no failure", svc.failStreak)
 	}
 }
 
