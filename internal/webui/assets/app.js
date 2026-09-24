@@ -490,7 +490,13 @@ function renderStatus(st) {
   state.status = st || {};
   const code = st.state || "checking";
   $("statePill").dataset.state = code;
-  $("stateText").textContent = state.i18n["state." + code] ? t("state." + code) : t("msg.noStatus");
+  // The pill carries the state and, once something is signed in, who it is
+  // signed in as: the account and the service type the session is on. That is
+  // the question the strip of readings answers, and the strip is a row lower
+  // than it needs to be for the one reading looked at most.
+  const stateWord = state.i18n["state." + code] ? t("state." + code) : t("msg.noStatus");
+  const who = activeEntryLabel(st);
+  $("stateText").textContent = who === "-" ? stateWord : stateWord + " · " + who;
   $("stEntry").textContent = activeEntryLabel(st);
   $("stClientIp").textContent = st.clientIp || "-";
   $("stAccount").textContent = st.account || "-";

@@ -80,28 +80,34 @@
     <div class="card">
       <h2 data-i18n="sub.options">Options</h2>
       <div class="grid">
-        <label for="f-interval" data-i18n="field.interval">Check interval (seconds)</label>
-        <div class="field">
-          <input id="f-interval" type="number" min="5" step="1" class="narrow">
-          <p class="hint" data-i18n="field.interval.hint"></p>
-          <p class="error" data-error="checkIntervalSeconds"></p>
+        <div class="pair">
+          <label for="f-interval" data-i18n="field.interval">Check interval (seconds)</label>
+          <div class="field">
+            <input id="f-interval" type="number" min="5" step="1">
+            <p class="hint" data-i18n="field.interval.hint"></p>
+            <p class="error" data-error="checkIntervalSeconds"></p>
+          </div>
         </div>
 
-        <span class="grid-spacer"></span>
-        <div class="field checks">
-          <label class="check"><input type="checkbox" id="f-autologin"> <span data-i18n="field.autoLogin"></span></label>
-          <label class="check"><input type="checkbox" id="f-remember"> <span data-i18n="field.rememberPassword"></span></label>
-          <p class="hint" data-i18n="field.rememberPassword.hint"></p>
-          <label class="check"><input type="checkbox" id="f-autostart"> <span data-i18n="field.autostart"></span></label>
+        <div class="pair">
+          <span class="pair-label" aria-hidden="true"></span>
+          <div class="field checks">
+            <label class="check"><input type="checkbox" id="f-autologin"> <span data-i18n="field.autoLogin"></span></label>
+            <label class="check"><input type="checkbox" id="f-remember"> <span data-i18n="field.rememberPassword"></span></label>
+            <p class="hint" data-i18n="field.rememberPassword.hint"></p>
+            <label class="check"><input type="checkbox" id="f-autostart"> <span data-i18n="field.autostart"></span></label>
+          </div>
         </div>
 
-        <label for="f-language" data-i18n="field.language">Interface language</label>
-        <div class="field">
-          <select id="f-language">
-            <option value="auto" data-i18n="lang.auto"></option>
-            <option value="zh" data-i18n="lang.zh"></option>
-            <option value="en" data-i18n="lang.en"></option>
-          </select>
+        <div class="pair">
+          <label for="f-language" data-i18n="field.language">Interface language</label>
+          <div class="field">
+            <select id="f-language">
+              <option value="auto" data-i18n="lang.auto"></option>
+              <option value="zh" data-i18n="lang.zh"></option>
+              <option value="en" data-i18n="lang.en"></option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
@@ -109,17 +115,21 @@
     <div class="card">
       <h2 data-i18n="sub.connectivity">Connectivity</h2>
       <div class="grid">
-        <span class="grid-spacer"></span>
-        <div class="field checks">
-          <label class="check"><input type="checkbox" id="f-internet"> <span data-i18n="field.checkInternet"></span></label>
+        <div class="pair">
+          <span class="pair-label" aria-hidden="true"></span>
+          <div class="field checks">
+            <label class="check"><input type="checkbox" id="f-internet"> <span data-i18n="field.checkInternet"></span></label>
+          </div>
         </div>
 
-        <label data-i18n="field.probes">Reachability probe addresses</label>
-        <div class="field">
-          <div id="probeList" class="probe-list"></div>
-          <p class="hint" data-i18n="field.probes.hint"></p>
-          <p class="error" data-error="probeUrls"></p>
-          <button type="button" class="btn ghost" id="btnAddProbe" data-i18n="btn.addProbe">Add address</button>
+        <div class="pair">
+          <label data-i18n="field.probes">Reachability probe addresses</label>
+          <div class="field">
+            <div id="probeList" class="probe-list"></div>
+            <p class="hint" data-i18n="field.probes.hint"></p>
+            <p class="error" data-error="probeUrls"></p>
+            <button type="button" class="btn ghost" id="btnAddProbe" data-i18n="btn.addProbe">Add address</button>
+          </div>
         </div>
       </div>
     </div>
@@ -129,36 +139,48 @@
     <div class="card">
       <p class="note" data-i18n="advanced.note"></p>
       <div class="grid">
-        <label for="f-portal" data-i18n="field.portalHome">Portal home URL</label>
-        <div class="field">
-          <input id="f-portal" spellcheck="false">
-          <p class="error" data-error="portalBaseUrl"></p>
+        <div class="pair">
+          <label for="f-portal" data-i18n="field.portalHome">Portal home URL</label>
+          <div class="field">
+            <input id="f-portal" spellcheck="false">
+            <p class="error" data-error="portalBaseUrl"></p>
+          </div>
         </div>
 
-        <label for="f-eportal" data-i18n="field.apiEndpoint">Authentication API URL</label>
-        <div class="field">
-          <input id="f-eportal" spellcheck="false">
-          <p class="error" data-error="eportalUrl"></p>
+        <div class="pair">
+          <label for="f-eportal" data-i18n="field.apiEndpoint">Authentication API URL</label>
+          <div class="field">
+            <input id="f-eportal" spellcheck="false">
+            <p class="error" data-error="eportalUrl"></p>
+          </div>
         </div>
 
-        <label for="f-prefix" data-i18n="field.accountPrefix">Account prefix</label>
-        <div class="field">
-          <input id="f-prefix" class="narrow" spellcheck="false">
-          <p class="hint" data-i18n="field.accountPrefix.hint"></p>
+        <div class="pair">
+          <label for="f-prefix" data-i18n="field.accountPrefix">Account prefix</label>
+          <div class="field">
+            <input id="f-prefix" spellcheck="false">
+            <p class="hint" data-i18n="field.accountPrefix.hint"></p>
+          </div>
         </div>
 
-        <label for="f-timeout" data-i18n="field.httpTimeout">Request timeout (seconds)</label>
-        <div class="field">
-          <input id="f-timeout" type="number" min="2" step="1" class="narrow">
-          <p class="error" data-error="httpTimeoutSeconds"></p>
+        <div class="pair">
+          <label for="f-timeout" data-i18n="field.httpTimeout">Request timeout (seconds)</label>
+          <div class="field">
+            <input id="f-timeout" type="number" min="2" step="1">
+            <p class="error" data-error="httpTimeoutSeconds"></p>
+          </div>
         </div>
 
-        <label for="f-jsversion" data-i18n="field.jsVersion">jsVersion parameter</label>
-        <div class="field"><input id="f-jsversion" class="narrow" spellcheck="false"></div>
+        <div class="pair">
+          <label for="f-jsversion" data-i18n="field.jsVersion">jsVersion parameter</label>
+          <div class="field"><input id="f-jsversion" spellcheck="false"></div>
+        </div>
 
-        <span class="grid-spacer"></span>
-        <div class="field checks">
-          <label class="check"><input type="checkbox" id="f-verbose"> <span data-i18n="field.verboseLog"></span></label>
+        <div class="pair">
+          <span class="pair-label" aria-hidden="true"></span>
+          <div class="field checks">
+            <label class="check"><input type="checkbox" id="f-verbose"> <span data-i18n="field.verboseLog"></span></label>
+          </div>
         </div>
       </div>
     </div>
@@ -167,14 +189,34 @@
   <section class="panel" id="panel-about">
     <div class="card">
       <div class="grid">
-        <label data-i18n="about.version">Version</label><div class="field" id="abVersion">-</div>
-        <label data-i18n="about.platform">Platform</label><div class="field" id="abPlatform">-</div>
-        <label data-i18n="about.repo">Project</label><div class="field"><a id="abRepo" href="#" target="_blank" rel="noreferrer"></a></div>
-        <label data-i18n="about.license">License</label><div class="field">MIT</div>
-        <label data-i18n="about.configPath">Config file</label>
-        <div class="field"><code id="abConfigPath">-</code></div>
-        <label data-i18n="about.logPath">Log file</label>
-        <div class="field"><code id="abLogPath">-</code></div>
+        <div class="pair">
+          <label data-i18n="about.version">Version</label>
+          <div class="field" id="abVersion">-</div>
+        </div>
+        <div class="pair">
+          <label data-i18n="about.platform">Platform</label>
+          <div class="field" id="abPlatform">-</div>
+        </div>
+        <div class="pair">
+          <label data-i18n="about.repo">Project</label>
+          <div class="field"><a id="abRepo" href="#" target="_blank" rel="noreferrer"></a></div>
+        </div>
+        <div class="pair">
+          <label data-i18n="about.license">License</label>
+          <div class="field">MIT</div>
+        </div>
+        <div class="pair">
+          <label data-i18n="about.configPath">Config file</label>
+          <div class="field"><code id="abConfigPath">-</code></div>
+        </div>
+        <div class="pair">
+          <label data-i18n="about.logPath">Log file</label>
+          <div class="field"><code id="abLogPath">-</code></div>
+        </div>
+      </div>
+      <div class="about-actions">
+        <button type="button" class="btn ghost" id="btnOpenConfig" data-i18n="btn.openConfig">Open config file</button>
+        <button type="button" class="btn ghost" id="btnOpenLog" data-i18n="btn.openLog">Open log</button>
       </div>
       <p class="note" data-i18n="about.security"></p>
     </div>
@@ -190,8 +232,6 @@
   <span class="toast" id="toast" hidden></span>
   <div class="spacer"></div>
   <button type="button" class="btn ghost" id="btnReload" data-i18n="btn.reload">Reload config</button>
-  <button type="button" class="btn ghost" id="btnOpenConfig" data-i18n="btn.openConfig">Open config file</button>
-  <button type="button" class="btn ghost" id="btnOpenLog" data-i18n="btn.openLog">Open log</button>
   <button type="button" class="btn danger" id="btnQuit" data-i18n="btn.quit">Quit</button>
   <button type="button" class="btn primary" id="btnSave" data-i18n="btn.save">Save</button>
 </footer>

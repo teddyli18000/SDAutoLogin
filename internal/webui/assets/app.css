@@ -1,54 +1,47 @@
-/* The settings page: one stylesheet, no framework, no build step. Every colour
-   comes from the custom properties below; the light and the dark palettes are
-   the only two places a colour is named, and every step of the layout rhythm
-   and of the type scale comes from the --sp-* and --fs-* properties rather than
-   from a literal. --accent is the crimson of the application mark, which
-   internal/brand draws and logo.svg repeats; the dark palette brightens it the
-   way it brightened the blue before it, since a crimson deep enough for white
-   text is unreadable as text on a dark surface.
+/* The settings page: one stylesheet, no framework, no build step. It is an
+   application shell rather than a document — a sidebar, a header and a status
+   strip across the top, and a content column whose panels and fields flow into
+   as many columns as the window has room for, so there is no width at which the
+   page falls between two layouts.
 
-   The neutrals are warm — grey with a little red in it. A blue-grey sitting
-   next to the crimson reads as two palettes that were chosen separately, which
-   is what the page looked like before. The order of the surfaces is unchanged:
-   the page sits behind the cards, and surface-3 is the press-down step. */
+   Every colour comes from the properties below, every gap is a step of --sp-*,
+   every size of text a step of --fs-*. The accent is spent on the primary
+   action, on links, on focus rings and on the current entry of the sidebar.
+   Everything else is grey: a control panel is read by its numbers, and paint on
+   the rest of it only competes with them. */
 
 :root {
   color-scheme: light dark;
 
-  --bg: #f5f0ef;
+  --bg: #eef0f3;
   --surface: #ffffff;
-  --surface-2: #faf6f5;
-  --surface-3: #efe8e6;
-  --border: #e8dedb;
-  --border-strong: #d5c8c4;
+  --surface-2: #f5f6f8;
+  --surface-3: #e9ebef;
+  --border: #dce0e6;
+  --border-strong: #c2c8d0;
 
-  --text: #1f1917;
-  --text-dim: #574e4b;
-  --text-mute: #766a68;
+  --text: #1b2027;
+  --text-dim: #4b535e;
+  --text-mute: #6b7380;
 
   --accent: #8c1d2c;
   --accent-ink: #ffffff;
-  --accent-weak: #f9e9ea;
+  --accent-weak: #f6e7e9;
 
-  --ok: #1f9d55;
-  --ok-weak: #e6f6ec;
-  --warn: #b8770c;
-  --warn-weak: #fdf3e2;
-  --err: #cf3b30;
-  --err-weak: #fdecea;
+  --ok: #1a7f45;
+  --ok-weak: #e6f2ea;
+  --warn: #8f5d06;
+  --warn-weak: #f9f0dc;
+  --err: #b32a20;
+  --err-weak: #fbe9e7;
 
-  /* Five text sizes and no half sizes: a micro label, a caption, secondary
-     body, body, and the one step above body. The sheet used to carry 10.5 and
-     12.5 too, and the browser rounds those per element rather than per page. */
+  /* Four sizes of text: a label, a caption, the body, and the one above it. */
   --fs-xs: 11px;
   --fs-sm: 12px;
-  --fs-md: 13px;
-  --fs-base: 14px;
-  --fs-lg: 16px;
+  --fs-base: 13px;
+  --fs-lg: 15px;
 
-  /* One spacing scale for the page: 4px is the step inside a control, 24px is
-     the page gutter. Every padding and gap below is one of these six, so the
-     rhythm stays even instead of drifting through 13, 18 and 22. */
+  /* Six steps, from the gap inside a control to the page gutter. */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -56,17 +49,16 @@
   --sp-5: 20px;
   --sp-6: 24px;
 
-  /* The label column of every label/field pair, so the options grid and the
-     rows inside an account share one gutter. */
-  --label-w: 190px;
+  /* Every control is the same height and its text sits in the same line box:
+     18 + 6 + 6 + the two borders = 32. */
+  --row-line: 18px;
 
-  --radius-lg: 14px;
-  --radius: 10px;
-  --radius-sm: 7px;
-  --shadow-1: 0 1px 2px rgba(31, 20, 18, .06);
-  --shadow-2: 0 2px 4px rgba(31, 20, 18, .06), 0 8px 20px rgba(31, 20, 18, .08);
-  --shadow-3: 0 20px 60px rgba(28, 16, 14, .30);
-  --shadow-up: 0 -10px 18px -14px rgba(31, 20, 18, .22);
+  /* The width past which a row of fields stops being easier to read. The action
+     bar's buttons are held to the same column, so they are named together. */
+  --content-w: 1440px;
+
+  --radius: 3px;
+  --shadow: 0 12px 32px rgba(15, 20, 28, .18);
 
   --font: "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans SC", "PingFang SC",
           "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
@@ -75,31 +67,29 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #141110;
-    --surface: #1b1716;
-    --surface-2: #211c1b;
-    --surface-3: #282221;
-    --border: #322b29;
-    --border-strong: #453c39;
+    --bg: #14171b;
+    --surface: #1b1f24;
+    --surface-2: #21252b;
+    --surface-3: #292e35;
+    --border: #323841;
+    --border-strong: #454c56;
 
-    --text: #f1eae8;
-    --text-dim: #b6aaa7;
-    --text-mute: #8d807c;
+    --text: #e6e9ed;
+    --text-dim: #adb4bd;
+    --text-mute: #848c96;
 
-    --accent: #d9616f;
-    --accent-ink: #141110;
-    --accent-weak: #301a18;
+    --accent: #d9646f;
+    --accent-ink: #14171b;
+    --accent-weak: #3a2226;
 
-    --ok: #46b978;
-    --ok-weak: #16281e;
-    --warn: #d9a13c;
-    --warn-weak: #2a2113;
-    --err: #e2685c;
-    --err-weak: #2b1714;
+    --ok: #4fb573;
+    --ok-weak: #16281d;
+    --warn: #d0a03c;
+    --warn-weak: #2a2314;
+    --err: #e1736a;
+    --err-weak: #2c1a18;
 
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, .3);
-    --shadow-2: 0 2px 4px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .35);
-    --shadow-up: 0 -10px 18px -14px rgba(0, 0, 0, .55);
+    --shadow: 0 12px 32px rgba(0, 0, 0, .5);
   }
 }
 
@@ -113,53 +103,45 @@
 html, body { margin: 0; min-height: 100%; }
 
 /* scrollbar-color and scrollbar-width are inherited, so these two reach the
-   page, the log box and the request dump at once; the default blue-grey is not
-   a colour this palette has. */
+   page, the log box and the request dump at once. */
 html { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
+/* ---------- the shell ---------- */
+
 body {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-rows: auto auto 1fr auto;
+  grid-template-areas:
+    "head   head"
+    "status status"
+    "nav    main"
+    "nav    foot";
+  min-height: 100vh;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   font-size: var(--fs-base);
-  line-height: 1.6;
-  display: grid;
-  /* Five rows for the five children, so the 1fr lands on main and not on the
-     tab strip: a row that is left with the free space stretches its contents,
-     and the tabs are the one row that must keep its own height. */
-  grid-template-rows: auto auto auto 1fr auto;
-  min-height: 100vh;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
-::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 
-h1, h2 { margin: 0; font-weight: 600; }
-h1 { font-size: var(--fs-lg); letter-spacing: .1px; }
-/* A section title is an eyebrow: small, spaced out, and marked with a crimson
-   tick so the eye can find it without a heavier weight. The dialogs reset all
-   of this, because the title in there is a real title. */
+.spacer { flex: 1; }
+
+h1 { margin: 0; font-size: var(--fs-lg); font-weight: 600; line-height: 1.25; }
+
+/* A panel title is a small heading over a hairline. It used to be an eyebrow in
+   capitals with a coloured tick in front of it, which is one decoration more
+   than a heading needs. */
 h2 {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-sm);
-  /* Every eyebrow on the page carries the same tracking, and a line box tight
-     enough that the gap below it is the gap that was actually written down. */
-  line-height: 1.2;
-  letter-spacing: .6px;
-  text-transform: uppercase;
-  color: var(--text-mute);
+  margin: 0 0 var(--sp-3);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-base);
+  font-weight: 600;
 }
-h2::before {
-  content: "";
-  flex: none;
-  width: 3px;
-  height: 12px;
-  border-radius: 2px;
-  background: var(--accent);
-}
-.card > h2 { margin-bottom: var(--sp-4); }
 
 code, pre { font-family: var(--mono); font-size: var(--fs-sm); }
 a { color: var(--accent); text-decoration: none; }
@@ -167,86 +149,70 @@ a:hover { text-decoration: underline; }
 
 /* ---------- header ---------- */
 
-/* The crimson rule across the top of the window is the cheapest way to say
-   whose program this is; the rest of the bar stays quiet around it. */
 .topbar {
+  grid-area: head;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-4);
-  padding: var(--sp-4) var(--sp-6);
+  padding: var(--sp-3) var(--sp-5);
   background: var(--surface);
-  border-top: 3px solid var(--accent);
   border-bottom: 1px solid var(--border);
 }
 
 .brand { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
-.brand-mark { flex: none; width: 36px; height: 36px; }
-.brand-sub { margin: 2px 0 0; font-size: var(--fs-sm); color: var(--text-mute); }
+.brand-mark { flex: none; width: 26px; height: 26px; }
+.brand-sub { margin: 0; font-size: var(--fs-xs); color: var(--text-mute); }
 
-/* One of the three controls that have to line up at 36px tall: a 20px line box
-   plus 7px of padding plus the 1px border. */
 .state-pill {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 7px var(--sp-4);
-  border-radius: 999px;
-  background: var(--surface-2);
+  padding: var(--sp-1) var(--sp-3);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-1);
-  font-size: var(--fs-md);
-  font-weight: 500;
-  line-height: 20px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
   white-space: nowrap;
 }
 .state-pill .dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--text-mute);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-mute) 18%, transparent);
 }
-.state-pill[data-state="online"] .dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-weak); }
-.state-pill[data-state="loggingIn"] .dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-weak); }
-.state-pill[data-state="error"] .dot { background: var(--err); box-shadow: 0 0 0 3px var(--err-weak); }
+.state-pill[data-state="online"] .dot { background: var(--ok); }
+.state-pill[data-state="loggingIn"] .dot { background: var(--warn); }
+.state-pill[data-state="error"] .dot { background: var(--err); }
 
-/* ---------- status ---------- */
+/* ---------- status strip ---------- */
 
-/* Recessed between the two white bands, so the header, the readings and the
-   tabs read as three distinct rows instead of three separated boxes. */
 .statusbar {
+  grid-area: status;
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--sp-5) var(--sp-6);
-  padding: var(--sp-4) var(--sp-6);
+  align-items: center;
+  gap: var(--sp-2) var(--sp-5);
+  padding: var(--sp-2) var(--sp-5);
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
 .status-items {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-4) var(--sp-6);
+  gap: var(--sp-2) var(--sp-5);
   flex: 1;
   min-width: 0;
 }
-.status-item { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
-.status-item label {
-  font-size: var(--fs-xs);
-  /* The same tight line box as the section titles: at the inherited 1.6 the 4px
-     gap below this label rendered as 11. */
-  line-height: 1.2;
-  text-transform: uppercase;
-  letter-spacing: .6px;
-  color: var(--text-mute);
-}
+/* Label and reading on one line rather than stacked: it halves the height of the
+   strip and reads the way a readout does. */
+.status-item { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.status-item label { font-size: var(--fs-xs); color: var(--text-mute); }
 .status-item span {
-  font-size: var(--fs-md);
+  font-size: var(--fs-base);
   font-weight: 500;
-  line-height: 1.2;
-  /* IPs, durations and timestamps all sit in one column here; lining figures
-     stop the row from twitching as the values change. */
+  /* IPs, durations and timestamps: lining figures stop the row from shifting as
+     the values change. */
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -254,143 +220,160 @@ a:hover { text-decoration: underline; }
 }
 .status-actions { display: flex; gap: var(--sp-2); }
 
-/* ---------- tabs ---------- */
+/* ---------- the sidebar ---------- */
 
-/* Underline tabs rather than pills: the pills took a coloured box to say what a
-   2px rule says, and the rule can carry the accent without shouting. */
 .tabs {
+  grid-area: nav;
   display: flex;
-  gap: var(--sp-1);
-  padding: var(--sp-1) var(--sp-6) 0;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--sp-3) var(--sp-2);
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
 }
 .tab {
   appearance: none;
   font: inherit;
-  font-weight: 500;
+  text-align: left;
   color: var(--text-dim);
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  /* 10px above against 8px plus the 2px rule below, so the label is centred on
-     the underline instead of sitting 1px above it. */
-  padding: 10px var(--sp-4) 8px;
-  /* Raised by the bar's own border, so the active underline lies on the rule
-     instead of floating just above it. */
-  margin-bottom: -1px;
+  border-left: 2px solid transparent;
+  padding: 6px var(--sp-3);
   cursor: pointer;
-  transition: background .15s, color .15s, border-color .15s;
+  transition: background .12s, color .12s;
 }
-.tab:hover { color: var(--text); background: var(--surface-2); }
+.tab:hover { background: var(--surface-3); color: var(--text); }
 .tab:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent-weak); }
 .tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  background: var(--surface);
+  border-left-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
 }
 
-/* ---------- panels and cards ---------- */
+/* ---------- the content column ---------- */
 
-main {
-  padding: var(--sp-5) var(--sp-6) var(--sp-6);
-  overflow: auto;
-}
-main > section { max-width: 1040px; margin: 0 auto; }
+main { grid-area: main; padding: var(--sp-5); }
+
+/* One cap for every panel. It is the point past which a row of fields stops
+   being easier to read, not a layout: how many fit in a row is for the field
+   grid below to decide. */
+main > section { max-width: var(--content-w); margin: 0 auto; }
+
 .panel { display: none; }
-.panel.active { display: block; }
+/* The panels are one column. Laying them out side by side was tried and looked
+   worse: three of them over two columns leave the short one with a hole beside
+   it that never closes, and the width that bought was better spent on more
+   fields per row inside each panel. */
+.panel.active {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
 
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
-  padding: var(--sp-5);
-  margin-bottom: var(--sp-4);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
 }
 .card-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-4);
+  gap: var(--sp-3);
   flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
 }
+.card-head h2 { margin: 0; padding: 0; border: none; }
 .summary { font-size: var(--fs-sm); color: var(--text-mute); }
 
+/* ---------- one label and its control ---------- */
+
+/* A pair is stacked rather than a label column beside a field column: the fields
+   of a panel can then flow into two, three or four columns as the window grows,
+   which a fixed label column cannot do. 420px keeps a URL or a path readable
+   without leaving the row half empty, and is what makes the settings panels come
+   out as three columns at the content width. */
 .grid {
   display: grid;
-  grid-template-columns: var(--label-w) minmax(0, 1fr);
-  gap: var(--sp-4) var(--sp-5);
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  gap: var(--sp-3) var(--sp-4);
   align-items: start;
 }
-/* The label sits on the first text line of the control beside it, so its offset
-   is measured from that line box rather than picked as a round number. */
-.grid > label { padding-top: var(--sp-2); line-height: 20px; font-weight: 500; }
-/* The rows in About carry plain text instead of a control, so there is no
-   padding to clear and the label belongs at the top of the row. */
-#panel-about .grid > label { padding-top: 0; }
-.grid-spacer { height: 0; }
-
+.pair { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.pair > label, .pair-label {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-dim);
+}
+/* Holds the height of a label where a pair has none, so its control still lines
+   up with the controls beside it. */
+.pair-label { display: block; }
 .field { min-width: 0; }
-.input-row { display: flex; gap: var(--sp-2); align-items: center; }
-.input-row input { flex: 1; }
-.checks { display: flex; flex-direction: column; gap: var(--sp-2); }
-.check { display: flex; align-items: center; gap: var(--sp-2); font-weight: 400; cursor: pointer; }
-.check input { accent-color: var(--accent); width: 15px; height: 15px; }
+/* A path is the one value that can be longer than the cell it is given. */
+.field code { word-break: break-all; }
 
-/* 36px tall like a button and the state pill: a 20px line box, 7px of padding
-   and the 1px border. */
 input[type=text], input[type=password], input[type=number], input:not([type]), select {
   width: 100%;
-  padding: 7px var(--sp-3);
+  padding: 6px var(--sp-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  line-height: 20px;
-  transition: border-color .14s, box-shadow .14s;
+  line-height: var(--row-line);
+  transition: border-color .12s, box-shadow .12s;
 }
 input::placeholder { color: var(--text-mute); opacity: 1; }
-input.narrow, select.narrow { max-width: 200px; }
 input:focus, select:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-weak);
+  box-shadow: 0 0 0 2px var(--accent-weak);
 }
 input.invalid, select.invalid { border-color: var(--err); }
 input:disabled, select:disabled { opacity: .55; }
 
-.hint { margin: var(--sp-1) 0 0; font-size: var(--fs-sm); color: var(--text-mute); }
-.error { margin: var(--sp-1) 0 0; font-size: var(--fs-sm); color: var(--err); }
+.hint { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--text-mute); }
+.error { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--err); }
 .error:empty { display: none; }
+
+.checks { display: flex; flex-direction: column; gap: var(--sp-2); }
+.check { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
+.check input { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+
+.input-row { display: flex; gap: var(--sp-2); align-items: center; }
+.input-row input { flex: 1; min-width: 0; }
+
 .note {
-  margin: 0 0 var(--sp-4);
-  padding: var(--sp-3) var(--sp-4);
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-dim);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
 }
 .warn {
-  margin: 0 0 var(--sp-4);
-  padding: var(--sp-3) var(--sp-4);
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   background: var(--warn-weak);
   border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
   border-radius: var(--radius);
   color: var(--warn);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
 }
 .empty {
-  margin: 0 0 var(--sp-4);
-  padding: var(--sp-6) var(--sp-5);
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-5);
   border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   text-align: center;
   color: var(--text-mute);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
 }
 
 /* ---------- buttons ---------- */
@@ -398,27 +381,25 @@ input:disabled, select:disabled { opacity: .55; }
 .btn {
   appearance: none;
   font: inherit;
-  font-weight: 500;
-  /* The same 36px as a field, so a button and an input line up on a row. */
-  padding: 7px var(--sp-4);
-  line-height: 20px;
-  border-radius: var(--radius);
+  padding: 6px var(--sp-3);
+  line-height: var(--row-line);
   border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   cursor: pointer;
   white-space: nowrap;
-  transition: background .14s, border-color .14s, color .14s, opacity .14s;
+  transition: background .12s, border-color .12s, color .12s;
 }
-.btn:hover { background: var(--surface-2); }
-.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-weak); border-color: var(--accent); }
+.btn:hover { background: var(--surface-3); }
+.btn:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.btn.primary:hover { filter: brightness(1.07); }
-.btn.ghost { background: transparent; }
-/* A ghost button sits on the header, on a card, and on the tinted status band;
-   surface-2 is that band's own colour, so the hover step has to be surface-3 to
-   be visible on all three. */
-.btn.ghost:hover { background: var(--surface-3); }
+.btn.primary:hover { filter: brightness(1.08); }
+/* No button is drawn without its box, whatever class it carries: a secondary
+   action that is only a word among other words does not read as something to
+   press, and the test buttons are the ones nobody finds. The classes stay
+   because the page names them; they differ in colour only — the accent for the
+   one primary action, red for the destructive one. */
 .btn.danger { color: var(--err); }
 .btn.danger:hover { background: var(--err-weak); border-color: var(--err); }
 .btn:disabled { opacity: .5; cursor: default; filter: none; }
@@ -427,53 +408,49 @@ input:disabled, select:disabled { opacity: .55; }
   appearance: none;
   font: inherit;
   line-height: 1;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-mute);
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-dim);
   cursor: pointer;
-  transition: background .14s, color .14s, border-color .14s;
+  transition: background .12s, color .12s, border-color .12s;
 }
-.icon:hover { background: var(--surface-3); color: var(--text); }
-.icon:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
-.icon.danger:hover { background: var(--err-weak); color: var(--err); }
+.icon:hover { background: var(--surface-3); border-color: var(--border-strong); color: var(--text); }
+.icon:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); }
+.icon.danger:hover { background: var(--err-weak); border-color: var(--err); color: var(--err); }
 
-/* ---------- the login list ---------- */
+/* ---------- the accounts ---------- */
 
-.accounts { display: flex; flex-direction: column; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.accounts { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-3); }
 
-/* A card inside a card takes one radius step less than the card that holds it,
-   which is what stops the nesting from reading as a second card edge. */
+/* One account is a panel of its own inside the accounts panel: a header bar and
+   the fields that describe it. */
 .account {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface-2);
+  background: var(--surface);
   overflow: hidden;
-  transition: border-color .15s, box-shadow .15s;
 }
-.account:hover { border-color: var(--border-strong); }
-.account.dragging { opacity: .6; box-shadow: var(--shadow-2); }
-.account:focus-within { border-color: var(--border-strong); }
+.account.dragging { opacity: .6; }
 
 .account-head {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-3);
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-3);
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
 }
 .account-head .spacer { flex: 1; }
 .grip {
-  cursor: grab;
+  flex: none;
   color: var(--text-mute);
-  /* Sized as a glyph rather than as text: this is the braille drag handle, and
-     the negative tracking closes the gap between its dots. */
-  font-size: 15px;
+  font-size: var(--fs-base);
   letter-spacing: -2px;
   padding: 0 2px;
+  cursor: grab;
   user-select: none;
 }
 .grip:active { cursor: grabbing; }
@@ -481,41 +458,40 @@ input:disabled, select:disabled { opacity: .55; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--accent-weak);
-  color: var(--accent);
-  font-size: var(--fs-sm);
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
   font-weight: 600;
 }
-.account-title {
-  font-weight: 600;
-  max-width: 40%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.account-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-tools { display: flex; gap: 2px; }
 
 .badge {
+  flex: none;
+  padding: 1px var(--sp-1);
+  border-radius: var(--radius);
   font-size: var(--fs-xs);
-  font-weight: 600;
-  letter-spacing: .3px;
-  padding: 3px var(--sp-2);
-  border-radius: 999px;
   white-space: nowrap;
 }
 .badge.active { background: var(--ok-weak); color: var(--ok); }
-.badge.skipped { background: var(--warn-weak); color: var(--warn); max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.badge.skipped {
+  background: var(--warn-weak);
+  color: var(--warn);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .badge.off { background: var(--surface-3); color: var(--text-mute); }
 
-/* a switch, because "in use" is a state rather than a choice to tick off */
 .switch {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   color: var(--text-dim);
   cursor: pointer;
   user-select: none;
@@ -523,12 +499,13 @@ input:disabled, select:disabled { opacity: .55; }
 .switch input {
   appearance: none;
   position: relative;
-  width: 34px;
-  height: 19px;
+  flex: none;
+  width: 28px;
+  height: 16px;
   margin: 0;
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--border-strong);
-  transition: background .16s;
+  transition: background .14s;
   cursor: pointer;
 }
 .switch input::after {
@@ -536,47 +513,51 @@ input:disabled, select:disabled { opacity: .55; }
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 15px;
-  height: 15px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: #fff;
-  transition: transform .16s;
+  transition: transform .14s;
 }
-.switch input:checked { background: var(--accent); }
-.switch input:checked::after { transform: translateX(15px); }
-.switch input:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-weak); }
+.switch input:checked { background: var(--ok); }
+.switch input:checked::after { transform: translateX(12px); }
+.switch input:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-weak); }
 
-.account-body { padding: var(--sp-4); }
-.row {
+/* The three fields of an account: 340px is the width at which the list of
+   service types still has room for its picker, and it is what lets two of them
+   share a row in the column the accounts panel is given on a wide window. */
+.account-body {
   display: grid;
-  grid-template-columns: var(--label-w) minmax(0, 1fr);
-  gap: var(--sp-2) var(--sp-4);
-  align-items: start;
-  margin-bottom: var(--sp-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  gap: var(--sp-3);
+  padding: var(--sp-3);
 }
-.row-label { padding-top: var(--sp-2); line-height: 20px; font-size: var(--fs-md); color: var(--text-dim); }
+.row { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.row-label { font-size: var(--fs-sm); font-weight: 500; color: var(--text-dim); }
 .row-body { min-width: 0; }
+.account-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
 
 .services { display: flex; flex-direction: column; gap: var(--sp-2); }
-.chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.chips:empty::before {
-  content: "—";
-  color: var(--text-mute);
-  font-size: var(--fs-md);
-}
+.chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.chips:empty::before { content: "—"; color: var(--text-mute); font-size: var(--fs-sm); }
 
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-2);
-  padding: 4px var(--sp-1) 4px var(--sp-3);
+  gap: var(--sp-1);
+  padding: 2px var(--sp-1) 2px var(--sp-2);
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  background: var(--surface);
-  font-size: var(--fs-md);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
   cursor: grab;
 }
-.chip:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+.chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-weak); }
 .chip.dragging { opacity: .55; }
 /* The remove button is one small glyph. The padding stays small so the chip
    keeps its height and an invisible ring does the work of a hit area. */
@@ -588,34 +569,23 @@ input:disabled, select:disabled { opacity: .55; }
   color: var(--text-mute);
   font: inherit;
   line-height: 1;
-  padding: 2px 5px;
-  border-radius: 50%;
+  padding: 2px 4px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 .chip-x::after { content: ""; position: absolute; inset: -4px; }
 .chip-x:hover { background: var(--err-weak); color: var(--err); }
 
 .service-add { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
-/* A picker, a custom suffix and a narrow field are all the same width. */
-.picker, .custom-suffix { max-width: 200px; }
+.picker, .custom-suffix { flex: 1 1 160px; }
 
-.account-foot {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
-  margin-top: var(--sp-1);
-}
-
-/* The same box as a note or the log tail: it is another block of prose inside a
-   card, so it carries the same padding. */
 .test-result {
   flex: 1;
-  min-width: 240px;
-  padding: var(--sp-3) var(--sp-4);
-  border-radius: var(--radius);
-  font-size: var(--fs-md);
+  min-width: 220px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
 }
 .test-result.ok { background: var(--ok-weak); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
 .test-result.bad { background: var(--err-weak); border-color: color-mix(in srgb, var(--err) 30%, transparent); }
@@ -639,108 +609,128 @@ input:disabled, select:disabled { opacity: .55; }
 
 .probe-list { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .probe-row { display: flex; gap: var(--sp-2); align-items: center; }
-.probe-row input { flex: 1; }
+.probe-row input { flex: 1; min-width: 0; }
 
-/* ---------- action bar ---------- */
+/* ---------- about ---------- */
 
-/* Sticky, so Save is always in reach; the upward shadow is what tells the eye
-   that the cards keep going underneath it. */
-.actionbar {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
-  padding: var(--sp-3) var(--sp-6);
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  box-shadow: var(--shadow-up);
-}
-.actionbar .spacer { flex: 1; }
-/* Both of these are messages on the action bar, so they are the same size. */
-.dirty { font-size: var(--fs-md); color: var(--warn); }
-.toast { font-size: var(--fs-md); color: var(--ok); }
-.toast.bad { color: var(--err); }
-
-/* ---------- log ---------- */
+.about-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
 
 .log {
   margin: 0;
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  max-height: 340px;
+  max-height: 320px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
   color: var(--text-dim);
 }
 
+/* ---------- the action bar ---------- */
+
+/* The end of the form, not a bar floating over it: the buttons belong to the
+   thing they save, and a panel that has already been saved does not need to keep
+   them on screen. The padding is what lets the bar span the window while its
+   buttons stay in the column above it — half of whatever the content column is
+   wider than the cap, or the ordinary gutter when it is not. */
+.actionbar {
+  grid-area: foot;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) max(var(--sp-5), calc((100% - var(--content-w)) / 2));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.dirty { font-size: var(--fs-sm); color: var(--warn); }
+.toast { font-size: var(--fs-sm); color: var(--ok); }
+.toast.bad { color: var(--err); }
+
 /* ---------- dialogs ---------- */
 
 .modal {
   position: fixed;
   inset: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--sp-6);
-  background: rgba(28, 16, 14, .55);
-  backdrop-filter: blur(2px);
-  z-index: 10;
+  padding: var(--sp-5);
+  background: rgba(15, 20, 28, .45);
 }
 .modal-box {
-  width: min(460px, 100%);
+  width: min(440px, 100%);
+  padding: var(--sp-4);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-3);
-  padding: var(--sp-6);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
-.modal-box.small { width: min(400px, 100%); }
-/* The wizard heading is a title, not an eyebrow: at the eyebrow size it read as
-   a stray label sitting above the first field. */
-.modal-box h2 {
-  font-size: var(--fs-lg);
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--text);
-}
-.modal-box h2::before { display: none; }
-.modal-step { margin-top: var(--sp-5); }
-.step-label {
-  margin: 0 0 var(--sp-2);
-  font-size: var(--fs-sm);
-  /* The same tracking and the same tight line box as every other eyebrow. */
-  line-height: 1.2;
-  text-transform: uppercase;
-  letter-spacing: .6px;
-  color: var(--text-mute);
-}
+.modal-box.small { width: min(380px, 100%); }
+.modal-box h2 { margin: 0 0 var(--sp-3); padding: 0; border: none; font-size: var(--fs-lg); }
+.modal-step { margin-top: var(--sp-3); }
+.step-label { margin: 0 0 var(--sp-1); font-size: var(--fs-sm); font-weight: 500; color: var(--text-dim); }
 .modal-step input, .modal-step select { margin-bottom: var(--sp-2); }
-.modal-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-5); }
-.confirm-text { margin: 0; font-size: var(--fs-base); }
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-4); }
+.confirm-text { margin: 0; }
 
 .gone {
-  padding: var(--sp-6) var(--sp-5);
+  padding: var(--sp-6);
   font-family: var(--font);
   color: var(--text-dim);
 }
 
+/* ---------- wide windows ---------- */
+
+/* 常规 is the one tab with a list in it: a list wants width and the settings
+   beside it do not. So its panels stop being three wide bands, one under the
+   other with mostly empty box between them, and become two columns — the
+   accounts panel on the wide side, the two settings panels stacked in a column
+   of their own, where each is narrow enough to be a single column of fields. */
+@media (min-width: 1200px) {
+  #panel-general.active {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    gap: var(--sp-4);
+    align-items: start;
+  }
+  /* The accounts panel is the tall one, so it is the one that spans both rows. */
+  #panel-general > .card:first-child { grid-row: 1 / span 2; }
+}
+
 /* ---------- narrow screens ---------- */
 
-@media (max-width: 760px) {
-  .topbar, .statusbar, main, .actionbar { padding-left: var(--sp-4); padding-right: var(--sp-4); }
-  .tabs { padding-left: var(--sp-4); padding-right: var(--sp-4); }
-  .grid, .row { grid-template-columns: minmax(0, 1fr); }
-  .grid > label, .row-label { padding-top: 0; }
-  .grid-spacer { display: none; }
+/* One breakpoint, and only because a sidebar cannot become a list on its own:
+   below this the entries move above the content and scroll sideways. Everything
+   inside the content — panels and fields alike — is already sized by the window
+   and needs nothing here. */
+@media (max-width: 860px) {
+  body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "head" "status" "nav" "main" "foot";
+  }
+  .tabs {
+    flex-direction: row;
+    gap: 0;
+    padding: 0 var(--sp-3);
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .tab {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    padding: var(--sp-2) var(--sp-3);
+    white-space: nowrap;
+  }
+  .tab.active { border-left-color: transparent; border-bottom-color: var(--accent); background: transparent; }
   .status-actions { width: 100%; }
   .status-actions .btn { flex: 1; }
-  .account-title { max-width: 100%; }
-  .btn { padding: 7px var(--sp-3); }
+  main { padding: var(--sp-4); }
+  .actionbar { padding: var(--sp-3) var(--sp-4); }
 }
 
 /* ---------- motion ---------- */

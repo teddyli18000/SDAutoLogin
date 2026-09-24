@@ -34,28 +34,42 @@ than a value taken from a specification.
 
 ### The page
 
-The settings page was written a rule at a time and its numbers show it: eight
-text sizes, two of them half a pixel, and paddings of 13, 18 and 22 px that had
-each been picked on their own. The sizes are five now and every gap is a step of
-one scale, so a section can be added without choosing new numbers.
+The settings page was a form with a skin on it: warm grey, a crimson rule across
+the top, rounded cards with shadows, and a column of fields pinned to 1040 px in
+the middle of whatever window it was opened in. It is an application now — a
+sidebar naming its three parts, a header and a strip of readings across the top,
+and a content column behind them that fills the window.
 
-- Text is five sizes: a micro label, a caption, secondary body, body, and the
-  one step above body. 10.5 and 12.5 px are gone, because a browser rounds those
-  per element and one row could end up carrying two sizes.
-- Spacing is six steps of 4 px and the layout keeps to them. The numbers that
-  belong to a drawing stay as they are: the offset that puts a label on the first
-  line of the field beside it is measured from that line, not chosen.
-- A field, a button and the state chip are 36 px tall, reached the same way in
-  all three. They used to come out at 42.4 and 36.8, since a 14 px font on a 1.6
-  line height had been given 9 px of padding, which is why the status bar lined
-  up by eight tenths of a pixel and everything beside it did not.
-- A section title carries a crimson tick, the tabs are an underline rather than a
-  pill, and the readings in the status bar use lining figures so that they stop
-  shifting as they update.
-- The details that were missing are in as well: placeholder and selected text
-  take colours from the palette, the scrollbars are thin and tinted, a card
-  inside a card takes a smaller radius, and a reader whose system asks for less
-  motion is given none.
+- The fields of a panel flow into one, two or three columns as the window has room
+  for them, instead of sitting in a single column with a fixed label gutter and
+  empty space to the right of every short control. Each field is a label with its
+  control under it, which is what makes that possible. One breakpoint is left in
+  the stylesheet, and it is only where the sidebar has to become a strip.
+- The page is grey and the panels are white, divided by hairlines, and the crimson
+  is spent on the primary action, on links, on focus rings and on the current entry
+  of the sidebar. The rule across the top, the tick in front of every section title
+  and the coloured pill tabs are gone: a control panel is read by its numbers, and
+  colour anywhere else competes with them.
+- Attention is said with size and weight rather than with more colour. Text comes
+  in four sizes, and a field and a button are both 32 px tall, so the two line up
+  on a row without anything being measured to make them.
+- General is two columns: the accounts, which are a list and want the width, beside
+  the two panels of settings, which stack and read as one column of fields each.
+  Three wide panels one under the other was the first answer, and it left each of
+  them a band of mostly empty box.
+- Every button keeps its box. Drawing the secondary ones as bare words left the test
+  buttons looking like part of the sentence they sat in, which is how a button stops
+  being found.
+- The pill in the header says what the session is doing and who it is doing it as —
+  "online · 23D001 (China Mobile)" — taken from the entry in use rather than from the
+  account alone.
+- The action bar is the end of the form rather than a bar floating over it: its
+  buttons line up with the column above them, so a panel that has been saved is not
+  covered by the buttons that saved it.
+- Small things that were missing are in as well: placeholder and selected text take
+  colours from the palette, the scrollbars are thin and tinted, a long path wraps
+  inside the field that shows it, and a reader whose system asks for less motion is
+  given none.
 
 ## v1.1.0 - 2026-09-24
 
