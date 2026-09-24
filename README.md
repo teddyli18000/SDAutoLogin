@@ -210,7 +210,8 @@ log, since the one before it was spent by the browser that opened it.
 - Sign in automatically after a disconnection.
 - Move a session that was already up onto the first service type of its account,
   and, on the card of the entry the session is on, the controls that move it onto
-  any of the other service types that entry lists.
+  any of the other service types that entry lists, the portal's own page among
+  them when the portal has refused to move it.
 - Run at startup.
 - Check interval, and the reachability probes.
 
@@ -274,6 +275,10 @@ The card of the account in use carries the controls for that: the service type
 the session is on, the one its entry puts first, and a way to sign in again as
 any of the other service types the entry lists. It is the way out when the portal
 will not take the first one, and it works whether or not the option above is on.
+What that card says about a refusal is what to do about it, and once there is one
+it also offers the portal's own page in a browser: a portal that refuses any
+second sign-in while a session is up has to be answered there, by signing the
+session out.
 
 ## Command line
 

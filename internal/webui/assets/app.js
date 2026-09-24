@@ -287,12 +287,20 @@ function accountCard(entry, index) {
   // status it is handed, and fills in the select and the line.
   const switchButton = button(t("acct.preferred.btn"), "ghost");
   switchButton.dataset.act = "switchService";
+  // The one way out the program cannot take itself: the portal's own page, for
+  // signing the session out when the portal will not sign in again while it is
+  // up. It belongs to the refusal, so renderPreferred uncovers it there and it
+  // is created hidden.
+  const portalButton = button(t("acct.preferred.portal"), "ghost");
+  portalButton.dataset.act = "openPortal";
+  portalButton.hidden = true;
   const preferred = el("div", { class: "account-preferred", hidden: true },
     el("p", { class: "hint preferred-line" }),
     el("div", { class: "preferred-actions" },
       el("span", { class: "preferred-target", text: t("acct.preferred.choose") }),
       el("select", { class: "preferred-isp" }),
-      switchButton));
+      switchButton,
+      portalButton));
 
   const body = el("div", { class: "account-body" },
     row(usernameID, t("field.account"), username, t("field.account.hint"), "accounts." + index + ".username"),
@@ -571,6 +579,11 @@ function renderPreferred(card, st, index) {
   const line = block.querySelector(".preferred-line");
   const refused = st.switchRefused;
   line.classList.toggle("attention", !!refused);
+  // The portal page is offered with the refusal and nowhere else: without one
+  // there is nothing on the portal to go and do, and a second button beside
+  // "Sign in again" would only be a question of which one to press.
+  const portalButton = block.querySelector('[data-act="openPortal"]');
+  if (portalButton) portalButton.hidden = !refused;
   if (refused) {
     // The portal's answer is localised by its ret_code, the way the login self
     // test localises it.
@@ -862,6 +875,26 @@ async function switchService(card, buttonNode) {
   refreshStatus();
 }
 
+/* The way out of a session the portal will not sign in again while it is up:
+   the session has to be signed out on the portal's own page, which the program
+   cannot do, and the switch is asked for again afterwards. The address is the
+   one the program is configured with, so the request carries nothing. */
+async function openPortal() {
+  note("asking the program to open the portal page");
+  const res = await api("/api/action", { method: "POST", body: JSON.stringify({ action: "openPortal" }) });
+  if (res.unreachable) {
+    note("the request to open the portal page did not reach the program");
+    toast(t("msg.stale"), true);
+    return;
+  }
+  if (!res.ok || !res.data.ok) {
+    note("the portal page could not be opened", { status: res.status, error: res.data.error });
+    toast(t(res.data.error || "err.openPortal"), true);
+    return;
+  }
+  note("the portal page was handed to the browser", res.data.url);
+}
+
 /* ---------- probes ---------- */
 
 function renderProbes(list) {
@@ -1091,6 +1124,7 @@ function wireAccounts() {
       case "remove": removeAccount(index); break;
       case "test": testEntry(index, target); break;
       case "switchService": switchService(card, target); break;
+      case "openPortal": openPortal(); break;
       case "unservice":
         target.closest(".chip").remove();
         refreshPicker(card);

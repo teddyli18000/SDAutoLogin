@@ -70,6 +70,11 @@ type Server struct {
 	onQuit func()
 	// addr is where to listen, empty for loopback on a port the system picks.
 	addr string
+	// openExternal hands a file or an address to the desktop, for the actions
+	// that open something: the configuration file, the log, and the portal page.
+	// It is a field so a test can read what would be opened without an editor or
+	// a browser being started.
+	openExternal func(string) error
 
 	mu    sync.Mutex
 	srv   *http.Server
@@ -93,7 +98,7 @@ type Server struct {
 // a management endpoint that was asked for, so it starts at once and stays up.
 // onQuit, when set, is called after the page asks the program to exit.
 func NewServer(state *AppState, addr string, onQuit func()) *Server {
-	return &Server{state: state, addr: addr, onQuit: onQuit}
+	return &Server{state: state, addr: addr, onQuit: onQuit, openExternal: platform.OpenExternal}
 }
 
 // SetOnQuit replaces the callback the page's exit button calls. A run that took
@@ -653,14 +658,30 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": true, "config": pageConfig(next)})
 
 	case "openConfig":
-		platform.OpenExternal(s.state.Config().Path())
+		s.openExternal(s.state.Config().Path())
 		writeJSON(w, map[string]any{"ok": true})
 
 	case "openLog":
 		if p := logging.Log.Path(); p != "" {
-			platform.OpenExternal(p)
+			s.openExternal(p)
 		}
 		writeJSON(w, map[string]any{"ok": true})
+
+	case "openPortal":
+		// The way out of a session the portal will not sign in again: the
+		// reader signs the session out on the portal's own page, which is the
+		// one thing this program cannot do for them, and asks for the switch
+		// afterwards. The address is the one the program is configured with, not
+		// one the page sends, so no request can hand the shell an address of its
+		// own choosing.
+		url := s.state.Config().PortalBaseURL
+		logging.Log.Info("the settings page asked for the portal page at %s", url)
+		if err := s.openExternal(url); err != nil {
+			logging.Log.Warn("opening the portal page %s: %v", url, err)
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "err.openPortal"})
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "url": url})
 
 	case "logTail":
 		writeJSON(w, map[string]any{"ok": true, "lines": tailLog(logTailLines)})

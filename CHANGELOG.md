@@ -103,13 +103,20 @@ by hand.
   online" rather than a ret_code - the pill in the header and the strip of
   readings say the session needs a reader, and the tray adds that line to its
   tooltip and shows one balloon tip when the refusal arrives. The session is up
-  and working, so nothing else says there is anything to do.
+  and working, so nothing else says there is anything to do. The wording says the
+  move is the reader's to make rather than what happened, since the program has
+  stopped trying and the two buttons under it are the ways out.
 - The controls on that card sign the session in again as any of the other service
   types the entry lists, not only the first one: when the first is the one the
   portal will not take, the reader can move the session onto another one without
   editing the list. The same card names the service type the session is on and the
   one its entry puts first, and the controls are there only while there is
-  somewhere to move it.
+  somewhere to move it. Besides them, and only once a refusal has been reported,
+  the card offers the portal's own page in a browser: a portal that refuses any
+  second sign-in while a session is up cannot be talked out of it from here, and
+  signing the session out there is the one thing that opens the way again. The
+  address is the configured portal home page, so the page cannot ask the shell to
+  open an address of its choosing.
 - Which service type a session is on is read from the account the portal echoes,
   which is the account a login was submitted with: a suffix the echo does not
   carry is one that was not sent. An account with no suffix on it used to be read

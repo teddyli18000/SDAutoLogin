@@ -52,11 +52,17 @@ var webText = map[string]text{
 	"acct.preferred.same": {
 		"会话当前在 {0}，这也正是本账号的首选。",
 		"The session is on {0}, which is what this account puts first."},
+	// Shown when the portal would not sign in again to move a session that is
+	// up. It says what to do rather than what happened: the program has stopped
+	// trying, so the two buttons beside it are the ways out, and the second one
+	// is the only one that works when the portal refuses any second sign-in
+	// while a session is up.
 	"acct.preferred.refused": {
-		"自动切换到 {0} 被门户拒绝（{1}）。可以再试一次，或先在门户页面注销当前会话。",
-		"The move onto {0} was refused ({1}). Try again, or log the session out on the portal page first."},
+		"需手动处理：自动切换到 {0} 被门户拒绝（{1}）。可点「重新登录」再试一次，或点「打开门户页面」注销当前会话后再试。",
+		"Needs doing by hand: the move onto {0} was refused ({1}). Press \"Sign in again\" to try once more, or \"Open the portal\" to log the session out and try again."},
 	"acct.preferred.choose": {"改为", "Change to"},
 	"acct.preferred.btn":    {"重新登录", "Sign in again"},
+	"acct.preferred.portal": {"打开门户页面", "Open the portal"},
 	"acct.preferred.none": {
 		"无法切换：会话已不在线，或这个服务类型不在该账号的列表里。",
 		"Nothing to switch: the session is down, or that service type is not one this account lists."},
@@ -124,8 +130,10 @@ var webText = map[string]text{
 	// Shown while the portal would not move the session where the order of the
 	// login list says it should be. The session is up, so nothing else in the
 	// strip says there is anything to do.
-	"status.attention":     {"需处理", "needs attention"},
-	"status.switchRefused": {"未能切换到 {0}，会话停在 {1}", "Could not move onto {0}; the session stays on {1}"},
+	"status.attention": {"需处理", "needs attention"},
+	"status.switchRefused": {
+		"需手动处理：会话停在 {1}，未能切换到 {0}，请用下方账号卡片上的按钮",
+		"Needs doing by hand: the session stays on {1} and could not move onto {0} - use the buttons on the account card below"},
 
 	"btn.save":       {"保存", "Save"},
 	"btn.reload":     {"重新载入配置", "Reload config"},
@@ -185,6 +193,7 @@ var webText = map[string]text{
 	"err.saveFailed":       {"保存失败，请查看日志", "Could not save, see the log"},
 	"err.loadFailed":       {"读取配置失败", "Could not read the config"},
 	"err.unknownAction":    {"未知操作", "Unknown action"},
+	"err.openPortal":       {"无法打开门户页面，请查看日志", "Could not open the portal page, see the log"},
 
 	"retcode.0":  {"登录成功", "login accepted"},
 	"retcode.1":  {"账号或密码不对", "wrong account or password"},
