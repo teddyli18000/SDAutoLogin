@@ -63,7 +63,8 @@ Options, for the commands that read the account:
                       that holds one has to be given with --username and
                       --password instead.
   --username=NAME     use this account, as the single entry of the list
-  --password=SECRET   use this password instead of the configured one
+  --password=SECRET   use this password instead of the configured one, which
+                      without --username is the first entry of the list
   --password-file=PATH
                       read the password from the first line of PATH instead. A
                       secret given on the command line is in the process list of
@@ -253,9 +254,11 @@ func parseOptions(args []string) (options, []string, error) {
 	return opts, rest, nil
 }
 
-// given reports whether anything was overridden on the command line.
+// given reports whether this run has anything to apply on top of the
+// configuration: an option on the command line, or the password systemd handed
+// over to the one unit that asked for it, which names nothing itself.
 func (o options) given() bool {
-	return o.accountGiven() || o.noLog
+	return o.accountGiven() || o.noLog || credentialPasswordPath() != ""
 }
 
 // accountGiven reports whether one of the account options was used. Only then is
@@ -297,7 +300,7 @@ func (o options) applyTo(cfg *config.Config) error {
 		}
 		cfg.Accounts = list
 
-	case o.username != nil || o.password != nil || o.passwordFile != nil || o.isp != nil || givenPassword:
+	case o.username != nil || o.isp != nil:
 		// One account described field by field. What is not given is taken from
 		// the entry that is already there, so a password can be changed without
 		// repeating the account it belongs to.
@@ -315,6 +318,18 @@ func (o options) applyTo(cfg *config.Config) error {
 			entry.ISPs = []string{*o.isp}
 		}
 		cfg.Accounts = []config.Account{entry}
+
+	case givenPassword:
+		// Only a password, which is how a service is handed its secret without
+		// writing the account out again. It belongs to the entry that is already
+		// first, and the rest of the list is left alone: the fallback order was
+		// not what this run was about, and a list cut down to one entry is not
+		// something the reader asked for.
+		if len(cfg.Accounts) == 0 {
+			cfg.Accounts = []config.Account{{Password: password}}
+		} else {
+			cfg.Accounts[0].Password = password
+		}
 	}
 
 	if o.noLog {
@@ -511,13 +526,17 @@ func loadForCLI(appDir string, opts options) (*config.Config, bool) {
 		}
 		if opts.save {
 			// Save drops the passwords when they are not remembered, and the
-			// caller explicitly asked for these values to be written down.
-			if opts.password != nil || len(opts.accounts) > 0 {
+			// caller explicitly asked for these values to be written down,
+			// whether they came from the command line or from a file.
+			if opts.password != nil || opts.passwordFile != nil || len(opts.accounts) > 0 {
 				cfg.RememberPassword = true
 			}
 			if err := cfg.Save(); err != nil {
 				fmt.Fprintf(os.Stderr, "writing the config: %v\n", err)
 				return cfg, false
+			}
+			if report := cfg.Protect(); report != "" {
+				fmt.Fprintln(os.Stderr, report)
 			}
 			fmt.Fprintf(os.Stderr, "config updated: %s\n", cfg.Path())
 		} else if opts.accountGiven() {

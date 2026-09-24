@@ -96,6 +96,11 @@ func (a *AppState) Update(next *config.Config) error {
 	if err := next.Save(); err != nil {
 		return err
 	}
+	// A save does not fail over the file's access list, so what could not be put
+	// right about it is said here instead.
+	if report := next.Protect(); report != "" {
+		logging.Log.Warn("%s", report)
+	}
 	i18n.SetLang(i18n.Lang(next.Language))
 	logging.Log.SetVerbose(next.VerboseLog)
 

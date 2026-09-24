@@ -280,7 +280,8 @@ help           print the usage text
                    one entry of the login list; repeat the option to write
                    several, in the order they are to be tried
 --username=NAME    use this account, as the single entry of the list
---password=SECRET  use this password instead of the configured one
+--password=SECRET  use this password instead of the configured one, which on its
+                   own is the password of the first entry of the list
 --password-file=PATH
                    read the password from the first line of PATH instead; a
                    secret on the command line is in the process list of every

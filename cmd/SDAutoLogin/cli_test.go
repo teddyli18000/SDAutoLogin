@@ -213,6 +213,7 @@ func TestParseOptionsKeepsAnExplicitlyEmptyValue(t *testing.T) {
 }
 
 func TestParseOptionsReportsNothingForNoOptions(t *testing.T) {
+	t.Setenv("CREDENTIALS_DIRECTORY", "")
 	var opts options
 	if opts.given() {
 		t.Error("empty options must not count as given")
@@ -348,6 +349,120 @@ func TestACommandLinePasswordWinsOverACredential(t *testing.T) {
 	}
 	if got := cfg.Accounts[0].Password; got != password {
 		t.Errorf("Password = %q, want the one that was named", got)
+	}
+}
+
+// A unit that hands the secret over names no account on its command line, so the
+// credential is the only thing this run was given and the options have to be
+// applied for it to be read at all.
+func TestARunWithACredentialHasSomethingToApply(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, credentialName), []byte("fromsystemd\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CREDENTIALS_DIRECTORY", dir)
+
+	var opts options
+	if !opts.given() {
+		t.Error("the credential was not taken for something to apply")
+	}
+	if opts.accountGiven() {
+		t.Error("the credential is not an account option, so the reminder about --save is not for it")
+	}
+}
+
+// The whole way in, not applyTo alone: loadForCLI is what decides whether the
+// options are applied, and a real start has to end up with the password the
+// service manager handed over.
+func TestLoadForCLITakesThePasswordSystemdHandedOver(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, credentialName), []byte("fromsystemd\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CREDENTIALS_DIRECTORY", dir)
+
+	// The account is written down without a password, which is the point of
+	// handing the secret over separately.
+	appDir := t.TempDir()
+	stored, err := config.LoadConfig(filepath.Join(appDir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.Accounts = []config.Account{{Username: "s1234567", ISPs: []string{""}}}
+	if err := stored.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, ok := loadForCLI(appDir, options{})
+	if !ok {
+		t.Fatal("a run that was handed a credential was refused")
+	}
+	if cfg.Accounts[0].Password != "fromsystemd" {
+		t.Errorf("Password = %q, want the credential", cfg.Accounts[0].Password)
+	}
+	if !cfg.Configured() {
+		t.Error("the run was left with nothing to sign in with")
+	}
+}
+
+// A password on its own says nothing about the rest of the list, so the entries
+// after the first are left where they are: the fallback order is not what this
+// run was about.
+func TestAPasswordAloneLeavesTheRestOfTheListAlone(t *testing.T) {
+	password := "onlythis"
+	cfg := &config.Config{Accounts: []config.Account{
+		{Username: "first", Password: "one", ISPs: []string{""}},
+		{Username: "second", Password: "two", ISPs: []string{"@cucc"}},
+	}}
+
+	if err := (options{password: &password}).applyTo(cfg); err != nil {
+		t.Fatalf("applyTo: %v", err)
+	}
+	if len(cfg.Accounts) != 2 {
+		t.Fatalf("Accounts = %+v, want the list to be left as it was", cfg.Accounts)
+	}
+	if cfg.Accounts[0].Username != "first" || cfg.Accounts[0].Password != password {
+		t.Errorf("the first entry = %+v, want it with the password that was named", cfg.Accounts[0])
+	}
+	if cfg.Accounts[1].Password != "two" {
+		t.Errorf("the second entry = %+v, want it untouched", cfg.Accounts[1])
+	}
+}
+
+// --save writes what was named, and a password read from a file was named just
+// as much as one written on the command line: a configuration with the passwords
+// turned off must not end up with an account that has none.
+func TestSavingAPasswordFromAFileRemembersIt(t *testing.T) {
+	secret := writeSecret(t, "fromthefile\n")
+
+	appDir := t.TempDir()
+	path := filepath.Join(appDir, "config.json")
+	stored, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.Accounts = []config.Account{{Username: "s1234567", ISPs: []string{""}}}
+	stored.RememberPassword = false
+	if err := stored.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := loadForCLI(appDir, options{passwordFile: &secret, save: true}); !ok {
+		t.Fatal("the run was refused")
+	}
+
+	reread, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reread.RememberPassword {
+		t.Error("the password was not written down after --save")
+	}
+	if len(reread.Accounts) != 1 || reread.Accounts[0].Password != "fromthefile" {
+		t.Errorf("Accounts = %+v, want the password from the file", reread.Accounts)
+	}
+	if !reread.Configured() {
+		t.Error("the saved configuration has nothing to sign in with")
 	}
 }
 

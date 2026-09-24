@@ -242,7 +242,7 @@ help           打印用法
 --account=USER:PASSWORD[@SERVICE[+SERVICE...]]
                    登录列表里的一条；可重复给出多条，顺序就是尝试顺序
 --username=NAME    用该账号作为列表里唯一的一条
---password=SECRET  用该密码替代配置中的密码
+--password=SECRET  用该密码替代配置中的密码；单独给出时，它是列表第一条的密码
 --password-file=PATH
                    改为从 PATH 的第一行读取密码；写在命令行上的密钥会出现在本机
                    每个用户的进程列表里，因此脚本、服务与容器用这种写法

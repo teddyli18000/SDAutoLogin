@@ -321,7 +321,13 @@ func (c *Config) Save() error {
 	if err := os.Chmod(c.path, configFileMode); err != nil {
 		return err
 	}
-	return restrictToOwner(c.path)
+	// A file whose access list cannot be set is not a reason to lose the
+	// settings: the file may be on a filesystem without access lists, or one
+	// this process may not change the list of. Protect reports it, both at
+	// startup and to whoever calls it after a save, and the passwords are in the
+	// file either way by this point.
+	_ = restrictToOwner(c.path)
+	return nil
 }
 
 // Protect checks that the file holding the passwords cannot be read by anyone
