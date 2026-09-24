@@ -5,12 +5,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"sdautologin/internal/config"
+	"sdautologin/internal/logging"
 )
 
 // stubPortal is a portal the tests can steer. It answers the two endpoints the
@@ -230,6 +233,68 @@ func TestTickReportsARejectedLogin(t *testing.T) {
 	}
 	if snap.Skipped[0].RetryInS <= 0 {
 		t.Errorf("RetryInS = %d, want the wait that is left of the cooldown", snap.Skipped[0].RetryInS)
+	}
+}
+
+func TestAnExpiredCooldownIsNotReported(t *testing.T) {
+	// A cooldown can run out while the session stays up, so signIn is never
+	// reached to forget it. The entry must not be reported as still being left
+	// alone, and in particular not with no wait left.
+	sp := &stubPortal{online: true}
+	svc := NewService(sp.start(t))
+
+	svc.mu.Lock()
+	svc.rejected["expired"] = rejection{
+		message: "wrong account or password",
+		retCode: "1",
+		index:   0,
+		until:   time.Now().Add(-time.Minute),
+	}
+	svc.mu.Unlock()
+
+	svc.tick()
+
+	snap := svc.Snapshot()
+	if len(snap.Skipped) != 0 {
+		t.Errorf("Skipped = %+v, want the expired cooldown dropped", snap.Skipped)
+	}
+	if len(svc.rejected) != 0 {
+		t.Errorf("rejected = %+v, want the expired refusal forgotten", svc.rejected)
+	}
+}
+
+func TestAnExpiredCooldownIsLoggedOnTheOfflinePath(t *testing.T) {
+	// The check loop prunes through signIn before skipped ever sees the entries,
+	// so the expiry has to be logged there as well: otherwise the very path an
+	// operator watches while the session is down says nothing about the cleanup.
+	dir := t.TempDir()
+	logging.Log.Init(dir, true)
+	t.Cleanup(logging.Log.CloseFile)
+
+	sp := &stubPortal{online: false, loginBody: `{"result":0,"ret_code":"1"}`}
+	svc := NewService(sp.start(t))
+
+	svc.mu.Lock()
+	svc.rejected["expired"] = rejection{
+		message: "wrong account or password",
+		retCode: "1",
+		index:   0,
+		until:   time.Now().Add(-time.Minute),
+	}
+	svc.mu.Unlock()
+
+	svc.tick()
+
+	data, err := os.ReadFile(filepath.Join(dir, "app.log"))
+	if err != nil {
+		t.Fatalf("reading the log: %v", err)
+	}
+	if !strings.Contains(string(data), "out of its") {
+		t.Errorf("the log does not report the cooldown being over:\n%s", data)
+	}
+	// The entry was free again, so it was submitted in this same round.
+	if _, logins := sp.counts(); logins != 1 {
+		t.Errorf("logins = %d, want the expired entry tried again", logins)
 	}
 }
 

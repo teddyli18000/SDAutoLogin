@@ -383,7 +383,7 @@ that implies.
 
 ### Tests
 
-129 cases, up from 52.
+131 cases, up from 52.
 
 - `internal/app` (16): the settings server serves on the address it was given,
   refuses a request without the token, reports an address a browser can use,
@@ -428,12 +428,14 @@ that implies.
   and its directory are made with.
 - `internal/platform` (3): the command each system is started with, the order
   the browsers are preferred in, and the places each system looks in.
-- `internal/service` (19): the check loop against a portal the test steers: an
+- `internal/service` (21): the check loop against a portal the test steers: an
   online session, a dropped one that is signed back into, a reply that cannot be
   read, auto login switched off, a missing account, and the failover the list is
   for: an entry refused and the next one signing in, a refused entry being
   walked past on the next round, a busy portal *not* walking the list, and the
-  wait being cut short by a check that was asked for.
+  wait being cut short by a check that was asked for. A wait that ends on its own
+  is covered twice over, since the status renderer and the check loop each reach
+  that expiry by a path of their own.
 - `internal/webui` (1): every literal in the page markup that the script
   replaces from the string table is compared with that table, so the two copies
   of a sentence cannot drift apart unnoticed.

@@ -3,8 +3,9 @@
 package service
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -546,28 +547,82 @@ func (s *Service) cooling(a config.Attempt) bool {
 // tried again.
 func (s *Service) pruneRejected(now time.Time) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	expired := s.pruneRejectedLocked(nil, now)
+	s.mu.Unlock()
+	logExpired(expired)
+}
+
+// pruneRejectedLocked is pruneRejected with the lock already held. It drops the
+// refusals whose wait is over and appends them to dst rather than making a slice
+// of its own, so a caller that hands it a buffer with room to spare keeps this
+// free of allocation while s.mu is held. A nil dst is fine, and is what the
+// once-per-round caller passes: it then allocates only when a wait really ends.
+func (s *Service) pruneRejectedLocked(dst []rejection, now time.Time) []rejection {
 	for key, r := range s.rejected {
 		if !now.Before(r.until) {
 			delete(s.rejected, key)
+			dst = append(dst, r)
 		}
+	}
+	return dst
+}
+
+// logExpired reports the refusals whose wait just ended, in the one place the
+// drop happens: a round that is offline prunes through signIn and one that is
+// online through skipped, so a line in either of them alone would be missing
+// from the other, which is exactly the path an operator watches to tell whether
+// the cleanup ran. The caller runs this after releasing the lock.
+func logExpired(expired []rejection) {
+	for _, r := range expired {
+		logging.Log.Info("entry %d is out of its %s cooldown and is tried again (it had been refused: %s, ret_code=%s)",
+			r.index+1, shortDuration(cooldownPeriod), r.message, r.retCode)
 	}
 }
 
 // skipped renders the entries that are being left alone, for the interface.
+//
+// The refusals whose wait is over are forgotten here first, so an entry a round
+// that never reached signIn let expire is not reported as still being left alone
+// with no wait left.
+//
+// The locked section allocates nothing: the two slices it fills are made in
+// between from a count read under a short lock of its own, so a concurrent
+// Snapshot is never queued behind the allocator. The count can only shrink
+// between the two passes (the one caller that adds a refusal runs on this same
+// goroutine, and the other two only empty the map), so the buffers always have
+// room and the appends never grow.
 func (s *Service) skipped(now time.Time) []Skipped {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Skipped, 0, len(s.rejected))
+	size := len(s.rejected)
+	s.mu.Unlock()
+
+	out := make([]Skipped, 0, size)
+	expired := make([]rejection, 0, size)
+
+	s.mu.Lock()
+	expired = s.pruneRejectedLocked(expired, now)
 	for _, r := range s.rejected {
+		retryIn := int(r.until.Sub(now).Round(time.Second).Seconds())
+		if retryIn < 1 {
+			// The entry is still being held back, so "0s" would read as "due
+			// now" and a negative value as nonsense. Anything below one second
+			// is rounded up to it.
+			retryIn = 1
+		}
 		out = append(out, Skipped{
 			Index:    r.index,
 			Message:  r.message,
 			RetCode:  r.retCode,
-			RetryInS: int(r.until.Sub(now).Round(time.Second).Seconds()),
+			RetryInS: retryIn,
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Index < out[j].Index })
+	s.mu.Unlock()
+
+	// slices.SortFunc rather than sort.Slice: the latter goes through
+	// reflect.Swapper and allocates on every call, which sort.Slice's own
+	// comparison func does not need.
+	slices.SortFunc(out, func(a, b Skipped) int { return cmp.Compare(a.Index, b.Index) })
+	logExpired(expired)
 	return out
 }
 
