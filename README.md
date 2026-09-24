@@ -410,7 +410,8 @@ Autostart entries: the registry key
 
 ## Files
 
-- `config.json` - settings, written readable by its owner alone
+- `config.json` - settings, written readable by its owner alone; on Windows it is
+  given an access list for that account, since the mode bits mean nothing there
 - `logs/app.log` - log, in a directory of its own, both readable by their owner
   alone, and rotated to `app.log.1` when it exceeds 4 MiB. `--no-log` and the
   `logToFile` setting leave it out, as a machine with a small flash, such as a
@@ -713,9 +714,11 @@ log is readable by anyone.
   `config.json` in clear text unless `rememberPassword` is turned off. The file is
   written readable by its owner alone, and so is the log in its directory, since
   the log names the account as well: `0600` for the two files, `0700` for the
-  directory. A file an earlier version left readable by everyone is tightened the
-  next time it is written. The systemd units set `UMask=0077` and the system
-  service keeps its state directory to `0700` as well.
+  directory. A file an earlier version or a copy left readable by anyone else is
+  tightened at startup, and the log says what was found and what was done; on
+  Windows, where the mode bits do nothing, the file gets an access list of its
+  own naming only the account the program runs as. The systemd units set
+  `UMask=0077` and the system service keeps its state directory to `0700` as well.
 - The settings page writes the password field and never reads it. It is told
   whether a password is stored rather than what it is, so the secret is not in the
   browser, not in the script the page loads, and not in a request the page makes,

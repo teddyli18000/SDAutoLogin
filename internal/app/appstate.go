@@ -22,6 +22,12 @@ type AppState struct {
 
 // New returns the shared state around an already loaded configuration.
 func New(cfg *config.Config) *AppState {
+	// The file the passwords are in is looked at here rather than on every save,
+	// since what can be loose about it is not something this program just wrote:
+	// it is a file an older version made, or a copy somebody moved around.
+	if report := cfg.Protect(); report != "" {
+		logging.Log.Warn("%s", report)
+	}
 	return &AppState{cfg: cfg, svc: service.NewService(cfg)}
 }
 

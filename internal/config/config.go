@@ -315,9 +315,23 @@ func (c *Config) Save() error {
 		return err
 	}
 	// WriteFile only applies the mode when it creates the file, so a file an
-	// earlier version left readable by everyone is tightened here as well.
-	return os.Chmod(c.path, configFileMode)
+	// earlier version left readable by everyone is tightened here as well. Where
+	// the mode bits do nothing, which is Windows, the file is given an access
+	// list of its own instead.
+	if err := os.Chmod(c.path, configFileMode); err != nil {
+		return err
+	}
+	return restrictToOwner(c.path)
 }
+
+// Protect checks that the file holding the passwords cannot be read by anyone
+// but its owner and puts it right where it can, returning what it had to say
+// about it for the log, or the empty string when there was nothing to say.
+//
+// Save does the same to the file it writes; this is for the file that is
+// already there when the program starts, which an older version or a reader who
+// copied it around may have left loose.
+func (c *Config) Protect() string { return protect(c.path) }
 
 func (c *Config) marshal() ([]byte, error) {
 	type persistConfig Config

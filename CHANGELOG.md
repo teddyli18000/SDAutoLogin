@@ -83,6 +83,11 @@ close the places it appears besides the file.
   with the field left empty keeps the password that is there, which is what an
   entry the reader did not touch sends; an entry with nothing to keep — one just
   added, or one whose account was renamed — is asked for a password instead.
+- The file is kept to its owner. It is written `0600`, and a file an older
+  version or a copy left readable by the group or by everyone else is tightened
+  at startup, with a line in the log saying what was found and what was done.
+  Windows has no mode bits to lean on, so there the file is given an access list
+  of its own naming only the account the program runs as.
 
 ## v1.1.0 - 2026-09-24
 

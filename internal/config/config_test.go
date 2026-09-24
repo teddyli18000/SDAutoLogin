@@ -708,6 +708,45 @@ func TestSaveKeepsTheFileToItsOwner(t *testing.T) {
 	}
 }
 
+// TestALooseModeIsPutRightAndReported covers the file that is already on disk, a
+// file an older version made or a copy a reader moved around: nothing has
+// tightened it yet, and the check that runs at startup is what does.
+func TestALooseModeIsPutRightAndReported(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the mode bits are a Unix thing; Windows is given an access list instead")
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Accounts = []Account{{Username: "s1234567", Password: "topsecret", ISPs: []string{""}}}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report := cfg.Protect()
+	if report == "" {
+		t.Fatal("a file readable by everyone was not reported")
+	}
+	if !strings.Contains(report, "0644") {
+		t.Errorf("the report does not name the mode it found: %q", report)
+	}
+	if got := fileMode(t, path); got != 0o600 {
+		t.Errorf("the loose file is %#o after Protect, want 0600", got)
+	}
+
+	// Nothing left to say once it is right, so a run that finds one of these
+	// does not repeat itself on every start.
+	if again := cfg.Protect(); again != "" {
+		t.Errorf("a file its owner alone can read was reported again: %q", again)
+	}
+}
+
 // fileMode is the permission bits of a file.
 func fileMode(t *testing.T, path string) os.FileMode {
 	t.Helper()
