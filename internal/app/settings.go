@@ -580,6 +580,11 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		// Index names the entry of the login list an action is about, used by
 		// "test this account".
 		Index int `json:"index"`
+		// ISP is the service type a switch asks for, as the suffix the entry is
+		// submitted with. It is a pointer because the campus network itself is a
+		// service type with no suffix: a request that names none at all is a
+		// malformed one, not a request for the campus network.
+		ISP *string `json:"isp"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "err.badRequest"})
@@ -610,15 +615,23 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 			"after":         statusPayload(snapshotFromStatus(test.After)),
 		})
 
-	case "usePreferred":
-		// The button beside the login list, for a session that is up on a
-		// service type the entry does not put first. It is the same answer the
-		// page shows for a login of its own, since that is what this is.
-		logging.Log.Info("the settings page asked for the session to be signed in as the first service type")
-		test, moved := s.state.UsePreferred()
+	case "switchService":
+		// The controls beside the login list, for a session that is up on a
+		// service type other than the one that was asked for. It is the same
+		// answer the page shows for a login of its own, since that is what this
+		// is.
+		if req.ISP == nil {
+			writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "err.badRequest"})
+			return
+		}
+		logging.Log.Info("the settings page asked for the session to be signed in as %s", config.OperatorName(*req.ISP))
+		test, moved := s.state.SwitchService(*req.ISP)
 		if moved {
 			logging.Log.Info("signed in again as %s: %s (ret_code=%s)", test.Attempt.Entry(),
 				test.Result.Message, test.Result.RetCode)
+		} else {
+			logging.Log.Info("there was nothing to sign in again as %s: the session is not up on this account, or it is on that service type already",
+				config.OperatorName(*req.ISP))
 		}
 		writeJSON(w, map[string]any{
 			"ok":     true,

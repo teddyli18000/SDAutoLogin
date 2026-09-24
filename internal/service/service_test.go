@@ -52,6 +52,17 @@ type stubPortal struct {
 	queries   int
 	logins    int
 	attempted []string
+	// accepted is whether the login the stub answered last was one it took, by
+	// the same rule the portal uses: the result field says 1 or ok.
+	accepted bool
+}
+
+// loginAccepted reports whether a login reply is an acceptance. The stubs answer
+// with the result field the portal itself is read by, so the rule is the one the
+// portal package applies to it.
+func loginAccepted(body string) bool {
+	return strings.Contains(body, `"result":1`) || strings.Contains(body, `"result":"1"`) ||
+		strings.Contains(body, `"result":"ok"`)
 }
 
 func boolPtr(v bool) *bool { return &v }
@@ -88,6 +99,7 @@ func (s *stubPortal) start(t *testing.T) *config.Config {
 				}
 				body = s.loginBodies[i]
 			}
+			s.accepted = loginAccepted(body)
 			_, _ = io.WriteString(w, body)
 			return
 		}
@@ -109,9 +121,11 @@ func (s *stubPortal) start(t *testing.T) *config.Config {
 		}
 		// The portal echoes the account a login was submitted with, so the stub
 		// does too: which service type the session is on is read off that echo,
-		// and a stub that always named the same account would not show it.
+		// and a stub that always named the same account would not show it. Only a
+		// login the stub accepted changes it, since one the portal refused leaves
+		// the session exactly as it was.
 		account := "s1234567"
-		if len(s.attempted) > 0 {
+		if s.accepted && len(s.attempted) > 0 {
 			account = strings.TrimPrefix(s.attempted[len(s.attempted)-1], ",0,")
 		}
 		fmt.Fprintf(w, `{"result":%s,"user_account":%q,`+
@@ -324,6 +338,9 @@ func TestTickMovesASessionOntoTheServiceTypeTheEntryPutsFirst(t *testing.T) {
 		t.Errorf("the snapshot says the session is on %q and should be moved (%v), want it on the first service type and nothing left to do",
 			snap.UsedISP, snap.MoveToPreferred)
 	}
+	if snap.SwitchRefused != nil {
+		t.Errorf("the move that worked is still reported as refused: %+v", snap.SwitchRefused)
+	}
 	if got := sp.submitted(); len(got) != 1 || got[0] != ",0,s1234567@zgyd" {
 		t.Errorf("submitted = %q, want one login as the first service type", got)
 	}
@@ -388,12 +405,15 @@ func TestTickLeavesASessionAloneWhenAutoLoginIsOff(t *testing.T) {
 	}
 }
 
-// TestTickAsksOnceWhenThePortalWillNotSignInAgainWhileTheSessionIsUp covers the
-// portal that refuses a second sign-in. The session is left as it is, the entry is
-// not put out of the running for it - the account was not what was refused - and
-// the portal is not asked again on every check.
-func TestTickAsksOnceWhenThePortalWillNotSignInAgainWhileTheSessionIsUp(t *testing.T) {
-	sp := &stubPortal{online: true, loginBody: `{"result":0,"ret_code":"1"}`}
+// TestTickAsksAgainWhenThePortalWillNotSignInAgainWhileTheSessionIsUp covers the
+// portal that refuses a second sign-in. The session is left as it is, what the
+// portal said is kept so the page and the tray can report it, and the entry is
+// not put out of the running for it - the account was not what was refused. The
+// portal is asked again, but not on every check: a login every interval against a
+// session the portal is happy with is not something to do.
+func TestTickAsksAgainWhenThePortalWillNotSignInAgainWhileTheSessionIsUp(t *testing.T) {
+	sp := &stubPortal{online: true,
+		loginBody: `{"result":0,"ret_code":"1","msg":"wrong account or password"}`}
 	cfg := sp.start(t)
 	cfg.Accounts[0].ISPs = []string{"@zgyd", ""}
 	cfg.SwitchToPreferredService = true
@@ -407,14 +427,41 @@ func TestTickAsksOnceWhenThePortalWillNotSignInAgainWhileTheSessionIsUp(t *testi
 	if !strings.Contains(first.Message, "would not sign in again") {
 		t.Errorf("Message = %q, want it to say the portal refused the second sign-in", first.Message)
 	}
+	if first.SwitchRefused == nil {
+		t.Fatal("the refusal was not kept, so nothing tells the reader the session needs them")
+	}
+	if first.SwitchRefused.RetCode != "1" || first.SwitchRefused.Message == "" {
+		t.Errorf("SwitchRefused = %+v, want what the portal answered", first.SwitchRefused)
+	}
 	if len(svc.skipped(time.Now())) != 0 {
 		t.Error("the entry was put out of the running for a refusal that was not about the account")
 	}
 
+	// The check right after it does not ask again.
 	svc.tick()
 	if _, logins := sp.counts(); logins != 1 {
-		t.Errorf("logins = %d, want one: a portal that will not sign in again must be asked once", logins)
+		t.Errorf("logins = %d, want one: the portal must not be asked again within the wait", logins)
 	}
+	if svc.Snapshot().SwitchRefused == nil {
+		t.Error("the refusal stopped being reported while the session is still where it was")
+	}
+
+	// Once the wait is over it is asked again.
+	shortenSwitchWait(t)
+	svc.tick()
+	if _, logins := sp.counts(); logins != 2 {
+		t.Errorf("logins = %d, want the move asked about again when the wait is over", logins)
+	}
+}
+
+// shortenSwitchWait makes the wait between two moves of a session nothing, so a
+// test does not have to spend it.
+func shortenSwitchWait(t *testing.T) {
+	t.Helper()
+
+	previous := switchRetryPeriod
+	switchRetryPeriod = 0
+	t.Cleanup(func() { switchRetryPeriod = previous })
 }
 
 func TestTickReportsARejectedLogin(t *testing.T) {

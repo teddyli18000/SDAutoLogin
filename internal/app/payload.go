@@ -77,8 +77,20 @@ type apiStatus struct {
 	// which is what the button that signs in again is shown for. It is a flag
 	// of its own because the service type to move onto may be the campus
 	// network itself, whose suffix is empty.
-	MoveToPreferred bool         `json:"moveToPreferred"`
-	Skipped         []apiSkipped `json:"skipped"`
+	MoveToPreferred bool `json:"moveToPreferred"`
+	// SwitchRefused is what the portal answered when it would not sign in again
+	// to move the session, or null when no such sign-in is outstanding. Its
+	// presence is what tells the page the session needs a reader: the program
+	// has left it as it is, and the move is now theirs to make. The ret_code
+	// travels with it, so the page says the reason in its own language.
+	SwitchRefused *apiRefusal  `json:"switchRefused"`
+	Skipped       []apiSkipped `json:"skipped"`
+}
+
+// apiRefusal is one refusal of the portal's, as the page needs it.
+type apiRefusal struct {
+	Message string `json:"message"`
+	RetCode string `json:"retCode"`
 }
 
 // apiSkipped is one entry of the login list that the portal refused, and how
@@ -103,6 +115,10 @@ func statusPayload(s service.Snapshot) apiStatus {
 			RetryInS: skip.RetryInS,
 		})
 	}
+	var refused *apiRefusal
+	if s.SwitchRefused != nil {
+		refused = &apiRefusal{Message: s.SwitchRefused.Message, RetCode: s.SwitchRefused.RetCode}
+	}
 	return apiStatus{
 		State:           s.State.Code(),
 		ClientIP:        s.ClientIP,
@@ -117,6 +133,7 @@ func statusPayload(s service.Snapshot) apiStatus {
 		UsedISP:         s.UsedISP,
 		PreferredISP:    s.PreferredISP,
 		MoveToPreferred: s.MoveToPreferred,
+		SwitchRefused:   refused,
 		Skipped:         skipped,
 	}
 }

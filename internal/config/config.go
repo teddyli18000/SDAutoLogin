@@ -333,6 +333,26 @@ func (c *Config) Match(reported string) (int, string) {
 	return -1, ""
 }
 
+// AttemptFor returns the attempt that submits one entry of the login list with
+// one of its service types. It reports false when there is no such attempt: the
+// position names no entry, the entry is switched off or cannot be submitted, or
+// the service type is not one the entry may be used with.
+func (c *Config) AttemptFor(index int, isp string) (Attempt, bool) {
+	if index < 0 || index >= len(c.Accounts) {
+		return Attempt{}, false
+	}
+	entry := c.Accounts[index]
+	if entry.Disabled || !entry.usable() || !slices.Contains(entry.ISPs, isp) {
+		return Attempt{}, false
+	}
+	return Attempt{
+		Index:    index,
+		Username: entry.Username,
+		Password: entry.Password,
+		ISP:      isp,
+	}, true
+}
+
 // PreferredFor returns the attempt the session the portal reports should be on:
 // the first service type of the entry that account belongs to. It reports false
 // when there is nothing to move the session onto - the account names no entry,
@@ -345,23 +365,30 @@ func (c *Config) Match(reported string) (int, string) {
 // why the caller decides whether to act on this.
 func (c *Config) PreferredFor(reported string) (Attempt, bool) {
 	index, isp := c.Match(reported)
-	if index < 0 {
+	if index < 0 || len(c.Accounts[index].ISPs) == 0 {
 		return Attempt{}, false
 	}
-	entry := c.Accounts[index]
-	if entry.Disabled || !entry.usable() || len(entry.ISPs) == 0 {
-		return Attempt{}, false
-	}
-	first := entry.ISPs[0]
+	first := c.Accounts[index].ISPs[0]
 	if first == isp {
 		return Attempt{}, false
 	}
-	return Attempt{
-		Index:    index,
-		Username: entry.Username,
-		Password: entry.Password,
-		ISP:      first,
-	}, true
+	return c.AttemptFor(index, first)
+}
+
+// SwitchTo returns the attempt that moves the session the portal reports onto
+// one service type of the entry that account belongs to, which is what the
+// settings page asks for when it names one. It reports false when there is
+// nothing to do: the account names no entry, the entry cannot be submitted, the
+// service type is not one the entry lists, or the session is on it already.
+//
+// The service type has to be one the entry lists, so a request from the page
+// cannot submit a suffix that was never configured for that account.
+func (c *Config) SwitchTo(reported, isp string) (Attempt, bool) {
+	index, used := c.Match(reported)
+	if index < 0 || used == isp {
+		return Attempt{}, false
+	}
+	return c.AttemptFor(index, isp)
 }
 
 // EntryLabel names one entry of the login list and one of its service types, for

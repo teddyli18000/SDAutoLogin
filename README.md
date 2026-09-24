@@ -209,7 +209,8 @@ log, since the one before it was spent by the browser that opened it.
 - Interface language.
 - Sign in automatically after a disconnection.
 - Move a session that was already up onto the first service type of its account,
-  and a button on the entry the session is on that does it by hand.
+  and, on the card of the entry the session is on, the controls that move it onto
+  any of the other service types that entry lists.
 - Run at startup.
 - Check interval, and the reachability probes.
 
@@ -263,10 +264,16 @@ in itself. A session that is already up when the program starts — one signed i
 by hand, or by a previous run — is not something the portal moves, and one
 session per address means the only way onto another service type is a login that
 replaces it. The program signs in again as the first service type of the entry
-that session belongs to, once: a portal that will not sign in again while a
-session is up is reported and left as it is, and the entry is not taken out of
-the running for it. The option can be turned off, and the card of the account in
-use then offers a button that moves the session by hand.
+that session belongs to, and asks about it again an hour later while the session
+stays where it is. A portal that will not sign in again while a session is up is
+reported and left as it is, and the entry is not taken out of the running for it:
+the session is up and working, so the settings page, the pill and the tray say
+the session needs a reader rather than showing an error.
+
+The card of the account in use carries the controls for that: the service type
+the session is on, the one its entry puts first, and a way to sign in again as
+any of the other service types the entry lists. It is the way out when the portal
+will not take the first one, and it works whether or not the option above is on.
 
 ## Command line
 

@@ -96,6 +96,19 @@ type Snapshot struct {
 	// alone would say the same thing as "nothing to do".
 	PreferredISP    string
 	MoveToPreferred bool
+	// SwitchRefused is what the portal answered when it would not sign in again
+	// to move the session, or nil when no such sign-in is outstanding: none was
+	// tried, the one that was tried worked, or the session is already where its
+	// entry puts first. It is what says the session is being left as it is and
+	// that moving it is now up to a reader.
+	SwitchRefused *Refusal
+}
+
+// Refusal is what the portal answered when it would not do something, kept so
+// the settings page can say it in the language of its own interface.
+type Refusal struct {
+	Message string
+	RetCode string
 }
 
 // Skipped is one entry of the login list that is not being tried, why, and how
@@ -135,6 +148,17 @@ const confirmTries = 3
 // test which has to go through this wait does not spend it.
 var confirmDelay = 750 * time.Millisecond
 
+// switchRetryPeriod is how long a move onto the service type an entry puts first
+// is left alone after the portal refused one.
+//
+// A refusal is not the end of it: a portal that will not sign in again while a
+// session is up may be that way about one service type and not another, or a
+// session signed in by hand may be dropped and taken over later, so the move is
+// asked about again. Asking every check would submit a login every fifteen
+// seconds against a session the portal is happy with, which is why the period is
+// this long, and it is a variable so a test does not have to spend it.
+var switchRetryPeriod = time.Hour
+
 // rejection is a definitively refused attempt and the moment it may be tried
 // again.
 type rejection struct {
@@ -172,11 +196,14 @@ type Service struct {
 	// keyed by config.Attempt.Key, so the check walks past a broken account
 	// instead of submitting it again every interval.
 	rejected map[string]rejection
-	// switchTried remembers that this session has been signed in again to move
-	// it onto the service type its entry puts first. A portal that will not sign
-	// in while the session is up must not be asked again every check, and the
-	// next session may be moved again.
-	switchTried bool
+	// switchAskedAt is when this session was last signed in again to move it onto
+	// the service type its entry puts first, and switchRefused is what the portal
+	// answered when it would not. A portal that will not sign in while a session
+	// is up is not asked again until switchRetryPeriod has passed, and its answer
+	// is kept so the page and the tray can say the session is being left as it is.
+	// Both are cleared for a new session and when the settings are saved.
+	switchAskedAt time.Time
+	switchRefused *Refusal
 }
 
 func NewService(cfg *config.Config) *Service {
@@ -274,8 +301,9 @@ func (s *Service) Restart(cfg *config.Config) {
 	s.rejected = map[string]rejection{}
 	// The settings may be what was wrong: a service type was added, the order
 	// was changed, or the option that moves a session onto the first one was
-	// turned on. A session that was left alone is asked about again.
-	s.switchTried = false
+	// turned on. A session that was left alone is asked about again at once.
+	s.switchAskedAt = time.Time{}
+	s.switchRefused = nil
 	s.mu.Unlock()
 	s.Start()
 }
@@ -451,7 +479,8 @@ func (s *Service) signIn(cfg *config.Config, st portal.Status, snap Snapshot, of
 	// A session is being signed in from scratch, so whatever was tried to move
 	// the one before it does not apply to this one.
 	s.mu.Lock()
-	s.switchTried = false
+	s.switchAskedAt = time.Time{}
+	s.switchRefused = nil
 	s.mu.Unlock()
 
 	attempts := cfg.Attempts()
@@ -586,6 +615,10 @@ func (s *Service) signedIn(snap Snapshot, a config.Attempt, verify portal.Status
 	s.failStreak = 0
 	s.lastOnlineAt = time.Now()
 	s.activeIndex, s.activeEntry = a.Index, entry
+	// The session is a new one, so a refusal to move the one before it is neither
+	// reported any more nor worth waiting on.
+	s.switchRefused = nil
+	s.switchAskedAt = time.Time{}
 	s.mu.Unlock()
 
 	snap.State = StateOnline
@@ -623,10 +656,24 @@ func (s *Service) attribute(cfg *config.Config, st portal.Status, snap Snapshot)
 
 	snap.PreferredISP = ""
 	snap.MoveToPreferred = false
-	if a, ok := cfg.PreferredFor(st.Account); ok {
-		snap.PreferredISP = a.ISP
-		snap.MoveToPreferred = true
+	a, ok := cfg.PreferredFor(st.Account)
+	if !ok {
+		// The session is where its entry puts first, so a refusal to move it is
+		// no longer news: it is forgotten rather than kept to be reported the
+		// next time the session is somewhere else. The wait is forgotten with
+		// it, since there is nothing being waited on.
+		s.mu.Lock()
+		s.switchRefused = nil
+		s.switchAskedAt = time.Time{}
+		s.mu.Unlock()
+		return snap
 	}
+	snap.PreferredISP = a.ISP
+	snap.MoveToPreferred = true
+	s.mu.Lock()
+	refused := s.switchRefused
+	s.mu.Unlock()
+	snap.SwitchRefused = refused
 	return snap
 }
 
@@ -649,10 +696,13 @@ func (s *Service) preferredPending(cfg *config.Config, st portal.Status) (config
 		return config.Attempt{}, false
 	}
 	s.mu.Lock()
-	tried := s.switchTried
+	askedAt := s.switchAskedAt
 	s.mu.Unlock()
-	if tried {
-		// Asked once for this session already, and the portal did not move it.
+	if wait := switchRetryPeriod - time.Since(askedAt); !askedAt.IsZero() && wait > 0 {
+		// Asked not long ago, and the portal would not move the session then. It
+		// is asked again when the wait is over: the answer may change, and a
+		// login every check against a session the portal is happy with is not
+		// something to do in the meantime.
 		return config.Attempt{}, false
 	}
 	a, ok := cfg.PreferredFor(st.Account)
@@ -674,7 +724,7 @@ func (s *Service) preferredPending(cfg *config.Config, st portal.Status) (config
 // broken: the entry has to stay usable for when the session does drop.
 func (s *Service) switchToPreferred(cfg *config.Config, st portal.Status, snap Snapshot, a config.Attempt) Snapshot {
 	s.mu.Lock()
-	s.switchTried = true
+	s.switchAskedAt = time.Now()
 	s.attempts++
 	attempt := s.attempts
 	s.mu.Unlock()
@@ -685,8 +735,11 @@ func (s *Service) switchToPreferred(cfg *config.Config, st portal.Status, snap S
 	start := time.Now()
 	res := s.client.Login(st, a)
 	if !res.Success {
-		logging.Log.Warn("the portal would not sign in again while the session is up: %s (ret_code=%s, raw %s); the session is left alone until it drops",
-			res.Message, res.RetCode, portal.Truncate(res.Raw))
+		// What the portal said is kept, not just logged: the session stays as it
+		// is either way, and the page is where a reader is told so.
+		s.setSwitchRefused(&Refusal{Message: res.Message, RetCode: res.RetCode})
+		logging.Log.Warn("the portal would not sign in again while the session is up: %s (ret_code=%s, raw %s); the session is left as it is and asked about again in %s",
+			res.Message, res.RetCode, portal.Truncate(res.Raw), shortDuration(switchRetryPeriod))
 		message := "the portal would not sign in again while the session is up"
 		if stays := s.entryLabel(cfg, st); stays != "" {
 			message += ", the session stays as " + stays
@@ -705,6 +758,14 @@ func (s *Service) switchToPreferred(cfg *config.Config, st portal.Status, snap S
 	logging.Log.Info("signed in again in %d ms, the session is now %s, since %s",
 		elapsedMS(start), a.Entry(), verify.OnlineSince)
 	return s.signedIn(snap, a, verify, "switched to")
+}
+
+// setSwitchRefused remembers what the portal answered when it would not sign in
+// again to move the session, which is what the page and the tray report.
+func (s *Service) setSwitchRefused(r *Refusal) {
+	s.mu.Lock()
+	s.switchRefused = r
+	s.mu.Unlock()
 }
 
 // entryLabel names the entry the portal says the session is on, for a message a

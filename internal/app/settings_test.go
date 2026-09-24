@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -676,11 +677,10 @@ func TestASaveThatLeavesThePasswordAloneKeepsIt(t *testing.T) {
 // postAction runs one action the page can ask for and hands back the reply, so
 // the contract between the page and the handler is what is being read rather
 // than the handler on its own.
-func postAction(t *testing.T, server *Server, action string) *httptest.ResponseRecorder {
+func postAction(t *testing.T, server *Server, body string) *httptest.ResponseRecorder {
 	t.Helper()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/action",
-		bytes.NewReader([]byte(`{"action":"`+action+`"}`)))
+	req := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader([]byte(body)))
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
 	req.Header.Set("X-Auth-Token", server.session)
 	rec := httptest.NewRecorder()
@@ -689,33 +689,41 @@ func postAction(t *testing.T, server *Server, action string) *httptest.ResponseR
 }
 
 // TestThePageCanAskForTheServiceTypeTheSessionShouldBeOn covers the reply the
-// button on the page is rendered from: whether there was anything to move, and
+// controls on the page are rendered from: whether there was anything to do, and
 // when there was, what the sign-in went out as. A session that is already on the
-// first service type is answered the same way as one that is not up at all -
-// with nothing to move - rather than with a login reply nobody asked for.
+// service type asked for is answered the same way as one that is not up at all -
+// with nothing to do - rather than with a login reply nobody asked for.
 func TestThePageCanAskForTheServiceTypeTheSessionShouldBeOn(t *testing.T) {
 	cases := []struct {
-		name    string
-		session string
-		moved   bool
+		name      string
+		isps      []string
+		session   string
+		isp       string
+		moved     bool
+		submitted string
 	}{
-		{"a session on the campus network, with China Mobile first in the entry", "s1234567", true},
-		{"a session already on the first service type", "s1234567@zgyd", false},
-		{"a session that is down", "", false},
+		{"the first service type, with the session on the campus network",
+			[]string{"@zgyd", ""}, "s1234567", "@zgyd", true, ",0,s1234567@zgyd"},
+		{"another service type of the entry",
+			[]string{"@zgyd", "@cucc"}, "s1234567@zgyd", "@cucc", true, ",0,s1234567@cucc"},
+		{"a service type the entry does not list",
+			[]string{"@zgyd", "@cucc"}, "s1234567", "@ctc", false, ""},
+		{"a session that is down",
+			[]string{"@zgyd", "@cucc"}, offlineSession, "@cucc", false, ""},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cfg, logins := portalStubSession(t, []string{"@zgyd", ""}, c.session,
+			stub := newStubPortal(t, c.isps, c.session,
 				`{"result":1,"ret_code":0,"msg":"authentication successful"}`)
-			state := New(cfg)
+			state := New(stub.cfg)
 			server := NewServer(state, "", nil)
 			t.Cleanup(server.Stop)
 			if _, err := server.URL(); err != nil {
 				t.Fatalf("URL: %v", err)
 			}
 
-			rec := postAction(t, server, "usePreferred")
+			rec := postAction(t, server, `{"action":"switchService","isp":`+strconv.Quote(c.isp)+`}`)
 
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
@@ -728,17 +736,43 @@ func TestThePageCanAskForTheServiceTypeTheSessionShouldBeOn(t *testing.T) {
 			if !strings.Contains(body, want) {
 				t.Errorf("the reply does not say %s: %s", want, body)
 			}
-			if c.moved && !strings.Contains(body, `"isp":"@zgyd"`) {
+			if c.moved && !strings.Contains(body, `"isp":`+strconv.Quote(c.isp)) {
 				t.Errorf("the reply does not name the service type the sign-in went out as: %s", body)
 			}
-			wantLogins := 0
-			if c.moved {
-				wantLogins = 1
+			submitted := stub.accounts()
+			if c.submitted == "" {
+				if len(submitted) != 0 {
+					t.Errorf("submitted = %q, want nothing with nothing to do", submitted)
+				}
+				return
 			}
-			if got := logins(); got != wantLogins {
-				t.Errorf("logins = %d, want %d", got, wantLogins)
+			if len(submitted) != 1 || submitted[0] != c.submitted {
+				t.Errorf("submitted = %q, want %q", submitted, c.submitted)
 			}
 		})
+	}
+}
+
+// TestASwitchWithoutAServiceTypeIsRefused covers the difference the request
+// keeps: the campus network itself is a service type with no suffix, so a
+// request that names no service type at all is a malformed one rather than a
+// request for the campus network.
+func TestASwitchWithoutAServiceTypeIsRefused(t *testing.T) {
+	stub := newStubPortal(t, []string{"@zgyd", ""}, onlineSession, `{"result":1,"ret_code":0}`)
+	state := New(stub.cfg)
+	server := NewServer(state, "", nil)
+	t.Cleanup(server.Stop)
+	if _, err := server.URL(); err != nil {
+		t.Fatalf("URL: %v", err)
+	}
+
+	rec := postAction(t, server, `{"action":"switchService"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if got := stub.loginCount(); got != 0 {
+		t.Errorf("a login was submitted %d time(s) for a request that named no service type", got)
 	}
 }
 

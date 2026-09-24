@@ -72,6 +72,9 @@ type unixTray struct {
 	iconBusy    []byte
 	iconError   []byte
 	lastState   service.State
+	// lastRefused is whether the snapshot before this one was one the portal had
+	// refused to move the session for, so the reader is told about it once.
+	lastRefused bool
 }
 
 func trayReady(state *app.AppState, opts Options) *unixTray {
@@ -216,6 +219,9 @@ func (t *unixTray) onStatus(s service.Snapshot) {
 	t.mu.Lock()
 	previous := t.lastState
 	t.lastState = s.State
+	refused := s.SwitchRefused != nil
+	previousRefused := t.lastRefused
+	t.lastRefused = refused
 
 	if s.State != previous {
 		logging.Log.Debug("tray icon updated to %s (internet checked=%v ok=%v)", s.State, s.InternetChecked, s.InternetOK)
@@ -238,14 +244,18 @@ func (t *unixTray) onStatus(s service.Snapshot) {
 	}
 	t.mu.Unlock()
 
-	// The two transitions worth telling the user about, the same pair the
-	// Windows tray shows as a balloon tip. This runs outside the lock, since it
-	// starts a helper process and the tray state has no part in that.
+	// The transitions worth telling the user about, the same ones the Windows
+	// tray shows as a balloon tip. This runs outside the lock, since it starts a
+	// helper process and the tray state has no part in that. The refusal is one
+	// of them because the program has stopped trying: the session is being left
+	// as it is and moving it is the reader's to do.
 	switch {
 	case previous == service.StateLoggingIn && s.State == service.StateOnline:
 		platform.Notify(i18n.L("app.name"), i18n.L("balloon.loggedIn"))
 	case s.State == service.StateError && previous != service.StateError:
 		platform.Notify(i18n.L("app.name"), i18n.L("balloon.reconnectFailed")+": "+s.Message)
+	case refused && !previousRefused:
+		platform.Notify(i18n.L("app.name"), i18n.L("balloon.switchRefused"))
 	}
 }
 
@@ -253,6 +263,13 @@ func (t *unixTray) tooltip(s service.Snapshot) string {
 	out := i18n.L("app.name") + "\n" + i18n.Lf("tray.status", stateLabel(s.State))
 	if s.Message != "" && s.State == service.StateError {
 		out += " (" + s.Message + ")"
+	}
+	// The session is up and the program could not move it where the order of the
+	// login list says it should be, so the reader is told the session is theirs
+	// to move. It is a line of its own because the state is Online: there is no
+	// error to read here, only something left to do.
+	if s.SwitchRefused != nil {
+		out += "\n" + i18n.L("tray.switchRefused")
 	}
 	if s.ClientIP != "" {
 		out += "\n" + i18n.Lf("tray.clientIP", s.ClientIP)

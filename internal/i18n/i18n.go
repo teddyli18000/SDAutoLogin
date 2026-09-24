@@ -50,9 +50,15 @@ var uiText = map[string]text{
 	"tray.reload":         {"重新加载配置", "Reload config"},
 	"tray.exit":           {"退出", "Exit"},
 	"tray.checkRequested": {"已触发一次检测", "A check has been requested"},
+	// Shown when the portal would not sign the session in again to move it onto
+	// the service type its entry puts first: the session is up, so there is
+	// nothing broken, but the move is left for the reader to make.
+	"tray.switchRefused": {"未能切换到首选服务类型，请在设置页处理", "Could not move onto the preferred service type, see the settings"},
 
 	"balloon.loggedIn":        {"已自动重新登录", "Signed back in"},
 	"balloon.reconnectFailed": {"自动登录失败，请检查设置", "Auto login failed, check the settings"},
+	"balloon.switchRefused": {"会话在线，但未能切换到首选服务类型，请在设置页处理",
+		"Signed in, but the move onto the preferred service type was refused - see the settings"},
 
 	"dlg.title":            {"校园网自动登录", "Campus Auto Login"},
 	"dlg.autostartFailed":  {"设置开机自启失败，请查看日志。", "Could not update the startup entry, see the log."},

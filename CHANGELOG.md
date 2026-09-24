@@ -89,22 +89,32 @@ by hand.
 - Such a session is signed in again as the first service type of its entry. The
   portal keeps one session per client address, so a login that replaces it is the
   only way onto another service type. Turning the option off leaves the session
-  alone, and the card of the account in use offers a button that does the same
-  thing by hand. Nothing is signed in on its own while automatic login is off
-  either: moving a session is a sign-in like any other, and one switch already
+  alone; nothing is signed in on its own while automatic login is off either,
+  since moving a session is a sign-in like any other and one switch already
   answers whether this program signs in by itself.
-- Moving a session is best effort and never a failure. A portal that will not
-  sign in again while a session is up is reported with the session left as it
-  was, and the entry is not taken out of the running for it. Each session is
-  asked once rather than on every round: a portal that refused is not asked again
-  until the settings are saved or the session is signed in from scratch.
+- Moving a session is best effort and never a failure. A portal that will not sign
+  in again while a session is up is reported with the session left as it was, and
+  the entry is not taken out of the running for it: the account was not what was
+  refused. The move is asked about again an hour later, which is slow enough not
+  to submit a login every check against a session the portal is happy with, and
+  the wait starts over for a new session or when the settings are saved.
+- What was refused is said where the session is, not only in the log: the card of
+  the account in use carries the portal's own answer for it - "this IP is already
+  online" rather than a ret_code - the pill in the header and the strip of
+  readings say the session needs a reader, and the tray adds that line to its
+  tooltip and shows one balloon tip when the refusal arrives. The session is up
+  and working, so nothing else says there is anything to do.
+- The controls on that card sign the session in again as any of the other service
+  types the entry lists, not only the first one: when the first is the one the
+  portal will not take, the reader can move the session onto another one without
+  editing the list. The same card names the service type the session is on and the
+  one its entry puts first, and the controls are there only while there is
+  somewhere to move it.
 - Which service type a session is on is read from the account the portal echoes,
   which is the account a login was submitted with: a suffix the echo does not
   carry is one that was not sent. An account with no suffix on it used to be read
   as the first service type of its entry, which named a session on the campus
   network itself "China Mobile" on the page.
-- The card of the account in use says what the session is on and what its entry
-  puts first, and the button on it is there only while there is something to move.
 
 ### The password
 

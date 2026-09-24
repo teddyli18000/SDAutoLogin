@@ -152,17 +152,19 @@ func (a *AppState) TestLogin(attempt config.Attempt) LoginTest {
 	}
 }
 
-// UsePreferred signs in again as the service type its entry puts first, while the
-// session is up on a later one, which is what the settings page's button asks
-// for. The portal keeps one session per client address, so this replaces the
-// session or is refused; either way nothing is logged out on purpose, and the
-// second sign-in is what the session is left to decide.
+// SwitchService signs in again with one service type of the entry the session is
+// on, while the session is up on another one, which is what the settings page's
+// button asks for: the first service type of the entry by default, or another one
+// the reader picks when the first is the one the portal will not take. The portal
+// keeps one session per client address, so this replaces the session or is
+// refused; either way nothing is logged out on purpose, and the second sign-in is
+// what the session is left to decide.
 //
-// The second return value says whether there was anything to move the session
-// onto. A session that is already down, or one that is on the first service type
-// already, has nothing to do here, and the page says that instead of showing a
-// login reply that was never asked for.
-func (a *AppState) UsePreferred() (LoginTest, bool) {
+// The second return value says whether there was anything to do. A session that
+// is already down, one that is on the service type asked for already, and a
+// service type the entry does not list all have nothing to do here, and the page
+// says that instead of showing a login reply that was never asked for.
+func (a *AppState) SwitchService(isp string) (LoginTest, bool) {
 	cfg := a.Config()
 	client := portal.NewClient(cfg)
 	before := client.QueryStatus()
@@ -171,7 +173,7 @@ func (a *AppState) UsePreferred() (LoginTest, bool) {
 		// its own - in the order of the list, which is the first service type.
 		return LoginTest{Before: before, After: before}, false
 	}
-	attempt, ok := cfg.PreferredFor(before.Account)
+	attempt, ok := cfg.SwitchTo(before.Account, isp)
 	if !ok {
 		return LoginTest{Before: before, After: before}, false
 	}

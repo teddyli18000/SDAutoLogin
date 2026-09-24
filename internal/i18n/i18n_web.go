@@ -44,17 +44,27 @@ var webText = map[string]text{
 	"acct.summaryOnly": {"{0} 个账号", "{0} accounts"},
 	"acct.allDisabled": {"所有账号都已停用，不会尝试登录。", "All accounts are disabled; nothing will be signed in."},
 
-	// Shown on the card whose account the session is on, when the session is on
-	// a service type the entry does not put first.
-	"acct.preferred": {
-		"会话已在线，但不在本账号的首选服务类型上（{0}）。改用首选重新登录会替换当前会话；门户不接受时，会话维持原样。",
-		"The session is up, but not on the service type this account puts first ({0}). Signing in again replaces the session; if the portal refuses, the session stays as it is."},
-	"acct.preferred.btn":   {"用首选重新登录", "Sign in again as the preferred type"},
-	"acct.preferred.none":  {"会话无需切换（已不在线，或已在首选服务类型上）。", "Nothing to move: the session is down, or already on the first service type."},
+	// Shown on the card whose account the session is on, whenever there is
+	// another service type of that entry to move it to.
+	"acct.preferred.now": {
+		"会话当前在 {0}，本账号的首选是 {1}。",
+		"The session is on {0}; this account puts {1} first."},
+	"acct.preferred.same": {
+		"会话当前在 {0}，这也正是本账号的首选。",
+		"The session is on {0}, which is what this account puts first."},
+	"acct.preferred.refused": {
+		"自动切换到 {0} 被门户拒绝（{1}）。可以再试一次，或先在门户页面注销当前会话。",
+		"The move onto {0} was refused ({1}). Try again, or log the session out on the portal page first."},
+	"acct.preferred.choose": {"改为", "Change to"},
+	"acct.preferred.btn":    {"重新登录", "Sign in again"},
+	"acct.preferred.none": {
+		"无法切换：会话已不在线，或这个服务类型不在该账号的列表里。",
+		"Nothing to switch: the session is down, or that service type is not one this account lists."},
 	"acct.preferred.moved": {"已用 {0} 重新登录。", "Signed in again as {0}."},
 	"acct.preferred.failed": {
 		"门户没有换：{0}。会话维持原样。",
 		"The portal would not sign in again: {0}. The session stays as it is."},
+	"acct.switch.dirty": {"保存后才能切换", "Save first, then switch"},
 
 	"field.account":       {"账号", "Account"},
 	"field.account.hint":  {"学号、用户名或邮箱均可", "Student id, user name or mail address"},
@@ -111,6 +121,11 @@ var webText = map[string]text{
 	"status.internetNo": {"不通", "unreachable"},
 	"status.checkNow":   {"立即检测", "Check now"},
 	"status.testLogin":  {"测试首个账号", "Test the first account"},
+	// Shown while the portal would not move the session where the order of the
+	// login list says it should be. The session is up, so nothing else in the
+	// strip says there is anything to do.
+	"status.attention":     {"需处理", "needs attention"},
+	"status.switchRefused": {"未能切换到 {0}，会话停在 {1}", "Could not move onto {0}; the session stays on {1}"},
 
 	"btn.save":       {"保存", "Save"},
 	"btn.reload":     {"重新载入配置", "Reload config"},

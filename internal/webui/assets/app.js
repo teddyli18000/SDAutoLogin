@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 
 /* The address the page was opened with carried a token, and the server
    exchanged it for this cookie before serving the page, so what is left in the
@@ -166,13 +166,13 @@ function renderAccounts(accounts) {
   $("acctWarn").hidden = !(accounts.length > 0 && accounts.every((entry) => entry.disabled));
   applyErrors();
   applyStatusBadges(state.status);
-  updateTestButtons();
+  updateEntryActions();
 }
 
-// The test action submits one entry from the saved list, which is keyed by
-// position, so an entry just moved or edited is not what the program would use
-// yet. The button therefore waits for a save.
-function updateTestButtons() {
+// The test button and the switch both ask the running program about the list it
+// is running with, which is keyed by position, so an entry just moved or edited
+// is not what the program would use yet. They therefore wait for a save.
+function updateEntryActions() {
   Array.from(document.querySelectorAll('#accountList [data-act="test"]')).forEach((node) => {
     const index = Number(node.closest(".account").dataset.index);
     const entry = state.config && state.config.accounts && state.config.accounts[index];
@@ -180,6 +180,11 @@ function updateTestButtons() {
     node.disabled = off || state.dirty;
     node.title = off ? t("acct.disabled") : state.dirty ? t("acct.test.dirty") : "";
   });
+  Array.from(document.querySelectorAll('#accountList [data-act="switchService"], #accountList .preferred-isp'))
+    .forEach((node) => {
+      node.disabled = state.dirty;
+      node.title = state.dirty ? t("acct.switch.dirty") : "";
+    });
 }
 
 function accountCard(entry, index) {
@@ -277,14 +282,17 @@ function accountCard(entry, index) {
   test.dataset.act = "test";
   const testResult = el("div", { class: "test-result", hidden: true });
 
-  // Shown only on the card the session is on, and only while that session is on
-  // a service type the entry does not put first; applyStatusBadges decides both
-  // from the status it is handed.
-  const preferredButton = button(t("acct.preferred.btn"), "ghost");
-  preferredButton.dataset.act = "usePreferred";
+  // Shown only on the card the session is on, and only while the entry lists
+  // another service type to move it to; applyStatusBadges decides both from the
+  // status it is handed, and fills in the select and the line.
+  const switchButton = button(t("acct.preferred.btn"), "ghost");
+  switchButton.dataset.act = "switchService";
   const preferred = el("div", { class: "account-preferred", hidden: true },
-    el("p", { class: "hint" }),
-    preferredButton);
+    el("p", { class: "hint preferred-line" }),
+    el("div", { class: "preferred-actions" },
+      el("span", { class: "preferred-target", text: t("acct.preferred.choose") }),
+      el("select", { class: "preferred-isp" }),
+      switchButton));
 
   const body = el("div", { class: "account-body" },
     row(usernameID, t("field.account"), username, t("field.account.hint"), "accounts." + index + ".username"),
@@ -474,9 +482,13 @@ function activeEntryLabel(st) {
   if (!st || typeof st.entryIndex !== "number" || st.entryIndex < 0) return "-";
   const cfg = state.config;
   if (!cfg || !cfg.accounts || st.entryIndex >= cfg.accounts.length) return "-";
-  if (typeof st.usedIsp === "string") return entryLabel(st.entryIndex, st.usedIsp);
-  // A status that does not carry the service type, which is what the login self
-  // test answers with: the entry is named with the types it may be used with.
+  // The service type is known only while a session has been read, which is the
+  // online state: a session that is gone is not on any of them, and the entry is
+  // named with the types it may be used with instead. So is a status that does
+  // not carry a service type at all, which is what the login self test answers.
+  if (st.state === "online" && typeof st.usedIsp === "string") {
+    return entryLabel(st.entryIndex, st.usedIsp);
+  }
   return entryLabel(st.entryIndex);
 }
 
@@ -505,21 +517,67 @@ function applyStatusBadges(st) {
         skipped.textContent = t("acct.skipped", formatWait(why.retryInS), reason);
       }
     }
-    // The session is up on this account but on a service type the entry does not
-    // put first, and the program has something to move it onto. Both the flag
-    // and the service type come from the program: the type it should be on may
-    // be the campus network itself, which is an empty suffix, so the type alone
-    // would not say whether there is anything to do.
-    const preferred = card.querySelector(".account-preferred");
-    if (preferred) {
-      const wanted = st.entryIndex === index && st.moveToPreferred;
-      preferred.hidden = !wanted;
-      if (wanted) {
-        preferred.querySelector(".hint").textContent = t("acct.preferred", operatorName(st.preferredIsp || ""));
-      }
-    }
+    // The card of the account the session is on: where the session is, where the
+    // entry says it should be, and the way to move it there. It is shown
+    // whenever that entry lists another service type, and the line says whether
+    // the program's own attempt was refused, which is the case a reader cannot
+    // see anywhere else: the session is up and working.
+    renderPreferred(card, st, index);
   });
   updateSummary();
+}
+
+// renderPreferred fills in the move-the-session block of one card.
+function renderPreferred(card, st, index) {
+  const block = card.querySelector(".account-preferred");
+  if (!block) return;
+  // Only the card of the entry the session is on, and only while it is up: the
+  // block is about a session that exists, and every other card's service types
+  // have nothing to do with where that session is.
+  const targets = st.state === "online" && st.entryIndex === index ? switchTargets(st, index) : [];
+  block.hidden = targets.length === 0;
+  if (targets.length === 0) return;
+
+  const select = block.querySelector(".preferred-isp");
+  // What the reader picked is kept while it is still one of the ways out: the
+  // status is refreshed every few seconds, and the list is rebuilt with it. An
+  // empty value is the campus network itself, which is a way out like any other,
+  // so the first render is told apart by the options the select does not have
+  // yet rather than by an empty value.
+  const picked = select.options.length ? select.value : null;
+  select.replaceChildren(...targets.map((suffix) =>
+    el("option", { value: suffix, text: operatorName(suffix) })));
+  const wanted = st.preferredIsp || "";
+  select.value = picked !== null && targets.includes(picked) ? picked
+    : targets.includes(wanted) ? wanted
+      : targets[0];
+
+  const line = block.querySelector(".preferred-line");
+  const refused = st.switchRefused;
+  line.classList.toggle("attention", !!refused);
+  if (refused) {
+    // The portal's answer is localised by its ret_code, the way the login self
+    // test localises it.
+    const reason = state.i18n["retcode." + (refused.retCode || "")] || refused.message || "";
+    line.textContent = t("acct.preferred.refused", operatorName(select.value), reason);
+    return;
+  }
+  const used = st.usedIsp || "";
+  line.textContent = used === wanted
+    ? t("acct.preferred.same", operatorName(used))
+    : t("acct.preferred.now", operatorName(used), operatorName(wanted));
+}
+
+// switchTargets is the service types of one entry that the session is not on,
+// which are the ones it can be moved to. The one it is on is left out: a login
+// as that would ask the portal for what it already has.
+function switchTargets(st, index) {
+  const cfg = state.config;
+  if (!cfg || !cfg.accounts || index < 0 || index >= cfg.accounts.length) return [];
+  const entry = cfg.accounts[index];
+  const isps = entry.isps && entry.isps.length ? entry.isps : [""];
+  const used = typeof st.usedIsp === "string" ? st.usedIsp : "";
+  return isps.filter((suffix) => suffix !== used);
 }
 
 function updateSummary() {
@@ -534,13 +592,22 @@ function renderStatus(st) {
   state.status = st || {};
   const code = st.state || "checking";
   $("statePill").dataset.state = code;
+  // A session that is up and that the program could not move where the order of
+  // the login list says it should be needs a reader, and nothing else in the
+  // strip says so: the state is Online, which reads as "nothing to do". The pill
+  // carries the words and the strip carries the sentence, so the news is where
+  // the state is looked at as well as beside the account it is about.
+  const refused = st.switchRefused;
+  $("statePill").classList.toggle("attention", !!refused);
   // The pill carries the state and, once something is signed in, who it is
   // signed in as: the account and the service type the session is on. That is
   // the question the strip of readings answers, and the strip is a row lower
   // than it needs to be for the one reading looked at most.
   const stateWord = state.i18n["state." + code] ? t("state." + code) : t("msg.noStatus");
   const who = activeEntryLabel(st);
-  $("stateText").textContent = who === "-" ? stateWord : stateWord + " · " + who;
+  let pill = who === "-" ? stateWord : stateWord + " · " + who;
+  if (refused) pill += " · " + t("status.attention");
+  $("stateText").textContent = pill;
   $("stEntry").textContent = activeEntryLabel(st);
   $("stClientIp").textContent = st.clientIp || "-";
   $("stAccount").textContent = st.account || "-";
@@ -549,6 +616,11 @@ function renderStatus(st) {
   $("stInternet").textContent = st.internetChecked
     ? (st.internetOk ? t("status.internetOk") : t("status.internetNo"))
     : "-";
+  $("statusNotice").hidden = !refused;
+  if (refused) {
+    $("statusNotice").textContent = t("status.switchRefused",
+      operatorName(st.preferredIsp || ""), operatorName(st.usedIsp || ""));
+  }
   applyStatusBadges(state.status);
 }
 
@@ -601,7 +673,7 @@ function toast(text, isError) {
 function markDirty() {
   state.dirty = true;
   $("dirtyBadge").hidden = false;
-  updateTestButtons();
+  updateEntryActions();
 }
 
 /* ---------- dialogs ---------- */
@@ -731,28 +803,33 @@ async function testEntry(index, buttonNode) {
   }
 }
 
-/* ---------- the service type the session should be on ---------- */
+/* ---------- the service type the session is on ---------- */
 
-/* usePreferred asks the program to sign the session in again as the service type
-   its entry puts first. The program says whether there was anything to move: a
-   session that went down in the meantime, or one that is already on the first
-   service type, has nothing to do, and saying so is the whole answer.
+/* switchService asks the program to sign the session in again with the service
+   type picked on the card, which replaces the session the portal is holding: one
+   session per client address is what the portal allows, so that is the only way
+   onto another one. The program says whether there was anything to do - the
+   session may have gone down in the meantime, or it may be on that service type
+   already - and the answer is shown the way the login self test shows one.
    It works on the configuration the program is running, not on what is on the
    page, since the session belongs to the running program. */
-async function usePreferred(buttonNode) {
+async function switchService(card, buttonNode) {
+  const select = card.querySelector(".preferred-isp");
+  const isp = select ? select.value : "";
   if (buttonNode) buttonNode.disabled = true;
   const res = await api("/api/action", {
     method: "POST",
-    body: JSON.stringify({ action: "usePreferred" }),
+    body: JSON.stringify({ action: "switchService", isp: isp }),
   });
   if (buttonNode) buttonNode.disabled = false;
+  updateEntryActions();
   if (res.unreachable || !res.ok) {
-    note("the sign-in as the preferred service type did not reach the program (" + res.status + ")");
+    note("the sign-in as " + operatorName(isp) + " did not reach the program (" + res.status + ")");
     toast(t("msg.stale"), true);
     return;
   }
   const result = res.data.result || {};
-  note("the sign-in as the preferred service type was asked for", {
+  note("the sign-in as " + operatorName(isp) + " was asked for", {
     moved: !!res.data.moved,
     message: result.message,
   });
@@ -997,7 +1074,7 @@ function wireAccounts() {
       case "down": moveAccount(index, 1); break;
       case "remove": removeAccount(index); break;
       case "test": testEntry(index, target); break;
-      case "usePreferred": usePreferred(target); break;
+      case "switchService": switchService(card, target); break;
       case "unservice":
         target.closest(".chip").remove();
         refreshPicker(card);
