@@ -443,10 +443,18 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 // out of the browser, out of whatever script the page loads, or out of a request
 // the page makes. What it costs is that an entry coming back with an empty
 // password has to be filled in from the stored one, which KeepPasswordsFrom does.
+//
+// Every answer that carries the configuration back to the page goes through
+// here, the reload included: that one reads the file again, and what comes out
+// of it is still the file's contents, so it is masked in the same way.
 func pageConfig(cfg *config.Config) *config.Config {
 	out := cfg.Clone()
 	for i := range out.Accounts {
-		out.Accounts[i].HasPassword = out.Accounts[i].Password != ""
+		// "There is a password" means the file holds one, not that this run has
+		// one in memory: with the passwords turned off there is nothing stored
+		// for an empty field to keep, and the page saying otherwise would be a
+		// promise the next start does not keep.
+		out.Accounts[i].HasPassword = out.Accounts[i].Password != "" && out.RememberPassword
 		out.Accounts[i].Password = ""
 	}
 	return out
@@ -558,7 +566,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "err.loadFailed"})
 			return
 		}
-		writeJSON(w, map[string]any{"ok": true, "config": next})
+		writeJSON(w, map[string]any{"ok": true, "config": pageConfig(next)})
 
 	case "openConfig":
 		platform.OpenExternal(s.state.Config().Path())

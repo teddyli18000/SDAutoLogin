@@ -503,9 +503,10 @@ func pageOf(t *testing.T, cfg *config.Config) (*Server, string) {
 // A password that never leaves the process cannot be read out of the browser, out
 // of the page's own script, or out of a request the page makes.
 func TestThePageIsNotGivenTheStoredPassword(t *testing.T) {
-	cfg := &config.Config{Accounts: []config.Account{
-		{Username: "s1234567", Password: "topsecret", ISPs: []string{""}},
-	}}
+	cfg := &config.Config{
+		Accounts:         []config.Account{{Username: "s1234567", Password: "topsecret", ISPs: []string{""}}},
+		RememberPassword: true,
+	}
 
 	_, body := pageOf(t, cfg)
 	if strings.Contains(body, "topsecret") {
@@ -513,6 +514,63 @@ func TestThePageIsNotGivenTheStoredPassword(t *testing.T) {
 	}
 	if !strings.Contains(body, `"hasPassword":true`) {
 		t.Errorf("the page is not told that a password is stored: %s", body)
+	}
+}
+
+// TestReloadingDoesNotHandThePasswordToThePage covers the second way the
+// configuration comes back to the page: reload reads the file again, so it is the
+// file's contents, and it is masked like the copy the page was opened with.
+func TestReloadingDoesNotHandThePasswordToThePage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Accounts = []config.Account{{Username: "s1234567", Password: "topsecret", ISPs: []string{""}}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	state := New(cfg)
+	server := NewServer(state, "", nil)
+	t.Cleanup(server.Stop)
+	if _, err := server.URL(); err != nil {
+		t.Fatalf("URL: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/action",
+		bytes.NewReader([]byte(`{"action":"reload"}`)))
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
+	req.Header.Set("X-Auth-Token", server.session)
+	rec := httptest.NewRecorder()
+	server.handleAction(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reload: status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "topsecret") {
+		t.Errorf("the reloaded configuration went back to the page with its password: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"hasPassword":true`) {
+		t.Errorf("the page is not told that a password is stored: %s", rec.Body.String())
+	}
+}
+
+// TestThePageIsToldNothingIsStoredWhenThePasswordsAreNotRemembered: with the
+// passwords switched off there is nothing in the file for an empty field to keep,
+// so the page saying otherwise is a promise the next start does not keep.
+func TestThePageIsToldNothingIsStoredWhenThePasswordsAreNotRemembered(t *testing.T) {
+	cfg := &config.Config{
+		Accounts:         []config.Account{{Username: "s1234567", Password: "topsecret", ISPs: []string{""}}},
+		RememberPassword: false,
+	}
+
+	_, body := pageOf(t, cfg)
+	if strings.Contains(body, "topsecret") {
+		t.Errorf("the stored password was handed to the page: %s", body)
+	}
+	if strings.Contains(body, `"hasPassword":true`) {
+		t.Errorf("the page was told a password is stored, and the file holds none: %s", body)
 	}
 }
 
