@@ -5,6 +5,58 @@ this file's code stay English; the interface wording is bilingual.
 
 **English** | [简体中文](CHANGELOG.zh-CN.md)
 
+## Unreleased
+
+### The mark
+
+The icon was a blue rounded badge. A university states who it is with a seal, so
+the mark is one now: two rings around a roundel, which is the shape a Chinese
+university keeps its emblem in, with the padlock kept inside it. Nothing of any
+emblem is reproduced: the rings and the padlock are drawn from primitives, there
+is no lettering, and the crimson is an approximation of a university red rather
+than a value taken from a specification.
+
+- The mark is a round seal: an outer ring in a darker tone of the accent, a gap,
+  and the disc inside it in the accent, with the padlock knocked out of the disc
+  in white. The proportions are held to the 16 px tray icon, the size that
+  decides whether a mark works at all.
+- Its fixed colour is a deep crimson under an ink ring, and the tray tints the
+  same mark by session state. The states were sorted out while the colours were
+  being chosen: being offline shared a colour with being signed in, and there is
+  now a lighter grey for the moment before the first check has answered.
+- The settings page takes the same crimson as its accent, as it is in the light
+  palette and brightened in the dark one. The brightening is not decoration: a
+  crimson deep enough to carry white text cannot be read as text on a dark
+  surface, which is the other thing the accent is used for.
+- The artwork stays generated. `go run ./tools/build icon` redraws the Windows
+  icon from the drawing code and `resources` rebuilds the resource files from it,
+  so the tray and the file that carries the icon cannot drift apart.
+
+### The page
+
+The settings page was written a rule at a time and its numbers show it: eight
+text sizes, two of them half a pixel, and paddings of 13, 18 and 22 px that had
+each been picked on their own. The sizes are five now and every gap is a step of
+one scale, so a section can be added without choosing new numbers.
+
+- Text is five sizes: a micro label, a caption, secondary body, body, and the
+  one step above body. 10.5 and 12.5 px are gone, because a browser rounds those
+  per element and one row could end up carrying two sizes.
+- Spacing is six steps of 4 px and the layout keeps to them. The numbers that
+  belong to a drawing stay as they are: the offset that puts a label on the first
+  line of the field beside it is measured from that line, not chosen.
+- A field, a button and the state chip are 36 px tall, reached the same way in
+  all three. They used to come out at 42.4 and 36.8, since a 14 px font on a 1.6
+  line height had been given 9 px of padding, which is why the status bar lined
+  up by eight tenths of a pixel and everything beside it did not.
+- A section title carries a crimson tick, the tabs are an underline rather than a
+  pill, and the readings in the status bar use lining figures so that they stop
+  shifting as they update.
+- The details that were missing are in as well: placeholder and selected text
+  take colours from the palette, the scrollbars are thin and tinted, a card
+  inside a card takes a smaller radius, and a reader whose system asks for less
+  motion is given none.
+
 ## v1.1.0 - 2026-09-24
 
 A release for what v1.0.0 could not reach: the machines that are not a desktop,
