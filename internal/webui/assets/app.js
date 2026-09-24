@@ -218,11 +218,15 @@ function accountCard(entry, index) {
     dataset: { field: "username" },
   });
 
+  // The password is the one field the page is never given: an entry that has one
+  // says so instead, and the field is left empty for the reader to replace it
+  // with. Empty is what "keep the stored one" looks like in the request the page
+  // sends back.
   const password = el("input", {
     id: passwordID,
     type: "password",
     autocomplete: "off",
-    value: entry.password || "",
+    placeholder: entry.hasPassword ? t("field.password.keep") : t("field.password"),
     oninput: markDirty,
     dataset: { field: "password" },
   });

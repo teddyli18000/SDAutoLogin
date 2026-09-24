@@ -439,8 +439,10 @@ func TestARefusedSaveLeavesTheRunningConfigAlone(t *testing.T) {
 		t.Fatalf("URL: %v", err)
 	}
 
-	// The empty password is the only thing wrong with this request.
-	body := `{"accounts":[{"username":"s1234567","password":"","isps":["@cucc"]}]}`
+	// The account name is what is wrong with this request. An empty password is
+	// not wrong by itself any more: that is how the page says "keep the one that
+	// is stored", and an entry with no name has nothing to keep a password for.
+	body := `{"accounts":[{"username":"","password":"","isps":["@cucc"]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(body)))
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
 	req.Header.Set("X-Auth-Token", server.session)
@@ -450,8 +452,8 @@ func TestARefusedSaveLeavesTheRunningConfigAlone(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "err.passwordRequired") {
-		t.Errorf("the reply does not name the password: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "err.accountRequired") {
+		t.Errorf("the reply does not name the account: %s", rec.Body.String())
 	}
 
 	live := state.Config().Accounts
@@ -470,6 +472,96 @@ func TestARefusedSaveLeavesTheRunningConfigAlone(t *testing.T) {
 	}
 	if string(stored) != older {
 		t.Errorf("the file was written by a request that was refused:\n%s", stored)
+	}
+}
+
+// pageOf starts a settings server on a configuration of a test's own and hands
+// back what its page is given when it asks for the configuration.
+func pageOf(t *testing.T, cfg *config.Config) (*Server, string) {
+	t.Helper()
+
+	state := New(cfg)
+	server := NewServer(state, "", nil)
+	t.Cleanup(server.Stop)
+	if _, err := server.URL(); err != nil {
+		t.Fatalf("URL: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/bootstrap", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
+	req.Header.Set("X-Auth-Token", server.session)
+	rec := httptest.NewRecorder()
+	server.handleBootstrap(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bootstrap: status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	return server, rec.Body.String()
+}
+
+// The page writes the password field and never reads it, so a stored secret is
+// not part of what it is given: it is told that there is one, and nothing more.
+// A password that never leaves the process cannot be read out of the browser, out
+// of the page's own script, or out of a request the page makes.
+func TestThePageIsNotGivenTheStoredPassword(t *testing.T) {
+	cfg := &config.Config{Accounts: []config.Account{
+		{Username: "s1234567", Password: "topsecret", ISPs: []string{""}},
+	}}
+
+	_, body := pageOf(t, cfg)
+	if strings.Contains(body, "topsecret") {
+		t.Errorf("the stored password was handed to the page: %s", body)
+	}
+	if !strings.Contains(body, `"hasPassword":true`) {
+		t.Errorf("the page is not told that a password is stored: %s", body)
+	}
+}
+
+func TestASaveThatLeavesThePasswordAloneKeepsIt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Accounts = []config.Account{{Username: "s1234567", Password: "topsecret", ISPs: []string{""}}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	state := New(cfg)
+	server := NewServer(state, "", nil)
+	t.Cleanup(server.Stop)
+	if _, err := server.URL(); err != nil {
+		t.Fatalf("URL: %v", err)
+	}
+
+	// What the page sends for an entry whose password field was left empty: the
+	// account and the service type, and no password at all.
+	body := `{"accounts":[{"username":"s1234567","isps":["@cucc"]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(body)))
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
+	req.Header.Set("X-Auth-Token", server.session)
+	rec := httptest.NewRecorder()
+	server.handleConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	live := state.Config().Accounts
+	if len(live) != 1 || live[0].Password != "topsecret" {
+		t.Fatalf("Accounts = %+v, want the stored password to have been kept", live)
+	}
+	if len(live[0].ISPs) != 1 || live[0].ISPs[0] != "@cucc" {
+		t.Errorf("the change the page made was lost: %v", live[0].ISPs)
+	}
+	if strings.Contains(rec.Body.String(), "topsecret") {
+		t.Errorf("the saved configuration went back to the page with its password")
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stored), "topsecret") {
+		t.Errorf("the file lost the password:\n%s", stored)
 	}
 }
 

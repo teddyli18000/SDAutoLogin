@@ -71,6 +71,19 @@ and a content column behind them that fills the window.
   inside the field that shows it, and a reader whose system asks for less motion is
   given none.
 
+### The password
+
+An unattended login needs the password in a form the program can read by itself,
+so it is kept in `config.json` in clear text. What can be done about that is to
+close the places it appears besides the file.
+
+- The settings page writes that field and never reads it. It is told whether a
+  password is stored rather than what it is, so the secret is not in the browser,
+  not in the script the page loads, and not in a request the page makes. Saving
+  with the field left empty keeps the password that is there, which is what an
+  entry the reader did not touch sends; an entry with nothing to keep — one just
+  added, or one whose account was renamed — is asked for a password instead.
+
 ## v1.1.0 - 2026-09-24
 
 A release for what v1.0.0 could not reach: the machines that are not a desktop,

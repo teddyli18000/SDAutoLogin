@@ -716,6 +716,13 @@ log is readable by anyone.
   directory. A file an earlier version left readable by everyone is tightened the
   next time it is written. The systemd units set `UMask=0077` and the system
   service keeps its state directory to `0700` as well.
+- The settings page writes the password field and never reads it. It is told
+  whether a password is stored rather than what it is, so the secret is not in the
+  browser, not in the script the page loads, and not in a request the page makes,
+  and what a save answers with is the same empty field. Leaving the field empty
+  while saving keeps the password that is stored, which is what every entry the
+  reader did not touch sends; a password has to be typed only for an entry that has
+  none, which is a new one or one whose account was renamed.
 - The program never calls the logout endpoint, so quitting cannot leave the
   machine offline.
 

@@ -423,7 +423,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		"lang":        string(lang),
 		"langSetting": cfg.Language,
 		"i18n":        i18n.ALL(lang),
-		"config":      cfg,
+		"config":      pageConfig(cfg),
 		"operators":   config.Operators,
 		"status":      statusPayload(s.state.Snapshot()),
 		"autostart":   platform.AutostartEnabled(),
@@ -433,6 +433,23 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 			"log":    logging.Log.Path(),
 		},
 	})
+}
+
+// pageConfig is the configuration as the settings page may see it: each stored
+// password is replaced by the fact that there is one.
+//
+// The page writes that field and never reads it, so there is no reason for the
+// secret to leave the process. A password that is never sent cannot be read back
+// out of the browser, out of whatever script the page loads, or out of a request
+// the page makes. What it costs is that an entry coming back with an empty
+// password has to be filled in from the stored one, which KeepPasswordsFrom does.
+func pageConfig(cfg *config.Config) *config.Config {
+	out := cfg.Clone()
+	for i := range out.Accounts {
+		out.Accounts[i].HasPassword = out.Accounts[i].Password != ""
+		out.Accounts[i].Password = ""
+	}
+	return out
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -467,6 +484,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// The page is not given the stored passwords, so an account it sends back
+	// with that field empty means "keep the one that is there". A password the
+	// reader typed is in the request and is left alone.
+	next.KeepPasswordsFrom(s.state.Config())
 	if errs := next.Validate(); len(errs) > 0 {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "errors": errs})
 		return
@@ -481,7 +502,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logging.Log.Info("settings page saved the config: %s", next.Summary())
-	writeJSON(w, map[string]any{"ok": true, "config": next})
+	writeJSON(w, map[string]any{"ok": true, "config": pageConfig(next)})
 }
 
 func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {

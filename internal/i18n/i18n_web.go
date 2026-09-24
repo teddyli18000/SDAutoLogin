@@ -44,11 +44,12 @@ var webText = map[string]text{
 	"acct.summaryOnly": {"{0} 个账号", "{0} accounts"},
 	"acct.allDisabled": {"所有账号都已停用，不会尝试登录。", "All accounts are disabled; nothing will be signed in."},
 
-	"field.account":      {"账号", "Account"},
-	"field.account.hint": {"学号、用户名或邮箱均可", "Student id, user name or mail address"},
-	"field.password":     {"密码", "Password"},
-	"field.show":         {"显示", "Show"},
-	"field.hide":         {"隐藏", "Hide"},
+	"field.account":       {"账号", "Account"},
+	"field.account.hint":  {"学号、用户名或邮箱均可", "Student id, user name or mail address"},
+	"field.password":      {"密码", "Password"},
+	"field.password.keep": {"已设置，留空表示不改动", "Set; leave it empty to keep it"},
+	"field.show":          {"显示", "Show"},
+	"field.hide":          {"隐藏", "Hide"},
 
 	"field.rememberPassword":      {"记住密码（写入配置文件）", "Remember passwords (write them to the config file)"},
 	"field.rememberPassword.hint": {"关闭后密码不写入配置文件；无法无人值守登录。", "With this off, passwords are not written to disk; unattended login is not possible."},

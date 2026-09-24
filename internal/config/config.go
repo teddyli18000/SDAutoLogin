@@ -24,7 +24,14 @@ import (
 // password changed or that was closed is skipped for the next one.
 type Account struct {
 	Username string `json:"username"`
-	Password string `json:"password"`
+	// Password is empty in the file when the password is not remembered, and it
+	// is empty in what the settings page is given: the page writes this field and
+	// never reads it, so a secret that is stored is never sent to a browser.
+	Password string `json:"password,omitempty"`
+	// HasPassword is not part of the file. It is what the page is told instead of
+	// the password, so that it can say whether one is stored without being handed
+	// one, and it is cleared on the way to disk.
+	HasPassword bool `json:"hasPassword,omitempty"`
 	// Disabled keeps an entry out of the login list without deleting its
 	// password. The field is inverted, so an absent one means "in use": a flag
 	// that has to be present for an entry to work is easy to lose while editing
@@ -315,14 +322,64 @@ func (c *Config) Save() error {
 func (c *Config) marshal() ([]byte, error) {
 	type persistConfig Config
 	v := persistConfig(*c)
-	if !c.RememberPassword {
-		v.Accounts = make([]Account, len(c.Accounts))
-		copy(v.Accounts, c.Accounts)
-		for i := range v.Accounts {
+	// The list is always copied: HasPassword is what the page is told and never
+	// what the file holds, and the passwords are dropped from it as well when
+	// they are not remembered.
+	v.Accounts = make([]Account, len(c.Accounts))
+	copy(v.Accounts, c.Accounts)
+	for i := range v.Accounts {
+		v.Accounts[i].HasPassword = false
+		if !c.RememberPassword {
 			v.Accounts[i].Password = ""
 		}
 	}
 	return json.MarshalIndent(v, "", "  ")
+}
+
+// KeepPasswordsFrom fills in the passwords an in-memory configuration was handed
+// without, taking them from the one it was built from.
+//
+// The settings page is never given a stored password, so an entry that comes back
+// with that field empty means "the password already there": the page leaves it
+// empty for every entry the reader did not type into. An entry with no
+// counterpart in the stored list — one just added, or one whose account was
+// renamed — has nothing to inherit and stays empty, which the validation then
+// reports as a missing password. Nothing here is reached by an entry that carried
+// a password of its own: what the reader typed always wins.
+func (c *Config) KeepPasswordsFrom(stored *Config) {
+	if stored == nil {
+		return
+	}
+	inherited := make([]bool, len(stored.Accounts))
+	for i := range c.Accounts {
+		if c.Accounts[i].Password != "" {
+			continue
+		}
+		// The entry in the same place, when it is the same account: the case of a
+		// list that nothing but an unrelated setting was done to.
+		if i < len(stored.Accounts) && !inherited[i] && sameAccount(stored.Accounts[i], c.Accounts[i]) {
+			inherited[i] = true
+			c.Accounts[i].Password = stored.Accounts[i].Password
+			continue
+		}
+		// Otherwise the entry the account came from, wherever it has moved to.
+		for j := range stored.Accounts {
+			if inherited[j] || !sameAccount(stored.Accounts[j], c.Accounts[i]) {
+				continue
+			}
+			inherited[j] = true
+			c.Accounts[i].Password = stored.Accounts[j].Password
+			break
+		}
+	}
+}
+
+// sameAccount reports whether two entries describe the same account. The name is
+// what a password belongs to, since the list may be reordered; the comparison is
+// on the trimmed name, as an entry is trimmed when it is stored.
+func sameAccount(a, b Account) bool {
+	left, right := strings.TrimSpace(a.Username), strings.TrimSpace(b.Username)
+	return left != "" && left == right
 }
 
 // Operator is one ISP entry of the login page dropdown.

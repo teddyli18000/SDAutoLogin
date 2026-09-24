@@ -506,6 +506,127 @@ func TestConfiguredNeedsOneEntryThatCanSignIn(t *testing.T) {
 	}
 }
 
+// The settings page is never given a password, so what it sends back carries an
+// empty one for every entry the reader did not type into. That empty field means
+// "the password already stored", and it has to survive a reordering of the list,
+// which is why the entries are matched up by their account rather than by their
+// position.
+func TestAnEntryKeepsThePasswordThePageDidNotSend(t *testing.T) {
+	stored := &Config{Accounts: []Account{
+		{Username: "first", Password: "one", ISPs: []string{""}},
+		{Username: "second", Password: "two", ISPs: []string{""}},
+		{Username: "third", Password: "three", ISPs: []string{""}},
+	}}
+
+	cases := []struct {
+		name string
+		sent []Account
+		want []string
+	}{
+		{
+			"a list nothing was done to",
+			[]Account{
+				{Username: "first", ISPs: []string{""}},
+				{Username: "second", ISPs: []string{""}},
+				{Username: "third", ISPs: []string{""}},
+			},
+			[]string{"one", "two", "three"},
+		},
+		{
+			"a list that was reordered",
+			[]Account{
+				{Username: "third", ISPs: []string{""}},
+				{Username: "first", ISPs: []string{""}},
+				{Username: "second", ISPs: []string{""}},
+			},
+			[]string{"three", "one", "two"},
+		},
+		{
+			"a list an entry was taken out of",
+			[]Account{
+				{Username: "second", ISPs: []string{""}},
+				{Username: "third", ISPs: []string{""}},
+			},
+			[]string{"two", "three"},
+		},
+		{
+			"a password the reader typed",
+			[]Account{
+				{Username: "first", Password: "typed", ISPs: []string{""}},
+				{Username: "second", ISPs: []string{""}},
+			},
+			[]string{"typed", "two"},
+		},
+		{
+			"an entry that was added",
+			[]Account{
+				{Username: "first", ISPs: []string{""}},
+				{Username: "newcomer", ISPs: []string{""}},
+			},
+			[]string{"one", ""},
+		},
+		{
+			"an entry whose account was renamed",
+			[]Account{
+				{Username: "renamed", ISPs: []string{""}},
+				{Username: "second", ISPs: []string{""}},
+			},
+			[]string{"", "two"},
+		},
+		{
+			"a second entry of an account that is already used",
+			[]Account{
+				{Username: "first", ISPs: []string{""}},
+				{Username: "first", ISPs: []string{""}},
+			},
+			[]string{"one", ""},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			next := &Config{Accounts: append([]Account(nil), c.sent...)}
+			next.KeepPasswordsFrom(stored)
+			if len(next.Accounts) != len(c.want) {
+				t.Fatalf("Accounts = %+v, want %d entries", next.Accounts, len(c.want))
+			}
+			for i, want := range c.want {
+				if got := next.Accounts[i].Password; got != want {
+					t.Errorf("entry %d: password = %q, want %q", i, got, want)
+				}
+			}
+		})
+	}
+}
+
+// HasPassword is what the page is told in place of a password, and the file is
+// not a place for it: a file that carried it would be a file that says a secret
+// is in it, which the file already shows by carrying the secret.
+func TestTheFlagThePageIsToldIsNotWritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Accounts = []Account{{
+		Username:    "s1234567",
+		Password:    "topsecret",
+		HasPassword: true,
+		ISPs:        []string{""},
+	}}
+
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "HasPassword") || strings.Contains(string(data), "hasPassword") {
+		t.Errorf("the flag meant for the page was written:\n%s", data)
+	}
+}
+
 func TestSaveOmitsThePasswordsWhenTheyAreNotRemembered(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	cfg, err := LoadConfig(path)
