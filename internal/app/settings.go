@@ -626,12 +626,12 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		}
 		logging.Log.Info("the settings page asked for the session to be signed in as %s", config.OperatorName(*req.ISP))
 		test, moved := s.state.SwitchService(*req.ISP)
+		// Nothing is logged for the round that moved nothing: SwitchService
+		// names the reason, and a second line here would only be a vaguer copy
+		// of it.
 		if moved {
-			logging.Log.Info("signed in again as %s: %s (ret_code=%s)", test.Attempt.Entry(),
-				test.Result.Message, test.Result.RetCode)
-		} else {
-			logging.Log.Info("there was nothing to sign in again as %s: the session is not up on this account, or it is on that service type already",
-				config.OperatorName(*req.ISP))
+			logging.Log.Info("the page is shown what came back from signing in again as %s: %s (ret_code=%s)",
+				test.Attempt.Entry(), test.Result.Message, test.Result.RetCode)
 		}
 		writeJSON(w, map[string]any{
 			"ok":     true,

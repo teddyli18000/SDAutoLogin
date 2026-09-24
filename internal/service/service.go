@@ -643,12 +643,19 @@ func (s *Service) signedIn(snap Snapshot, a config.Attempt, verify portal.Status
 // is not on it, which is what the page offers the button for.
 func (s *Service) attribute(cfg *config.Config, st portal.Status, snap Snapshot) Snapshot {
 	if st.Account == "" {
+		// A session the portal will not put an account name on cannot be
+		// matched to an entry, so nothing is marked and no move is offered.
+		logging.Log.Debug("the portal reports a session with no account name on it, so it cannot be matched to an entry of the login list")
 		return snap
 	}
 	if index, isp := cfg.Match(st.Account); index >= 0 {
-		s.setActive(index, cfg.EntryLabel(index, isp))
+		label := cfg.EntryLabel(index, isp)
+		s.setActive(index, label)
 		snap.UsedISP = isp
+		logging.Log.Debug("the session is on %s: entry %d, service type %s", label, index+1, config.OperatorName(isp))
 	} else {
+		logging.Log.Debug("the session's account %q names no entry of the login list, so no entry is marked and no service type is offered",
+			st.Account)
 		s.setActive(-1, "")
 		snap.UsedISP = ""
 	}
@@ -663,9 +670,15 @@ func (s *Service) attribute(cfg *config.Config, st portal.Status, snap Snapshot)
 		// next time the session is somewhere else. The wait is forgotten with
 		// it, since there is nothing being waited on.
 		s.mu.Lock()
+		hadRefused := s.switchRefused != nil
 		s.switchRefused = nil
 		s.switchAskedAt = time.Time{}
 		s.mu.Unlock()
+		if hadRefused {
+			// A refusal that was on its way to the page and the tray stops
+			// being reported here, so the moment it is dropped is worth a line.
+			logging.Log.Info("the session is on the service type its entry puts first, forgetting the earlier refusal to move it")
+		}
 		return snap
 	}
 	snap.PreferredISP = a.ISP
@@ -673,6 +686,12 @@ func (s *Service) attribute(cfg *config.Config, st portal.Status, snap Snapshot)
 	s.mu.Lock()
 	refused := s.switchRefused
 	s.mu.Unlock()
+	if refused != nil {
+		// Read back on every round the session is up, which is what keeps the
+		// page's warning and the tray's tooltip saying the same thing.
+		logging.Log.Debug("the session is still on %s and has not been moved onto %s: the portal refused it (%s, ret_code=%s), the settings page and the tray say so",
+			config.OperatorName(snap.UsedISP), config.OperatorName(a.ISP), refused.Message, refused.RetCode)
+	}
 	snap.SwitchRefused = refused
 	return snap
 }
@@ -687,12 +706,19 @@ func (s *Service) attribute(cfg *config.Config, st portal.Status, snap Snapshot)
 // signing in, not a ranking of who should be online.
 func (s *Service) preferredPending(cfg *config.Config, st portal.Status) (config.Attempt, bool) {
 	if !cfg.SwitchToPreferredService {
+		// Every "why is my session not being moved" report ends here or at one
+		// of the three returns below, and they look the same from the outside:
+		// the session is online and stays where it is.
+		logging.Log.Debug("not moving the session off %s: the option that moves a session onto the first service type of its entry is off",
+			st.Account)
 		return config.Attempt{}, false
 	}
 	if !cfg.AutoLogin {
 		// Moving a session is a sign-in, and one switch already answers whether
 		// this program signs in on its own. A reader who turned that off is left
 		// to the button on the page, which is offered either way.
+		logging.Log.Debug("not moving the session off %s: automatic login is off, so only the button on the settings page asks for it",
+			st.Account)
 		return config.Attempt{}, false
 	}
 	s.mu.Lock()
@@ -703,16 +729,33 @@ func (s *Service) preferredPending(cfg *config.Config, st portal.Status) (config
 		// is asked again when the wait is over: the answer may change, and a
 		// login every check against a session the portal is happy with is not
 		// something to do in the meantime.
+		logging.Log.Debug("not moving the session off %s: it was asked about %s ago and refused, asking again in %s",
+			st.Account, shortDuration(time.Since(askedAt)), shortDuration(wait))
 		return config.Attempt{}, false
 	}
 	a, ok := cfg.PreferredFor(st.Account)
 	if !ok {
+		// Two things look alike here: the session is already on the service
+		// type its entry puts first, so there is nothing to move it onto, or
+		// its account names no entry of the list at all. The entry label tells
+		// them apart, because it is empty for the second one.
+		if stays := s.entryLabel(cfg, st); stays != "" {
+			logging.Log.Debug("not moving the session off %s: that is the service type its entry puts first", stays)
+		} else {
+			logging.Log.Debug("not moving the session reported as %q: it names no entry of the login list", st.Account)
+		}
 		return config.Attempt{}, false
 	}
 	if s.cooling(a) {
 		// The first service type is being left alone for a while, so the session
 		// stays where it is rather than moving onto something that was refused.
+		logging.Log.Debug("not moving the session off %s onto %s: that attempt is still being left alone after the portal refused it",
+			st.Account, a.Entry())
 		return config.Attempt{}, false
+	}
+	if !askedAt.IsZero() {
+		logging.Log.Debug("the session on %s has waited out the %s after the last refusal, asking the portal to move it onto %s",
+			st.Account, shortDuration(switchRetryPeriod), a.Entry())
 	}
 	return a, true
 }

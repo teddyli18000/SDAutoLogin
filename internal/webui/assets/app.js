@@ -535,8 +535,24 @@ function renderPreferred(card, st, index) {
   // block is about a session that exists, and every other card's service types
   // have nothing to do with where that session is.
   const targets = st.state === "online" && st.entryIndex === index ? switchTargets(st, index) : [];
-  block.hidden = targets.length === 0;
-  if (targets.length === 0) return;
+  // Written only when the answer changes. This runs for every card on every
+  // refresh of the status, and a line per poll would bury everything else in
+  // the console.
+  const shows = targets.length > 0;
+  if (block.hidden === shows) {
+    note(shows
+      ? "card " + (index + 1) + " offers moving the session onto another service type"
+      : "no card offers moving the session", {
+      state: st.state,
+      entryIndex: st.entryIndex,
+      usedIsp: st.usedIsp,
+      preferredIsp: st.preferredIsp,
+      targets,
+      refused: !!st.switchRefused,
+    });
+  }
+  block.hidden = !shows;
+  if (!shows) return;
 
   const select = block.querySelector(".preferred-isp");
   // What the reader picked is kept while it is still one of the ways out: the

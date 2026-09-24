@@ -255,6 +255,7 @@ func (t *unixTray) onStatus(s service.Snapshot) {
 	case s.State == service.StateError && previous != service.StateError:
 		platform.Notify(i18n.L("app.name"), i18n.L("balloon.reconnectFailed")+": "+s.Message)
 	case refused && !previousRefused:
+		logging.Log.Debug("tray: the session could not be moved onto the service type its entry puts first, saying so once")
 		platform.Notify(i18n.L("app.name"), i18n.L("balloon.switchRefused"))
 	}
 }

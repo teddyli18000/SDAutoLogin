@@ -171,12 +171,30 @@ func (a *AppState) SwitchService(isp string) (LoginTest, bool) {
 	if !before.Online {
 		// Nothing to move: the session is down, and the next check signs in on
 		// its own - in the order of the list, which is the first service type.
+		logging.Log.Info("nothing to sign in again as %s: the session is down (client ip %q, %s), the next check signs in on its own",
+			config.OperatorName(isp), before.ClientIP, before.Message)
 		return LoginTest{Before: before, After: before}, false
 	}
+	index, used := cfg.Match(before.Account)
 	attempt, ok := cfg.SwitchTo(before.Account, isp)
 	if !ok {
+		// The three reasons look the same on the page, which is why each one is
+		// named here rather than left as "it did not move".
+		switch {
+		case index < 0:
+			logging.Log.Info("nothing to sign in again as %s: the portal reports the session on %q, which names no entry of the login list",
+				config.OperatorName(isp), before.Account)
+		case used == isp:
+			logging.Log.Info("nothing to sign in again as %s: the session is on that service type already",
+				config.OperatorName(isp))
+		default:
+			logging.Log.Info("nothing to sign in again as %s: entry %d is on %s and does not list that service type",
+				config.OperatorName(isp), index+1, config.OperatorName(used))
+		}
 		return LoginTest{Before: before, After: before}, false
 	}
+	logging.Log.Info("signing in again while the session is up, to move it from %s onto %s (entry %d)",
+		config.OperatorName(used), config.OperatorName(attempt.ISP), index+1)
 	result := client.Login(before, attempt)
 	return LoginTest{
 		Attempt: attempt,
