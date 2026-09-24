@@ -25,7 +25,7 @@ PKG_NAME:=sdautologin
 # written here rather than read out of the sources it fetches. A test in
 # tools/build compares it with the Version variable in internal/app/payload.go,
 # so the two cannot drift apart without a build failing.
-PKG_VERSION:=1.1.0
+PKG_VERSION:=1.2.0
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git

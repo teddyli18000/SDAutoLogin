@@ -16,7 +16,7 @@ const Repo = "https://git.zqlhub.com/zqlan/SDAutoLogin"
 // the build can write into them the tree it was made from. What stands here is
 // what a build that has neither falls back on.
 var (
-	Version = "1.1.0"
+	Version = "1.2.0"
 	Commit  = ""
 )
 
