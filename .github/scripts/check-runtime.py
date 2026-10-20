@@ -1,5 +1,6 @@
 """Exercise the real settings runner without external network access."""
 import json
+import http.cookiejar
 import os
 import subprocess
 import sys
@@ -23,7 +24,11 @@ try:
     assert entry.stat().st_mode & 0o777 == 0o600
     # Do not echo the private URL, even when a request fails.
     try:
-        with urllib.request.urlopen(entry.read_text().strip(), timeout=5) as response:
+        browser = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
+        )
+        with browser.open(entry.read_text().strip(), timeout=5) as response:
             assert response.status == 200
     except Exception:
         raise AssertionError("Settings page request failed") from None
