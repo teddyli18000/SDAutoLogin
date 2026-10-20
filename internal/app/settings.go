@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -29,7 +30,7 @@ const (
 	// small, so a caller still sending one after this long has stopped meaning to.
 	settingsReadTimeout = 30 * time.Second
 	// settingsMinWriteTimeout is the shortest deadline a reply may have, for a
-	// configuration that names no request timeout at all.
+	// configuration that names no request timeout.
 	settingsMinWriteTimeout = 30 * time.Second
 	// settingsPortalRequests is how many requests to the portal the longest
 	// handler makes: reading the session state is two of them, and the login test
@@ -41,9 +42,14 @@ const (
 	sessionCookie = "sdauth"
 )
 
-// writeTimeout is the deadline for writing one reply, counted from the
-// configured request timeout rather than pinned: a handler that talks to the
-// portal waits that long per request, so a fixed deadline would cut it off.
+// writeTimeout is the deadline for writing one reply, counted from the configured
+// request timeout: a handler that talks to the portal waits that long per request,
+// so a fixed deadline would cut it off.
+//
+// It is worked out again for every request rather than fixed when the server
+// starts: the request timeout is a setting on the page, and a deadline taken from
+// the configuration of the day would cut off a reply the reader had just asked to
+// be allowed to wait for. See withWriteDeadline.
 func writeTimeout(cfg *config.Config) time.Duration {
 	d := time.Duration(cfg.HTTPTimeoutSeconds) * settingsPortalRequests * time.Second
 	if d < settingsMinWriteTimeout {
@@ -52,9 +58,9 @@ func writeTimeout(cfg *config.Config) time.Duration {
 	return d
 }
 
-// contentSecurityPolicy lets the page load its own script, stylesheet and images
-// and make its own requests, and nothing else. It allows no inline script or
-// style, which leaves an injected one nowhere to run.
+// contentSecurityPolicy lets the page load only its own script, stylesheet and
+// images and make its own requests. It allows no inline script or style, which
+// leaves an injected one nowhere to run.
 const contentSecurityPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; " +
 	"img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
@@ -86,10 +92,9 @@ type Server struct {
 	lastHit atomic.Int64
 }
 
-// NewServer returns a settings server for state. An empty addr means loopback on
-// a port the system picks, started on first use and shut down once idle; an
-// address the caller names starts at once and stays up. onQuit is called after
-// the page asks the program to exit.
+// NewServer returns a settings server for state. An empty addr means loopback on a
+// port the system picks, up on first use and shut down once idle; a named address
+// starts at once and stays up. onQuit runs after the page asks the program to exit.
 func NewServer(state *AppState, addr string, onQuit func()) *Server {
 	return &Server{state: state, addr: addr, onQuit: onQuit, openExternal: platform.OpenExternal}
 }
@@ -109,6 +114,22 @@ func (s *Server) quitCallback() func() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.onQuit
+}
+
+// Addr is the address the settings page is served on, without the token in it.
+// It is what a log line may carry: the token lives in the address handed to a
+// browser, and nothing else may hold it. Empty until the server is started,
+// and false when it is serving on no address at all.
+func (s *Server) Addr() (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.url == "" {
+		return "", false
+	}
+	if i := strings.LastIndex(s.url, "/?"); i > 0 {
+		return s.url[:i], true
+	}
+	return s.url, true
 }
 
 // URL starts the server on first use and returns the tokenised address.
@@ -153,14 +174,21 @@ func (s *Server) URL() (string, error) {
 
 	if onDemand {
 		// The tray opens the page when it is wanted, so the port is released
-		// again once it has gone unused for a while. The address is written to
-		// the log as it is handed out, since a new one is made for every opening.
+		// again once it has gone unused for a while. The address is handed to
+		// the browser that opens it and is not written down here: the log
+		// outlives the token, and a token kept where logs are collected and
+		// copied is a way in that outlives its one opening.
 		go s.reapWhenIdle()
 	} else {
 		if host, _, err := net.SplitHostPort(listener.Addr().String()); err == nil && !isLoopback(host) {
 			logging.Log.Warn("the settings page is reachable from the network on %s; the token in its address is the only protection, so keep it on a trusted network or behind a tunnel", listener.Addr())
 		}
-		logging.Log.Info("settings page for remote management at %s, staying up until the program stops", s.url)
+		// Nothing opens this one by itself: it is meant for a machine with no
+		// tray, so the address goes to the console, which is where the person who
+		// asked for the page is reading. The log file would keep the token past
+		// its one opening and travel with every log that is copied or collected.
+		logging.Log.Info("settings page for remote management on %s, staying up until the program stops", s.bound.String())
+		fmt.Fprintf(os.Stderr, "settings page for remote management: open %s (good for one opening; it is replaced after each one)\n", s.url)
 	}
 
 	// The local srv is what this goroutine serves on: Stop clears the field, so
@@ -176,8 +204,7 @@ func (s *Server) URL() (string, error) {
 
 // rollEntry makes a new token for the address handed to a browser, so the one
 // before it stops working: an address that was seen, logged or left in a
-// browser's history opens the page once and no more. The current address goes to
-// the log as it is made.
+// history opens the page once and no more. The new address goes to the log.
 func (s *Server) rollEntry() (string, error) {
 	entry, err := randomToken()
 	if err != nil {
@@ -190,7 +217,10 @@ func (s *Server) rollEntry() (string, error) {
 	url := s.url
 	s.mu.Unlock()
 
-	logging.Log.Info("settings page at %s", url)
+	// The address carries the one time token and the log outlives it, so the
+	// port is what is written down. A reader who needs the address is handed it
+	// where it is used: by the tray, or by the browser this run opens.
+	logging.Log.Info("settings page on %s", s.bound.String())
 	return url, nil
 }
 
@@ -243,11 +273,9 @@ func (s *Server) OpenAppWindow() (string, error) {
 	return s.open(platform.OpenAppWindow)
 }
 
-// open serves the page and hands the address to opener. The address comes back
-// even when opening it failed, so the caller can show it to the user.
-//
-// Every opening gets an address of its own: the one handed out last time is spent
-// by this, which is what makes two openings in a row work.
+// open serves the page and hands the address to opener, and every opening gets an
+// address of its own: this spends the one handed out last time. The address comes
+// back even when opening it failed, so the caller can show it to the user.
 func (s *Server) open(opener func(string) error) (string, error) {
 	if _, err := s.URL(); err != nil {
 		return "", err
@@ -306,18 +334,66 @@ func randomToken() (string, error) {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(webui.Assets()))))
+	mux.Handle("/static/", s.assets())
 	mux.HandleFunc("/api/bootstrap", s.handleBootstrap)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/action", s.handleAction)
-	return s.withHeaders(mux)
+	// The deadline is set outside the headers, so that every answer carries one:
+	// a refusal and a missing address are written by the same connections as a
+	// page, and a caller that stops reading holds one of them just as long. The
+	// host is checked inside them, so a name this server does not answer to is
+	// refused before any handler sees the request.
+	return s.withWriteDeadline(s.withHeaders(s.withHost(mux)))
 }
 
-// withHeaders puts the response headers on before the handler runs, on every
-// answer including the refusals, since a caller without the token reads one of
-// those. The page is opened with the token in its address, so the headers keep
-// that address out of a Referer, keep the page unframed, and name what it loads.
+// withWriteDeadline gives every reply the deadline the configuration in force
+// asks for, counted from the moment the request arrived.
+//
+// The deadline is set here rather than left to the server's WriteTimeout because
+// that one is read when the server starts. The request timeout can be changed
+// from the page, and a copy that kept the deadline of its first configuration
+// would either cut off a reply it had just been told to wait for, or hold a
+// connection open for a wait nobody asked for any more.
+func (s *Server) withWriteDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The controller is how a handler reaches the connection's deadline: the
+		// interface it is given does not carry one. A connection that cannot take
+		// one is one that is already gone, and answering it is the caller's
+		// business rather than a reason to refuse here.
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(writeTimeout(s.state.Config()))); err != nil {
+			logging.Log.Debug("no reply deadline for %s %s: %v", r.Method, r.URL.Path, err)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// assets serves the page's own files: its script, its stylesheet and the mark.
+// They are served through the same check as everything else, so the session the
+// address was exchanged for is what reads them. The files hold no secret, but
+// they are the page, and a page served to a program that never opened the
+// address is one it can read, copy or hang a frame around. A browser has the
+// cookie by the time it asks for them: the markup that names them is served
+// after the exchange, on the same origin.
+func (s *Server) assets() http.Handler {
+	files := http.StripPrefix("/static/", http.FileServer(http.FS(webui.Assets())))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.authorised(r) {
+			http.Error(w, "invalid or missing token", http.StatusForbidden)
+			return
+		}
+		// The files are part of the executable, so nothing may be kept: a page from
+		// a cache would be paired with the API of a different build. What the markup
+		// is served with says the same, and this is the way the script and the
+		// stylesheet are read.
+		w.Header().Set("Cache-Control", "no-store")
+		files.ServeHTTP(w, r)
+	})
+}
+
+// withHeaders puts the headers on before the handler runs, refusals included: a
+// caller without the token reads one of those. The headers keep the tokenised
+// address out of a Referer and the page unframed; the policy names what it loads.
 func (s *Server) withHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -329,10 +405,76 @@ func (s *Server) withHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// authorised reports whether a request may go through. The session cookie is
-// what authenticates it, and a request that changes something has to carry the
-// same value in a header as well: a page from another site cannot set a custom
-// header without this server agreeing to a cross site request, and it does not.
+// withHost refuses a request whose Host header does not name this machine, so that a
+// page served from another name — one a browser was made to resolve to 127.0.0.1 —
+// cannot reach this server as an origin of its own. Without it the protection is
+// only what the browser does with a cookie, which is a property of the page and not
+// of this server.
+func (s *Server) withHost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.hostAllowed(r.Host) {
+			logging.Log.Debug("refusing %s %s: the Host header %q does not name this machine", r.Method, r.URL.Path, r.Host)
+			http.Error(w, "invalid host", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hostAllowed reports whether a request may be answered under the Host header it
+// carries: the loopback address this page is served on, the address the listener was
+// bound to, or — for a listener on every interface — an address written as an IP
+// literal, which is what an operator reaching the page from another machine sends and
+// what a name a rebinding page owns is not.
+func (s *Server) hostAllowed(hostPort string) bool {
+	host := hostName(hostPort)
+	if host == "" {
+		// A browser always sends one, so a request without one is not the page.
+		return false
+	}
+	if isLoopback(host) {
+		return true
+	}
+	s.mu.Lock()
+	bound := s.bound
+	s.mu.Unlock()
+	if bound == nil {
+		// No listener: no request can arrive over a network, and the handler chain is
+		// being driven directly.
+		return true
+	}
+	boundHost := hostName(bound.String())
+	if strings.EqualFold(boundHost, host) {
+		return true
+	}
+	if isWildcardHost(boundHost) {
+		return net.ParseIP(host) != nil
+	}
+	return false
+}
+
+// hostName is the host part of a Host header or of a listener address, with the port
+// and the brackets an IPv6 literal is written with taken off.
+func hostName(hostPort string) string {
+	host := strings.TrimSpace(hostPort)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+}
+
+// isWildcardHost reports whether a listener address names every interface.
+func isWildcardHost(host string) bool {
+	switch host {
+	case "", "0.0.0.0", "::":
+		return true
+	}
+	return false
+}
+
+// authorised reports whether a request may go through. The session cookie
+// authenticates it; a write also carries the value in a header, which a page from
+// another site cannot set without this server agreeing to a cross site request.
 func (s *Server) authorised(r *http.Request) bool {
 	s.lastHit.Store(time.Now().UnixNano())
 	cookie, err := r.Cookie(sessionCookie)
@@ -362,12 +504,9 @@ func (s *Server) authorised(r *http.Request) bool {
 	return true
 }
 
-// tokenEqual compares two tokens in a time that does not depend on how many bytes
-// of one match the other, so the token cannot be read out a byte at a time by
-// timing the answers. A token that was never made matches nothing, not even an
-// empty string, which the comparison alone would call a match; a length that does
-// not match is answered at once, which gives nothing away since every token this
-// program makes is the same length.
+// tokenEqual compares tokens in constant time, so the token cannot be read off the
+// reply time. A token that was never made matches nothing, empty strings included.
+// A length mismatch is answered at once, since every token is the same length.
 func tokenEqual(got, want string) bool {
 	if want == "" {
 		return false
@@ -381,9 +520,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The address the page was opened with carries a token, because the first request
-	// of a navigation is one the browser makes on its own and cannot put anything in
-	// a header. That token buys the session cookie here, and the browser is sent to
-	// the page without it, so what it is left showing and its history carry no token.
+	// of a navigation is one the browser makes on its own and cannot put anything in a
+	// header. That token buys the session cookie here, and the browser is sent on
+	// without it, so the address bar and the history carry no token.
 	s.mu.Lock()
 	entry := s.entry
 	s.mu.Unlock()
@@ -399,18 +538,15 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // startSession hands the browser the cookie the rest of the session is checked
-// against, and sends it to the page again without the token it arrived with.
-//
-// The address that was used is spent here and the next one is made and written to
-// the log, so the page can always be opened again: from the tray, or by reading
-// the newest address out of the log on a machine that has none.
+// against, and sends it back to the page without the token it arrived with: the
+// used address is spent and the next one made, so the page can be opened again.
 func (s *Server) startSession(w http.ResponseWriter) {
 	s.mu.Lock()
 	session := s.session
 	s.mu.Unlock()
 	if _, err := s.rollEntry(); err != nil {
-		// The address that was used stays valid in that case. Saying so is
-		// better than a page that cannot be opened again at all.
+		// The address that was used stays valid in that case, and saying so is
+		// better than a page that cannot be opened again.
 		logging.Log.Warn("making the next settings address: %v", err)
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -447,7 +583,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		"operators":   config.Operators,
 		"status":      statusPayload(s.state.Snapshot()),
 		"autostart":   platform.AutostartEnabled(),
-		"configured":  cfg.Configured(),
+		"configured":  cfg.HasAccounts(),
 		"paths": map[string]string{
 			"config": cfg.Path(),
 			"log":    logging.Log.Path(),
@@ -455,24 +591,24 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// pageConfig is the configuration as the settings page may see it: each stored
-// password is replaced by the fact that there is one. The page writes that field
-// and never reads it, so there is no reason for the secret to leave the process:
-// a password that is never sent cannot be read back out of the browser, out of
-// whatever script the page loads, or out of a request the page makes.
-//
-// What it costs is that an entry coming back with an empty password has to be
-// filled in from the stored one, which KeepPasswordsFrom does. Every answer that
-// carries the configuration back to the page goes through here, the reload
-// included: that one reads the file again, so it is masked in the same way.
+// pageConfig masks the configuration for the settings page: each stored password
+// is replaced by where it comes from, so the secret stays in the process. Every
+// answer that carries it to the page comes through here, the reload included.
 func pageConfig(cfg *config.Config) *config.Config {
 	out := cfg.Clone()
 	for i := range out.Accounts {
-		// "There is a password" means the file holds one, not that this run has one
-		// in memory: with the passwords off there is nothing stored for an empty
-		// field to keep, and the page saying otherwise is a promise the next start
-		// does not keep.
-		out.Accounts[i].HasPassword = out.Accounts[i].Password != "" && out.RememberPassword
+		// A password in memory with no source recorded came from this file.
+		source := out.Accounts[i].PasswordSource
+		if source == "" && out.Accounts[i].Password != "" {
+			source = config.SourceConfig
+		}
+		// One in this file does not survive a save with the passwords turned off,
+		// and the page saying it is there is a promise the next start breaks. One
+		// read from a password file is kept, since that switch does not govern it.
+		if !out.RememberPassword && source == config.SourceConfig {
+			source = ""
+		}
+		out.Accounts[i].PasswordSource = source
 		out.Accounts[i].Password = ""
 	}
 	return out
@@ -499,10 +635,33 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The request carries the whole configuration back, so it is decoded onto a clone:
-	// a request refused below must not have written into the running configuration.
-	next := s.state.Config().Clone()
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(next); err != nil {
+	// The request carries the whole configuration back, so it is decoded onto a
+	// copy: a request refused below must not have written into the running
+	// configuration. What came from a password file is taken out of that copy, so
+	// that a password the reader did not type can be told from one they did.
+	// A page from another site can post the three content types a form is allowed to
+	// use without asking this server first, and none of them is this one. A request
+	// that names no type at all is taken: a form cannot make one, and the page always
+	// says what it sends.
+	if contentType := r.Header.Get("Content-Type"); contentType != "" {
+		mediaType, _, err := mime.ParseMediaType(contentType)
+		if err != nil || (mediaType != "application/json" && !strings.HasSuffix(mediaType, "+json")) {
+			logging.Log.Warn("the settings page sent a configuration as %q, which is not JSON", contentType)
+			writeJSONStatus(w, http.StatusUnsupportedMediaType, map[string]any{
+				"ok":     false,
+				"errors": map[string]string{"_": "err.badRequest"},
+			})
+			return
+		}
+	}
+
+	next := s.state.Config().PageBase()
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	// A field this program does not know is a request that does not match this
+	// version of the page, and refusing it keeps one from naming a setting this
+	// program keeps for itself.
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(next); err != nil {
 		logging.Log.Warn("the settings page sent a configuration that could not be read: %v", err)
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{
 			"ok":     false,
@@ -510,13 +669,24 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	// The page is not given the stored passwords, so an account it sends back
-	// with that field empty means "keep the one that is there". A password the
-	// reader typed is in the request and is left alone.
-	next.KeepPasswordsFrom(s.state.Config())
+	// Where a password came from is this program's own word about an entry, never the
+	// request's, so every source a request carried is cleared here. What the page did
+	// not type is filled in again from the configuration that is running by
+	// ReconcilePasswords, which puts the label that entry had back on with it.
+	for i := range next.Accounts {
+		next.Accounts[i].PasswordSource = ""
+	}
+	// The page is never given a stored password, so an account sent back with that
+	// field empty means keep the one that is there, and a typed password wins. The
+	// file may have been changed by the same request, so where each password comes
+	// from is worked out again from what the request now names.
+	if notice := next.ReconcilePasswords(s.state.Config()); notice != "" {
+		logging.Log.Warn("%s", notice)
+	}
 	if errs := next.Validate(); len(errs) > 0 {
 		// The field paths of the refusal go to the log, since the page shows them next
-		// to the inputs: accounts.0.password says a password is missing, never what it is.
+		// to the inputs: accounts.0.password says a password is missing, and no value
+		// of that field is written with it.
 		logging.Log.Warn("the settings page's configuration was refused: %s", describeErrors(errs))
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "errors": errs})
 		return
@@ -536,7 +706,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 // describeErrors is a validation result as one line: the field paths and the
 // message keys that go with them, in a stable order, so a refusal in the log can
-// be read against the page. The paths name the fields, never their values.
+// be read against the page. The paths name the fields and never their values.
 func describeErrors(errs map[string]string) string {
 	fields := make([]string, 0, len(errs))
 	for field := range errs {
@@ -568,8 +738,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		Index int `json:"index"`
 		// ISP is the service type a switch asks for, as the suffix the entry is
 		// submitted with. It is a pointer because the campus network itself is a
-		// service type with no suffix: a request that names none at all is a
-		// malformed one, not a request for the campus network.
+		// service type with no suffix, and a request that names none is malformed.
 		ISP *string `json:"isp"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
@@ -648,9 +817,8 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 
 	case "openPortal":
 		// The way out of a session the portal will not sign in again: the reader signs
-		// the session out on the portal's own page and asks for the switch afterwards.
-		// The address is the configured one, not one the page sends, so no request can
-		// hand the shell an address of its own choosing.
+		// it out on the portal's own page and asks for the switch afterwards. The
+		// address opened is the configured one, so no request can choose it.
 		url := s.state.Config().PortalBaseURL
 		logging.Log.Info("the settings page asked for the portal page at %s", url)
 		if err := s.openExternal(url); err != nil {
@@ -659,6 +827,16 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, map[string]any{"ok": true, "url": url})
+
+	case "checkUpdate":
+		// The reader asking, so it runs whether or not the automatic check is on.
+		logging.Log.Info("a check for a newer release was requested from the settings page")
+		if !s.state.CheckForUpdateNow() {
+			writeJSONStatus(w, http.StatusServiceUnavailable,
+				map[string]any{"ok": false, "error": "err.noUpdater"})
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
 
 	case "logTail":
 		writeJSON(w, map[string]any{"ok": true, "lines": tailLog(logTailLines)})

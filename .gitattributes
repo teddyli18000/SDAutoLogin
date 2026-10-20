@@ -1,20 +1,19 @@
-# keep line endings stable across the platforms this tool builds on: the sources
-# are stored and checked out with LF everywhere, so which system a file was
-# written on is not what decides whether the next one sees a whole file as
-# changed. The one exception is the Windows command scripts, which cmd.exe wants
-# in its own spelling, and the generated resources below.
+# Keep line endings stable across the platforms this tool builds on: store and
+# check out LF everywhere, so a file does not look wholly changed just because
+# another system wrote it. The Windows command scripts are the exception, since
+# cmd.exe wants its own spelling.
 * text=auto eol=lf
 *.go text eol=lf
 *.sh text eol=lf
 *.cmd text eol=crlf
 
-# the files under packaging/ are read from the working copy and installed on the
-# target, where a carriage return at the end of a line is not what it looks like:
-# a shell script whose shebang ends in one does not run at all. Some of them have
-# no extension for a rule to match, so the whole directory is pinned.
+# The files under packaging/ are installed on the target, where a carriage
+# return at the end of a line breaks things: a shell script whose shebang ends
+# in one does not run. Some of them have no extension to match, so the whole
+# directory is pinned.
 packaging/** text eol=lf
 
-# the generated Windows resources are binaries: store them byte for byte, do not
-# let git guess and touch their line endings
+# The generated Windows resources are binaries: store them byte for byte and
+# keep git from touching their line endings.
 *.syso binary
 *.ico binary

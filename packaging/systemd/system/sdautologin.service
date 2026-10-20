@@ -1,22 +1,32 @@
 # SDAutoLogin as a system service, for a server or a machine with no display.
 #
-# The account has to be written down once before the service stays up, since a
-# service has nobody to answer the setup wizard:
+# The account has to be written down once before the service stays up: a service
+# has nobody to answer the setup wizard.
 #
+#   printf '%s\n' SECRET > /etc/sdautologin/password
+#   chmod 600 /etc/sdautologin/password
 #   sudo -u sdautologin /usr/bin/SDAutoLogin --home=/var/lib/sdautologin \
-#        --username=s1234567 --password=SECRET --isp=@zgyd --save config --show
+#        --username=s1234567 --password-file=/etc/sdautologin/password \
+#        --isp=@zgyd --save config --show
 #
-# or add --settings=127.0.0.1:8088 to ExecStart below and reach the page through
-# an SSH tunnel: ssh -L 8088:127.0.0.1:8088 the-server, then open the address
-# the log prints (journalctl -u sdautologin), token and all. The bare port is
-# refused: the address carries a one time token, it opens the page once, and the
-# newest line is the one that works. Bind to 0.0.0.0 only on a trusted network:
-# the page holds the account in clear text.
+# A password written as --password=... on the command line stands in the process
+# list for as long as that command runs, where every user of the machine can read
+# it, so the file is handed over instead. The LoadCredential= form below keeps the
+# password off the disk as well.
 #
-# The password does not have to be written down at all. systemd can hand it over as
-# a credential, which the program picks up by itself, so that neither the file nor
-# the command line ever holds one; add this to the [Service] section below, with
-# the secret on the first line of a file root reads (0600) and nobody else:
+# Or add --settings=127.0.0.1:8088 to ExecStart below and reach the page through
+# an SSH tunnel: ssh -L 8088:127.0.0.1:8088 the-server, then open the address the
+# program prints on its console, which is what "journalctl -u sdautologin" shows.
+# The bare port will not open the page: it needs the one-time token in that
+# address, and the address is replaced after every opening, so take the newest
+# line. The token is deliberately not written to logs/app.log, which outlives it
+# and gets copied around. Bind to 0.0.0.0 only on a trusted network, since the
+# page holds the account in clear text.
+#
+# The password does not have to be written down. systemd can hand it over as a
+# credential the program picks up by itself, so neither the file nor the command
+# line holds one. Add this to the [Service] section below, with the secret on
+# the first line of a file root reads (0600) and nobody else:
 #
 #   LoadCredential=password:/etc/sdautologin/password
 #
@@ -30,7 +40,7 @@ Description=SDAutoLogin campus network auto login
 Documentation=https://git.zqlhub.com/zqlan/SDAutoLogin
 After=network-online.target
 Wants=network-online.target
-# Give up instead of restarting forever when the account is wrong.
+# Stop the unit when the account is wrong.
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
@@ -44,13 +54,16 @@ Group=sdautologin
 StateDirectory=sdautologin
 StateDirectoryMode=0700
 ExecStart=/usr/bin/SDAutoLogin run --home=/var/lib/sdautologin
+# The program reloads config.json when it is sent SIGHUP, so a file edited by
+# hand or written by the settings page takes effect without dropping the
+# session: systemctl reload sdautologin.
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=15
 
 # The program needs nothing but a network connection, so the rest is cut off.
-# The umask is the last line of defence for what it writes: config.json holds
-# the password and the log holds the account, and both are made readable by
-# their owner alone either way.
+# The umask covers what it writes: config.json holds the password and the log
+# holds the account, and both are readable by their owner alone.
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -60,12 +73,28 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_INET AF_INET6
+# AF_UNIX is the single instance socket: without it the service cannot publish the
+# socket a second copy looks for, and the lock it holds is a different file from
+# the one a copy started by hand takes.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictNamespaces=yes
 RestrictRealtime=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
+# Nothing of root is left either, and the program may ask the kernel for nothing
+# but the ordinary set of a service: its single instance lock is the only unusual
+# call in it, and flock is part of @system-service, as are the sockets, the
+# epoll, the futex and the memory calls a Go program needs.
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+# The process list of the other users is none of its business, and neither is the
+# clock or the host name it does not set.
+ProtectProc=invisible
+ProcSubset=pid
+ProtectClock=yes
+ProtectHostname=yes
 
 [Install]
 WantedBy=multi-user.target

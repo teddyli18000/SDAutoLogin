@@ -3,5 +3,7 @@
 - [手册（中文）](Manual.zh-CN)
 - [更新日志 / Changelog](Changelog)
 - [更新日志（中文）](Changelog.zh-CN)
+- [部署 / Deployment](Deployment)
+- [部署（中文）](Deployment.zh-CN)
 - [发布 / Releases](https://git.zqlhub.com/zqlan/SDAutoLogin/releases)
 - [问题 / Issues](https://git.zqlhub.com/zqlan/SDAutoLogin/issues)

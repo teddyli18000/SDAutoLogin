@@ -1,8 +1,7 @@
 // Command build is the task runner for this repository. Every build flag lives
-// here, so the wrapper scripts and the CMake targets call these tasks instead of
-// repeating a command line and drifting apart. It uses the standard library only,
-// so it works offline next to the vendored dependencies and behaves the same on
-// Windows, Linux and macOS.
+// here, so the wrapper scripts and the CMake targets repeat no command line of
+// their own. It uses the standard library only, so it builds offline the same
+// way on Windows, Linux and macOS.
 //
 //	go run ./tools/build            list the tasks
 //	go run ./tools/build build      build for this platform
@@ -24,28 +23,34 @@ const (
 	// mainPkg is the entry point package. Everything else is a library under
 	// internal/, so the build has to name it explicitly.
 	mainPkg = "./cmd/SDAutoLogin"
-	// distDir holds everything the build produces, so the repository root stays
-	// free of executables and the results of every platform sit together.
+	// distDir holds everything the build produces, keeping executables out of the
+	// repository root.
 	distDir = "dist"
-	// The generated resources belong to the winres package, next to the files
-	// they are made from. The linker only picks up a .syso that lies in one of
-	// the packages being built, which is why these are not under distDir.
+	// The generated resources belong to the winres package, next to the files they
+	// are made from: the linker picks up a .syso only from a package being built,
+	// so these are not under distDir.
 	iconPath  = "winres/icon.ico"
 	resPrefix = "winres/rsrc"
 	resConfig = "winres/winres.json"
 	// winresVersion is pinned so regenerating the resources is reproducible.
 	winresVersion = "github.com/tc-hib/go-winres@v0.3.3"
 
-	// versionVar and commitVar are the variables inside the program that the
-	// linker writes the release into. The path has to be the full one of the
-	// package that holds them, and both have to be variables: -X cannot set a
-	// constant.
+	// versionVar and commitVar are the variables the linker writes the release
+	// into. The path has to be the full one of the package holding them, and -X
+	// cannot set a constant.
 	versionVar = "sdautologin/internal/app.Version"
 	commitVar  = "sdautologin/internal/app.Commit"
+	// updaterVersionVar is the same version written where the updater can read
+	// it: the updater holds a release against the version of the running program,
+	// and it cannot read internal/app, which is the package that imports it. A
+	// build that is not linked with this refuses to install anything, so a -X
+	// that names nothing is a program that does not update itself rather than one
+	// that updates without checking.
+	updaterVersionVar = "sdautologin/internal/update.BuildVersion"
 
 	// notrayTag is the build tag of the builds that leave the tray out. Every
-	// package is built from one: there is no desktop session on a router, in a
-	// container or on a server to put an icon in.
+	// package is built from one: a router, a container or a server has no desktop
+	// session to put an icon in.
 	notrayTag = "notray"
 )
 
@@ -55,7 +60,7 @@ type task struct {
 }
 
 // taskOrder keeps the listing stable, a map is not ordered.
-var taskOrder = []string{"build", "console", "all", "packages", "verify", "windows", "openwrt", "deb", "rpm", "pacman", "icon", "resources", "test", "run", "clean"}
+var taskOrder = []string{"build", "console", "all", "packages", "verify", "windows", "openwrt", "deb", "rpm", "pacman", "icon", "resources", "version", "keygen", "sign", "test", "run", "clean"}
 
 var tasks = map[string]task{
 	"build":     {"build for this platform into dist/", taskBuild},
@@ -70,17 +75,17 @@ var tasks = map[string]task{
 	"pacman":    {"pack the Arch packages into dist/packages/", taskPacman},
 	"icon":      {"redraw winres/icon.ico from the drawing code", taskIcon},
 	"resources": {"regenerate the Windows resource file with go-winres", taskResources},
-	"test":      {"run go vet and go test", taskTest},
+	"version":   {"print the version this tree builds, as every format spells it", taskVersion},
+	"keygen":    {"make the key the releases are signed with", taskKeygen},
+	"sign":      {"sign the checksum list of the packages just built", taskSign},
+	"test":      {"vet this platform and Windows, then test under the race detector", taskTest},
 	"run":       {"build and start the program", taskRun},
 	"clean":     {"remove the built executables, keeping settings and logs", taskClean},
 }
 
-// taskPackages packs every format this repository publishes, which a release
-// needs. Each format builds the binaries it wants, and one another format already
-// built comes out of the toolchain cache.
-//
-// The list is spelled out rather than read from the task map, which would be a
-// cycle: the map holds this function.
+// taskPackages packs every format a release publishes. Each format builds the
+// binaries it wants, and one another format already built comes out of the
+// toolchain cache. The list is spelled out: the task map holds this function.
 func taskPackages(root string) error {
 	formats := []struct {
 		name string
@@ -98,8 +103,8 @@ func taskPackages(root string) error {
 			return err
 		}
 	}
-	// The digests of everything that was just written go next to it, as the one
-	// file that says what a release contains.
+	// The digests of everything written here go next to it, as the one file that
+	// says what a release contains.
 	return writeChecksums(root)
 }
 
@@ -185,16 +190,15 @@ func taskConsole(root string) error {
 	return buildFor(root, runtime.GOOS, runtime.GOARCH, appName(runtime.GOOS, "-console"), false, nil)
 }
 
-// target is one of the builds worth publishing.
+// target is one of the builds this repository publishes.
 type target struct {
 	goos, goarch string
-	// variant is how the file name spells the architecture, for the targets
-	// where GOARCH is not precise enough to be read on its own.
+	// variant is how the file name spells the architecture where GOARCH is not
+	// precise enough on its own.
 	variant string
-	// extraEnv goes into the environment on top of GOOS and GOARCH, for the
-	// targets where GOARCH alone is not precise: arm does not say which
-	// instruction set it is for, and mips does not say whether the board has a
-	// floating point unit.
+	// extraEnv goes into the environment on top of GOOS and GOARCH: arm does not
+	// say which instruction set it is for, and mips does not say whether the board
+	// has a floating point unit.
 	extraEnv []string
 	// tags are the build tags to build with, empty for none.
 	tags string
@@ -227,18 +231,15 @@ func (t target) buildArgs() []string {
 	return []string{"-tags", t.tags}
 }
 
-// buildTarget builds one target into dist/.
 func buildTarget(root string, t target) error {
 	return buildFor(root, t.goos, t.goarch, t.name(), true, t.env(), t.buildArgs()...)
 }
 
-// targets is every build worth publishing: the Windows one to double click, the
-// Linux one for a server, which also serves the command line, and the small ones
-// a router or an embedded board has room for, the 64 bit builds first.
-//
-// Every Linux build is made twice, the second leaving the tray out for the
-// machines with no desktop session to put an icon in: the tray is by far the
-// largest thing the binary can do without.
+// targets is every build this repository publishes: the Windows one to double
+// click, the Linux one for a server and its command line, and the small ones a
+// router or an embedded board has room for, the 64 bit builds first. Each Linux
+// build is made twice, the second without the tray, by far the largest thing
+// the binary can do without.
 func targets() []target {
 	base := []target{
 		{goos: "windows", goarch: "amd64"},
@@ -248,10 +249,9 @@ func targets() []target {
 		{goos: "linux", goarch: "arm64"},
 		{goos: "linux", goarch: "386"},
 		{goos: "linux", goarch: "arm", variant: "armv7", extraEnv: []string{"GOARM=7"}},
-		// Most routers have no floating point unit, which is why these are
-		// softfloat builds, and both byte orders are here because the boards
-		// are: the Atheros targets (ath79, ar71xx) are big endian, the MediaTek
-		// ones (ramips, mt76x8) are little endian.
+		// Most routers have no floating point unit, so these are softfloat
+		// builds. Both byte orders are here because the boards are: Atheros
+		// (ath79, ar71xx) is big endian, MediaTek (ramips, mt76x8) little endian.
 		{goos: "linux", goarch: "mips", variant: "mips-softfloat", extraEnv: []string{"GOMIPS=softfloat"}},
 		{goos: "linux", goarch: "mipsle", variant: "mipsle-softfloat", extraEnv: []string{"GOMIPS=softfloat"}},
 	}
@@ -284,10 +284,10 @@ func taskAll(root string) error {
 	return nil
 }
 
-// ldflagsFor is what the linker needs to write the release into the program: the
-// version, which is the git tag the checkout is at, and the commit it was built
-// from, so a copy in front of someone can be named exactly. The version is read
-// here, since a program cannot read the tag it was built at.
+// ldflagsFor is what the linker needs to write the release into the program:
+// the version from the git tag the checkout is at, and the commit it was built
+// from. The version is read here, since a program cannot read the tag it was
+// built at.
 func ldflagsFor(root string, gui bool, goos string) (string, error) {
 	version, err := appVersion(root)
 	if err != nil {
@@ -299,6 +299,7 @@ func ldflagsFor(root string, gui bool, goos string) (string, error) {
 		flags += " -H=windowsgui"
 	}
 	flags += " -X " + versionVar + "=" + version
+	flags += " -X " + updaterVersionVar + "=" + version
 	if commit := appCommit(root); commit != "" {
 		flags += " -X " + commitVar + "=" + commit
 	}
@@ -331,33 +332,96 @@ func taskIcon(root string) error {
 	return runGo(root, nil, "run", "tools/icogen/main.go", iconPath)
 }
 
+// winresEnv is the environment the resource generator runs in.
+//
+// go-winres is not a dependency of the program: it is not in go.mod, not in
+// go.sum and not in vendor/, so this is the one task that reaches the network
+// for a tool. What it downloads is asked of the checksum database, and the two
+// settings that turn that verification off are cleared here, so a proxy or a
+// mirror cannot answer with a module that is not the one the version names.
+// GOFLAGS carries the module mode, since the vendor directory of this module
+// cannot resolve a tool that is not in it.
+func winresEnv() []string {
+	return []string{
+		"GOFLAGS=-mod=mod",
+		"GOSUMDB=sum.golang.org",
+		"GONOSUMDB=",
+		"GOPRIVATE=",
+	}
+}
+
 func taskResources(root string) error {
-	// go-winres is not a dependency of the program, it only turns the icon and
-	// the version information into an object file. Running it by module path keeps
-	// it out of go.mod, which needs the module mode: the vendor directory cannot
-	// resolve a package that is not a dependency.
-	//
-	// One object file per architecture, named rsrc_windows_<arch>.syso, since the
-	// toolchain reads that name to tell which build it belongs to: a Windows
-	// architecture without one would be built without an icon or version
-	// information. The version is passed on the command line rather than written
-	// into winres.json, so that the file a person opens holds no version to go
-	// stale.
+	// It writes one rsrc_windows_<arch>.syso per architecture, and the version
+	// goes on the command line so that winres.json holds no number to go stale.
+	// The generated files are committed and no release step runs this task, so a
+	// release is built from what the repository holds; run it only when the
+	// resources are meant to change.
 	version, err := appVersion(root)
 	if err != nil {
 		return err
 	}
-	env := []string{"GOFLAGS=-mod=mod"}
-	return runGo(root, env, "run", winresVersion, "make",
+	return runGo(root, winresEnv(), "run", winresVersion, "make",
 		"--in", resConfig, "--out", resPrefix, "--arch", "amd64,arm64,386",
 		"--file-version", version, "--product-version", version)
+}
+
+// taskVersion prints the version of the tree and the spelling each format is
+// named with, one per line as name=value. A caller that has to know the name of
+// a package asks here rather than working the version out a second time: the
+// spellings differ per format, and that rule copied into a workflow is a copy
+// that goes stale the next time one of them changes.
+func taskVersion(root string) error {
+	report, err := versionReport(root)
+	if err != nil {
+		return err
+	}
+	fmt.Print(report)
+	return nil
+}
+
+// versionReport is the text of that task. The workflow reads the deb= line out
+// of it to find the package it expects, so the shape is a contract and a test
+// holds it.
+func versionReport(root string) (string, error) {
+	rel, err := packageVersion(root)
+	if err != nil {
+		return "", err
+	}
+	version, release := rel.rpm()
+	return fmt.Sprintf("tag=%s\ndeb=%s\npacman=%s\nrpm=%s-%s\n",
+		rel.tag, rel.deb(), rel.pacman(), version, release), nil
 }
 
 func taskTest(root string) error {
 	if err := runGo(root, nil, "vet", "./..."); err != nil {
 		return err
 	}
-	return runGo(root, nil, "test", "./...")
+	// The Windows sources are never compiled by the job this runs in, so a type
+	// error or a test that does not compile there would only be found on a
+	// release build. CGO is off because there is no Windows C toolchain here,
+	// and one is not needed: the whole program is pure Go once the Windows
+	// files are selected. macOS is left out on purpose: the vendored systray
+	// backend there is cgo only, so it cannot be type checked from Linux.
+	//
+	// What this does NOT do is run anything on Windows, and the difference has
+	// already cost this project a real defect: a directory was checked for
+	// privacy by reading its mode bits, which every NTFS directory reports as
+	// 0777, so the check passed a directory every account could read. It type
+	// checked, it linked, and only running it on Windows showed the fault.
+	// vet compiles the Windows test files, so a Windows runner would add
+	// execution and nothing else; the job that runs this has no such runner.
+	// To close the gap by hand, from a Linux checkout:
+	//   CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -c -o x.exe ./internal/config/
+	// then run x.exe on a Windows machine in a directory it can write to
+	// (Go refuses to start an executable found by a relative name, so invoke it
+	// as .\x.exe from the directory that holds it).
+	if err := runGo(root, []string{"CGO_ENABLED=0", "GOOS=windows"}, "vet", "./..."); err != nil {
+		return err
+	}
+	// Under the race detector, which needs cgo and a C compiler. A field the
+	// check loop reads while a restart writes it passes a plain run and shows up
+	// only here, and the settings page reaches that path from two tabs at once.
+	return runGo(root, nil, "test", "-race", "./...")
 }
 
 func taskRun(root string) error {

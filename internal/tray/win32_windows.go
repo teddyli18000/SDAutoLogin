@@ -4,7 +4,6 @@ package tray
 
 import (
 	"syscall"
-	"unicode/utf16"
 	"unsafe"
 
 	"sdautologin/internal/platform"
@@ -134,18 +133,6 @@ type notifyIconData struct {
 func moduleHandle() uintptr {
 	h, _, _ := procGetModuleHandleW.Call(0)
 	return h
-}
-
-// putUTF16 copies s into a fixed size UTF-16 buffer, always NUL terminated.
-func putUTF16(dst []uint16, s string) {
-	for i := range dst {
-		dst[i] = 0
-	}
-	u := utf16.Encode([]rune(s))
-	if len(u) > len(dst)-1 {
-		u = u[:len(dst)-1]
-	}
-	copy(dst, u)
 }
 
 func messageBox(owner syscall.Handle, title, text string, flags uint32) {

@@ -1,6 +1,12 @@
 # Build results. The directory also holds the settings and the log of a build
-# started from here, because the program keeps both next to its executable.
+# started from here, which the program keeps next to its executable.
 /dist/
+
+# A program built at the top of the tree rather than into dist/: the test task
+# compiles one there to run the command line against, and a copy left behind by
+# hand has no business in a commit either. The build itself writes to dist/.
+/SDAutoLogin
+/SDAutoLogin.exe
 
 # CMake build tree
 /build/
@@ -10,3 +16,20 @@
 # executable of its own to sit next to, it falls back to the working directory.
 /config.json
 /logs/
+
+# A signing key left at the top of the tree. keygen no longer writes here — the
+# private half goes to the per-user configuration directory, and the release
+# build is given its text in the environment — but a key that was made by an
+# earlier version, or put here by hand, must never be committed. A key in the
+# repository signs whatever anyone asks it to.
+/signing.key
+
+# Key material anywhere else in the tree, whatever it is named. A key written
+# by hand, or one named by SDAUTOLOGIN_SIGNING_KEY_FILE, is not at the top of
+# the tree and would otherwise be added by "git add -A" without a word. Once a
+# key is in a commit it is in the history for good, so the pattern goes by
+# extension: nothing this repository holds ends in one of these.
+*.key
+*.pem
+*.p12
+*.pfx

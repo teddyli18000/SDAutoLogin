@@ -11,13 +11,9 @@ import (
 	"math"
 )
 
-// Accent colors. AccentBrand is the fixed application identity: the deep crimson
-// a Chinese university keeps its seal in, with a darker tone of the same colour
-// for the ring around it.
-//
-// The others tint the mark by session state, so the tray icon reads at a glance:
-// green online, grey offline, amber while signing in, red on an error, and a
-// lighter grey before the first check.
+// Accent colors. AccentBrand is the fixed application identity, the deep crimson
+// a Chinese university keeps its seal in; the others tint the mark by session
+// state, so the tray icon reads at a glance.
 var (
 	AccentBrand   = color.RGBA{R: 0x8C, G: 0x1D, B: 0x2C, A: 0xFF}
 	AccentOnline  = color.RGBA{R: 0x2E, G: 0xA0, B: 0x43, A: 0xFF}
@@ -27,13 +23,9 @@ var (
 	AccentError   = color.RGBA{R: 0xD1, G: 0x3A, B: 0x2E, A: 0xFF}
 )
 
-// Icon renders the mark: a round seal holding a padlock, tinted by session
-// state. It is drawn from primitives at 4x and then box filtered down, so no
-// font or rasteriser dependency is needed.
-//
-// A university seal is two rings around a roundel: an outer ring in a darker
-// tone of the accent, a gap, and the disc inside it, with the padlock knocked
-// out in white. The proportions keep both rings readable at the 16 px tray size.
+// Icon renders the mark: a round seal holding a padlock, tinted by session state.
+// It is drawn from primitives at 4x and box filtered down, so no font or
+// rasteriser is needed; the two rings keep the padlock readable at 16 px.
 func Icon(size int, accent color.RGBA) *image.RGBA {
 	const ss = 4
 	n := size * ss
@@ -44,12 +36,9 @@ func Icon(size int, accent color.RGBA) *image.RGBA {
 	fillCircle(canvas, n/2, n/2, px(float64(n)*0.335), accent)
 
 	white := color.RGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
-	// Shackle: the upper half of a ring, ending where the body starts.
 	fillArc(canvas, n/2, px(float64(n)*0.465), px(float64(n)*0.165), px(float64(n)*0.085), 180, 360, white)
-	// Body.
 	fillRoundRect(canvas, px(float64(n)*0.290), px(float64(n)*0.465),
 		px(float64(n)*0.710), px(float64(n)*0.735), px(float64(n)*0.055), white)
-	// Keyhole punched back through in the accent color.
 	fillCircle(canvas, n/2, px(float64(n)*0.585), px(float64(n)*0.052), accent)
 
 	return downscale(canvas, size)
@@ -69,9 +58,8 @@ func PNG(size int, accent color.RGBA) []byte {
 	return buf.Bytes()
 }
 
-// darken mixes a colour towards black. The ring of the seal is a darker tone of
-// the same colour rather than a second colour of its own, so the mark stays one
-// identity that is tinted by the session state.
+// darken mixes a colour towards black. The ring of the seal takes a darker tone
+// of the accent, so the mark stays one identity, tinted by the session state.
 func darken(c color.RGBA, amount float64) color.RGBA {
 	mix := func(v uint8) uint8 {
 		out := float64(v) * (1 - amount)

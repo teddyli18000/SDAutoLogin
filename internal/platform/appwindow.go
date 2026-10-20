@@ -9,14 +9,9 @@ import (
 	"sdautologin/internal/logging"
 )
 
-// OpenAppWindow opens target in a browser window that carries none of the
-// browser chrome, so the settings page looks like an application of its own
-// rather than a tab among everything else the user has open.
-//
-// Only the Chromium family can do that, and which member is installed cannot be
-// known, so the usual ones are tried in turn. When none is found, or the one found
-// refuses to start, the page goes to the default browser: a tab is worse than a
-// window of its own, but better than a program that appears to do nothing.
+// OpenAppWindow opens target in a browser window with none of the browser
+// chrome. Which Chromium family member is installed cannot be known, so the
+// usual ones are tried in turn, and the default browser is the fallback.
 func OpenAppWindow(target string) error {
 	browser := findAppBrowser(
 		appBrowserCandidates(runtime.GOOS, os.Getenv),
@@ -34,20 +29,26 @@ func OpenAppWindow(target string) error {
 		logging.Log.Warn("starting %s: %v, opening the settings page in the default browser", browser, err)
 		return OpenExternal(target)
 	}
-	// The browser outlives this program by design, but something still has to
-	// collect it when it ends: without this it stays a zombie for as long as the
-	// tray runs, which is a long time and can happen more than once.
+	// The browser outlives this program, but something still has to collect it
+	// when it ends: an uncollected child stays a zombie for as long as the tray
+	// runs, and this can happen more than once.
 	go func() { _ = cmd.Wait() }()
 	logging.Log.Info("settings page opened in %s, in a window of its own", browser)
 	return nil
 }
+
+// darwinLauncher is the program macOS starts a bundle with. It is named by its
+// path rather than left to PATH, since it is the one helper here that is always
+// in the same place and a name would let a directory earlier on PATH decide
+// which program runs.
+const darwinLauncher = "/usr/bin/open"
 
 // appWindowCommand is how a browser is asked for a window of its own. macOS
 // cannot start a browser bundle with that flag directly, so the launcher is
 // asked to start the bundle and to pass the flag on to it.
 func appWindowCommand(goos, browser, target string) (string, []string) {
 	if goos == "darwin" {
-		return "open", []string{"-na", browser, "--args", "--app=" + target}
+		return darwinLauncher, []string{"-na", browser, "--args", "--app=" + target}
 	}
 	return browser, []string{"--app=" + target}
 }
@@ -64,8 +65,8 @@ func appBrowserCandidates(goos string, getenv func(string) string) []string {
 				bases = append(bases, base)
 			}
 		}
-		// Chrome first, being the one installed on purpose; Edge next, being
-		// already on every Windows that has not been stripped of it.
+		// Chrome first, then Edge, which ships with every Windows that has
+		// not been stripped of it.
 		var out []string
 		for _, rel := range []string{
 			filepath.Join("Google", "Chrome", "Application", "chrome.exe"),
@@ -84,8 +85,8 @@ func appBrowserCandidates(goos string, getenv func(string) string) []string {
 			"/Applications/Brave Browser.app",
 		}
 	default:
-		// The names the distributions put on PATH, in the order they are worth
-		// trying. A name that is missing is skipped.
+		// The names the distributions put on PATH, in the order to try them.
+		// A name that is missing is skipped.
 		return []string{
 			"google-chrome",
 			"google-chrome-stable",

@@ -1,6 +1,5 @@
 // The Debian package: one .deb per Linux architecture, for the machines that
-// install their software with apt. Ubuntu and everything else that reads the
-// same format comes along with it.
+// install their software with apt, Ubuntu among them.
 
 package main
 
@@ -19,12 +18,11 @@ const (
 
 // taskDeb builds the Debian packages, one for each architecture, into
 // dist/packages/. The build without the tray is the one that goes in: the
-// package runs the program as a service, and a desktop has the archive from the
-// project page instead.
+// package runs the program as a service, and a desktop uses the archive.
 func taskDeb(root string) error {
 	for _, t := range targets() {
-		// Debian has dropped its MIPS ports, and a router runs OpenWrt rather
-		// than a distribution, so those builds are not packaged here.
+		// Debian has dropped its MIPS ports, and a router runs OpenWrt, so those
+		// builds are not packaged here.
 		if t.tags != notrayTag || t.goos != "linux" || t.goarch == "mips" || t.goarch == "mipsle" {
 			continue
 		}
@@ -40,9 +38,8 @@ func taskDeb(root string) error {
 	return writeChecksums(root)
 }
 
-// packageDeb writes the .deb of one target.
 func packageDeb(root string, t target) error {
-	version, err := appVersion(root)
+	rel, err := packageVersion(root)
 	if err != nil {
 		return err
 	}
@@ -58,14 +55,14 @@ func packageDeb(root string, t target) error {
 
 	data, err := debLayout(debFiles{
 		entries:  entries,
-		control:  debControl(version, arch, repo, entries),
+		control:  debControl(rel.deb(), arch, repo, entries),
 		scripts:  filepath.Join(root, debDir, "control"),
 		checksum: true,
 	})
 	if err != nil {
 		return err
 	}
-	return writePackage(root, fmt.Sprintf("%s_%s-%s_%s.deb", pkgName, version, pkgRelease, arch), data)
+	return writePackage(root, fmt.Sprintf("%s_%s-%s_%s.deb", pkgName, rel.deb(), pkgRelease, arch), data)
 }
 
 // debEntries is what the package installs: the program, the unit that runs it,
@@ -119,8 +116,8 @@ func debEntries(root string, t target, repo string) ([]pkgEntry, error) {
 }
 
 // debControl is the control file of a deb, the fields dpkg and the archive tools
-// show. There is no Depends line on purpose: the program is statically linked, so
-// it needs nothing from the system beyond the systemd the package is built for.
+// show. There is no Depends line: the program is statically linked, so it needs
+// nothing from the system beyond the systemd the package is built for.
 func debControl(version, arch, repo string, entries []pkgEntry) string {
 	return fmt.Sprintf(`Package: %s
 Version: %s-%s
@@ -142,16 +139,15 @@ Description: %s
 		pkgSection, repo, pkgSummary, pkgName, pkgName, pkgName)
 }
 
-// installedSize is what dpkg reports as the size the package takes up, in KiB,
-// which is the unit its control file uses.
+// installedSize is what dpkg reports as the size the package takes up. The
+// control file gives it in KiB.
 func installedSize(entries []pkgEntry) int64 {
 	return (installedBytes(entries) + 1023) / 1024
 }
 
 // debianCopyright renders the copyright file Debian wants from the licence the
-// repository carries. In that format the licence text is indented by one space,
-// which marks it as text rather than as the next field of the header, and an
-// empty line inside it is a single dot.
+// repository carries. The licence text is indented by one space, and an empty
+// line inside it is a single dot.
 func debianCopyright(repo, license string) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, `Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/

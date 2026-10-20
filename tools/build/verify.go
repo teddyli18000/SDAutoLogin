@@ -1,14 +1,8 @@
-// Checking what the packaging wrote, with the tool of every format: this is the
-// automated form of the checks the formats were written against. dpkg reads the deb
-// and the ipk, rpm verifies the four digests it carries, bsdtar reads the Arch
-// package and its listing, and the Windows archives are compared with the builds
-// they were made from and the manifests that point at them. Packing everything a
-// second time then says whether the result is the same bytes, so a release built
-// twice is the same release.
-//
-// A tool that is not installed is named and counted, rather than passed over: a run
-// that reports success without having looked at anything is worse than one that
-// names what it could not look at.
+// Checking what the packaging wrote, with the tool of every format: dpkg reads
+// the deb and the ipk, rpm verifies the four digests it carries, bsdtar reads
+// the Arch package and its listing, and the Windows archives are compared with
+// the builds they came from. A missing tool is named and counted, so a run
+// cannot report success without having looked.
 
 package main
 
@@ -16,21 +10,23 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"sdautologin/internal/update"
 )
 
-// wantSystemd lists what a package for a distribution that boots with systemd has
-// to hold, wantDeb the same for the Debian layout, which keeps the licence in the
-// copyright file instead, and wantOpenwrt what the router package has to hold.
-// They are written down here rather than taken from the code that packs them on
-// purpose: a check that asks the thing it checks what it wrote cannot catch a file
-// that was never written at all.
+// wantSystemd, wantDeb and wantOpenwrt list what each package layout has to
+// hold, Debian naming the copyright file where the others name the licence.
+// They are written out here, since a check that reads them back off the packing
+// code would catch nothing.
 var (
 	wantSystemd = []string{
 		"usr/bin/SDAutoLogin",
@@ -64,10 +60,28 @@ func taskVerify(root string) error {
 		return fmt.Errorf("%s: %w (the packages task writes them)", describe(root, dir), err)
 	}
 
-	notChecked := 0
+	// The list and its signature are read first, and together: the signature is
+	// over the bytes of SHA256SUMS, so a list written again after it was signed
+	// leaves a signature nothing accepts, and the release would carry the pair
+	// without anything having noticed. It runs before the per-format checks
+	// below, which a machine may not have the tools for: a pair that does not
+	// match is a fault of the release, not of the machine reading it. The key is
+	// a property of this build, so it is read once.
+	key, err := buildKey()
+	if err != nil {
+		return err
+	}
+	if err := verifyChecksumsSignature(dir, key); err != nil {
+		return err
+	}
+
+	notChecked := make([]string, 0, 1)
 	checked := 0
 	for _, e := range entries {
-		if e.IsDir() || e.Name() == checksumsFile {
+		// The checksum list and its signature are the two files here that are not
+		// packages. They are named, since a package this loop passed over would be
+		// one the release shipped without anything having read it back.
+		if e.IsDir() || e.Name() == checksumsFile || strings.HasSuffix(e.Name(), ".sig") {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
@@ -93,18 +107,83 @@ func taskVerify(root string) error {
 			return fmt.Errorf("%s: %w", e.Name(), err)
 		}
 		if missing != "" {
-			notChecked++
+			notChecked = append(notChecked, fmt.Sprintf("%s: %s", e.Name(), missing))
 			fmt.Printf("  --  %s: %s, not checked\n", e.Name(), missing)
 			continue
 		}
 		checked++
 	}
 
-	fmt.Printf("  %d package(s) checked, %d left unchecked\n", checked, notChecked)
+	fmt.Printf("  %d package(s) checked, %d left unchecked\n", checked, len(notChecked))
+	// A package of a format whose tool is missing is the failure this task exists
+	// for: the release would ship it without anything having read it back. A
+	// format this run packed nothing of needs no tool, so that stays quiet.
+	if len(notChecked) > 0 {
+		return fmt.Errorf("%d package(s) could not be read back: %s (install the tool of every format that was packed)",
+			len(notChecked), strings.Join(notChecked, "; "))
+	}
 	if checked == 0 {
 		return fmt.Errorf("no package could be checked: install the tools of the formats")
 	}
 	return verifyReproducible(root)
+}
+
+// buildKey is the key a release of this project is checked with.
+//
+// A build with no key at all is the state before keygen has run, and a build
+// whose key cannot be read is a build that is broken: the two are told apart
+// here, since only the second is a fault to report. A build with no key reaches
+// verifyChecksumsSignature as nil, which refuses a release that carries a
+// signature nothing in this build can judge.
+func buildKey() (ed25519.PublicKey, error) {
+	pub, err := update.PublicKeyBytes()
+	switch {
+	case err == nil:
+		return pub, nil
+	case errors.Is(err, update.ErrUnsigned):
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("%s holds a key that cannot be read: %w", publicKeySource, err)
+	}
+}
+
+// verifyChecksumsSignature checks the signature of SHA256SUMS.
+//
+// A signature is required: a package set nothing has signed is not a release
+// this project publishes, so a run that finds one fails rather than reporting
+// success. The release is signed before this is run, and the pair is read back
+// from the disk, so what is checked is what would be published.
+//
+// pub is the key the build carries, nil when it carries none. It is a parameter
+// rather than a call here, so the check can be tried with a key of the test's
+// own making.
+func verifyChecksumsSignature(dir string, pub ed25519.PublicKey) error {
+	sumsPath := filepath.Join(dir, checksumsFile)
+	sigPath := sumsPath + update.SignatureSuffix
+	sig, err := os.ReadFile(sigPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%s is not there: the packages are not signed, and nothing unsigned is published (run sign)",
+				filepath.Base(sigPath))
+		}
+		return err
+	}
+	sums, err := os.ReadFile(sumsPath)
+	if err != nil {
+		return fmt.Errorf("%s is there and %s is not, so the signature signs nothing: %w",
+			filepath.Base(sigPath), checksumsFile, err)
+	}
+	if pub == nil {
+		return fmt.Errorf("%s is signed and this build carries no key to check it with: it was signed by a build that has one",
+			filepath.Base(sigPath))
+	}
+	if err := update.VerifySignature(pub, sums, string(sig)); err != nil {
+		return fmt.Errorf("%s does not check out against %s (%v): the list was written again after it was signed, so run sign",
+			filepath.Base(sigPath), checksumsFile, err)
+	}
+	fmt.Printf("  ok  %s checks out against %s, key %s\n",
+		filepath.Base(sigPath), checksumsFile, update.KeyID(pub))
+	return nil
 }
 
 // verifyDpkg reads a package with dpkg-deb, which reads an ipk as well as a deb:
@@ -302,8 +381,8 @@ func checkMtree(dir string) (int, error) {
 
 // verifyWindows checks an archive of a Windows build: the program inside has to
 // be the build that was packed, and the manifests next to it have to carry the
-// digest of the file that was written, so that a manifest cannot go on pointing
-// at the build before this one.
+// digest of the file that was written, so a manifest cannot point at the build
+// before this one.
 func verifyWindows(root, path string) (string, error) {
 	version, err := appVersion(root)
 	if err != nil {
@@ -364,10 +443,10 @@ func verifyWindows(root, path string) (string, error) {
 	return "", nil
 }
 
-// verifyManifests checks that the two manifests that name a Windows archive carry
-// the digest of the archive that is there now. A manifest that is not there at
-// all is an error rather than something to pass over: a check that skips what it
-// cannot find would report success for a release that never wrote one.
+// verifyManifests checks that the two manifests naming a Windows archive carry
+// the digest of the archive that is there now. A missing manifest is an error,
+// since a check that skips what it cannot find reports success for a release
+// that wrote none.
 func verifyManifests(root, archive, digest, arch string) error {
 	scoop := filepath.Join(root, distDir, pkgDir, manifestDir, "scoop", pkgName+".json")
 	data, err := os.ReadFile(scoop)
@@ -428,8 +507,7 @@ func verifyReproducible(root string) error {
 	}
 
 	// The set first: a run that left a file behind, or that packed on a machine
-	// where another compressor was installed, is told which file it is rather
-	// than that some digest somewhere changed.
+	// where another compressor was installed, is told which file it is.
 	for name := range after {
 		if _, ok := before[name]; !ok {
 			return fmt.Errorf("%s was not there before, and is now", name)
@@ -448,7 +526,11 @@ func verifyReproducible(root string) error {
 	return nil
 }
 
-// digestDir is the digest of every file of a directory, by name.
+// digestDir is the digest of every file of a directory, by name. Subdirectories
+// are left out, and one of them is there: dist/packages/manifests holds the
+// Scoop and winget manifests. They are written from the archives rather than
+// shipped beside them — the publish step walks the files of dist/packages and
+// nothing under it — so what is compared here is what a release carries.
 func digestDir(dir string) (map[string]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

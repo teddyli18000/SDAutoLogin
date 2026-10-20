@@ -10,10 +10,19 @@
 #   uci commit sdautologin
 #   /etc/init.d/sdautologin restart
 #
-# An option that is left empty is not passed on, and then whatever config.json
-# holds decides. This allows configuring the account from the settings page
-# instead: leave the account options here empty, turn the page on with the
-# settings option below, and the page writes config.json on the overlay.
+# The password can also be kept in a file instead, which is the form to use when
+# the account is written from a script or shared with another program:
+#
+#   printf '%s\n' SECRET > /etc/sdautologin/password
+#   chmod 600 /etc/sdautologin/password
+#   uci set sdautologin.main.password_file=/etc/sdautologin/password
+#   uci commit sdautologin
+#   /etc/init.d/sdautologin restart
+#
+# An option that is left empty is not passed on, and whatever config.json holds
+# decides. The account can also be configured from the settings page: leave the
+# account options here empty, turn the page on with the settings option below,
+# and the page writes config.json on the overlay.
 
 START=95
 
@@ -28,26 +37,38 @@ HOME_DIR=/etc/sdautologin
 start_service() {
 	config_load sdautologin
 
-	local username password isp settings log_file
+	local username password password_file isp settings log_file quiet
 	config_get username main username
 	config_get password main password
+	config_get password_file main password_file
 	config_get isp main isp
 	config_get settings main settings
 	config_get log_file main log_file
+	config_get quiet main quiet
 
 	set -- run "--home=$HOME_DIR"
 	[ -n "$username" ] && set -- "$@" "--username=$username"
-	[ -n "$password" ] && set -- "$@" "--password=$password"
+	# The file wins when both are set: a password on the command line is in the
+	# process list, which every user on the router can read, and the program's own
+	# help points at the file for that reason.
+	if [ -n "$password_file" ]; then
+		set -- "$@" "--password-file=$password_file"
+	elif [ -n "$password" ]; then
+		set -- "$@" "--password=$password"
+	fi
 	[ -n "$isp" ] && set -- "$@" "--isp=$isp"
 	[ -n "$settings" ] && set -- "$@" "--settings=$settings"
 	# The log file is off by default here, since /etc is on the flash and the
-	# same lines already reach the system log, which is in memory.
+	# same lines already reach the system log in memory.
 	[ "$log_file" = "0" ] && set -- "$@" "--no-log"
+	# The console goes into the system log, and logd keeps a small ring: the
+	# per check detail would be most of what it holds.
+	[ "$quiet" != "0" ] && set -- "$@" "--quiet"
 
 	procd_open_instance
 	procd_set_param command "$PROG" "$@"
-	# Restart after a crash, but give up rather than spinning for ever behind a
-	# wrong account: five restarts, no more than one every five seconds.
+	# Restart after a crash, but stop retrying behind a wrong account: five
+	# restarts, no more than one every five seconds.
 	procd_set_param respawn 3600 5 5
 	procd_set_param stdout 1
 	procd_set_param stderr 1

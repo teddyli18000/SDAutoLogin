@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"os"
 	"sync"
 
 	"sdautologin/internal/config"
@@ -8,6 +10,7 @@ import (
 	"sdautologin/internal/logging"
 	"sdautologin/internal/portal"
 	"sdautologin/internal/service"
+	"sdautologin/internal/update"
 )
 
 // AppState owns the mutable configuration and the running service, so the
@@ -22,13 +25,67 @@ type AppState struct {
 
 // New returns the shared state around an already loaded configuration.
 func New(cfg *config.Config) *AppState {
-	// The file the passwords are in is looked at here rather than on every save,
-	// since what can be loose about it is not something this program just wrote:
-	// it is a file an older version made, or a copy somebody moved around.
+	// The password file was read and checked while the configuration was loaded,
+	// and this reports what was loose about the files themselves: what is loose
+	// did not come from this program. It is an older version's file, or a copy
+	// somebody moved around.
 	if report := cfg.Protect(); report != "" {
 		logging.Log.Warn("%s", report)
 	}
-	return &AppState{cfg: cfg, svc: service.NewService(cfg)}
+	// What reading the password file had to say, reported once for the same
+	// reason: it is a fact about the deployment, not about a check.
+	if notice := cfg.PasswordNotice(); notice != "" {
+		logging.Log.Warn("%s", notice)
+	}
+	return &AppState{cfg: cfg, svc: newService(cfg)}
+}
+
+// newService is the check loop with this copy's look for a newer release: the
+// repository address, the version this build carries and the program file to
+// replace are all known here, and internal/service cannot import this package.
+func newService(cfg *config.Config) *service.Service {
+	svc := service.NewService(cfg)
+	svc.SetUpdater(newUpdater())
+	return svc
+}
+
+// updater is what internal/service asks for a newer release: the forge this
+// project is published on, the version this build is, and the program file a
+// release would go over.
+type updater struct {
+	client  *update.Client
+	current update.Version
+	target  update.Target
+}
+
+// newUpdater builds one, or answers nil when this build cannot say what version
+// it is: every release would look newer than a version that cannot be compared,
+// so the forge is left alone and the reason is logged once.
+func newUpdater() service.Updater {
+	current, err := update.ParseVersion(Version)
+	if err != nil {
+		logging.Log.Warn("not looking for a newer release: %v", err)
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		logging.Log.Warn("not looking for a newer release, the program file is unknown: %v",
+			err)
+		return nil
+	}
+	return &updater{
+		client:  UpdateClient(),
+		current: current,
+		target:  update.Native(exe),
+	}
+}
+
+func (u *updater) Check(ctx context.Context, ch update.Channel) (update.Check, error) {
+	return u.client.Check(ctx, ch, u.current, u.target)
+}
+
+func (u *updater) Install(ctx context.Context, rel update.Release) (string, error) {
+	return u.client.Install(ctx, rel, u.target)
 }
 
 func (a *AppState) Config() *config.Config {
@@ -37,7 +94,6 @@ func (a *AppState) Config() *config.Config {
 	return a.cfg
 }
 
-// Snapshot returns the latest status shown to the user.
 func (a *AppState) Snapshot() service.Snapshot {
 	a.mu.Lock()
 	svc := a.svc
@@ -45,7 +101,7 @@ func (a *AppState) Snapshot() service.Snapshot {
 	return svc.Snapshot()
 }
 
-// Start begins the periodic check, once.
+// Start starts the check loop. Later calls do nothing.
 func (a *AppState) Start() {
 	a.mu.Lock()
 	svc, first := a.svc, !a.started
@@ -68,6 +124,12 @@ func (a *AppState) Trigger() {
 	svc := a.svc
 	a.mu.Unlock()
 	svc.Trigger()
+}
+
+// CheckForUpdateNow asks for a newer release at once, at the reader's request
+// from the settings page.
+func (a *AppState) CheckForUpdateNow() bool {
+	return a.svc.CheckForUpdateNow()
 }
 
 func (a *AppState) SetListener(f func(service.Snapshot)) {
@@ -96,8 +158,9 @@ func (a *AppState) Update(next *config.Config) error {
 	if err := next.Save(); err != nil {
 		return err
 	}
-	// A save does not fail over the file's access list, so what could not be put
-	// right about it is said here instead.
+	// The save has already put the files' permissions right, and fails when it
+	// cannot: this reports what is still loose about the ones that were already
+	// there, which a save cannot fail over.
 	if report := next.Protect(); report != "" {
 		logging.Log.Warn("%s", report)
 	}
@@ -111,8 +174,10 @@ func (a *AppState) Update(next *config.Config) error {
 	a.mu.Unlock()
 
 	if started {
+		// Restart ticks as soon as its loop starts, so asking for a check as well
+		// would run two of them back to back and submit a failing account twice
+		// inside a second.
 		svc.Restart(next)
-		svc.Trigger()
 	}
 	return nil
 }
@@ -127,16 +192,13 @@ type LoginTest struct {
 	Result  portal.LoginResult
 	After   portal.Status
 	// AlreadyOnline says the portal reported this client as signed in before
-	// anything was submitted, which is the one case where nothing is.
+	// anything was submitted. Nothing is submitted in that case.
 	AlreadyOnline bool
 }
 
-// TestLogin submits one attempt of the login list. It reports what the portal
-// replied and never logs the session out.
-//
-// A client the portal already reports as signed in is left alone: the portal
-// allows one session per address, so a second login on top of it comes back as
-// a refusal that blames the account, which says nothing about the credentials.
+// TestLogin submits one attempt of the login list and reports the reply, without
+// logging the session out. A client already reported as signed in is left alone:
+// the portal keeps one session per address, so a second login is refused.
 func (a *AppState) TestLogin(attempt config.Attempt) LoginTest {
 	cfg := a.Config()
 	client := portal.NewClient(cfg)
@@ -152,22 +214,16 @@ func (a *AppState) TestLogin(attempt config.Attempt) LoginTest {
 	}
 }
 
-// SwitchService signs in again with one service type of the entry the session is
-// on while it is up on another, which is what the settings page's button asks
-// for: the first service type by default, or another one the reader picks.
-//
-// The portal keeps one session per client address, so this replaces the session
-// or is refused, and nothing is logged out on purpose. The second return value
-// says there was nothing to do: a session that is down, one already on the
-// service type asked for, and a service type the entry does not list, which the
-// page reports instead of a login reply that was never asked for.
+// SwitchService signs the session in again with one service type of the entry it
+// is on while it is up on another, and never logs the session out. The page's
+// button asks for the first service type, or another one the reader picks.
 func (a *AppState) SwitchService(isp string) (LoginTest, bool) {
 	cfg := a.Config()
 	client := portal.NewClient(cfg)
 	before := client.QueryStatus()
 	if !before.Online {
-		// Nothing to move: the session is down, and the next check signs in on
-		// its own - in the order of the list, which is the first service type.
+		// The session is down, so there is nothing to move: the next check signs
+		// in on its own, in the order of the list.
 		logging.Log.Info("nothing to sign in again as %s: the session is down (client ip %q, %s), the next check signs in on its own",
 			config.OperatorName(isp), before.ClientIP, before.Message)
 		return LoginTest{Before: before, After: before}, false
@@ -175,8 +231,9 @@ func (a *AppState) SwitchService(isp string) (LoginTest, bool) {
 	index, used := cfg.Match(before.Account)
 	attempt, ok := cfg.SwitchTo(before.Account, isp)
 	if !ok {
-		// The three reasons look the same on the page, which is why each one is
-		// named here rather than left as "it did not move".
+		// There is nothing to move, and the log names which case it is: the portal
+		// account matches no entry of the login list, the session is on that
+		// service type already, or the entry does not list it.
 		switch {
 		case index < 0:
 			logging.Log.Info("nothing to sign in again as %s: the portal reports the session on %q, which names no entry of the login list",

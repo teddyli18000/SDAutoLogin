@@ -11,3 +11,21 @@ config.json
 *.exe
 Dockerfile
 .dockerignore
+
+# Nothing that is a key goes into an image, whatever it is called. The context
+# is copied into a layer, and a layer is readable by anyone who can pull the
+# image or read the build cache of the machine that made it: a signing key that
+# reaches one signs releases every installed copy accepts. The COPY lines in
+# the Dockerfile name what the build reads, so this is the second line of
+# defence rather than the only one.
+#
+# The patterns carry "**/" and are not bare names, which matters: a pattern
+# without a slash is matched against the name at the top of the context only,
+# so "*.pem" left a key in internal/ sitting in the layer that copies internal/.
+# Measured, not assumed: with the bare patterns a decoy internal/leaked.pem was
+# present in the build stage, and with these it is not.
+signing.key
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx

@@ -1,69 +1,45 @@
-# Continuous integration, run by Gitea Actions.
-#
-# The two jobs answer the two questions a change has to answer: does the program
-# still build and pass its tests, and do the packages still come out right. The
-# second one installs the tools of the formats and then runs the same "packages"
-# and "verify" tasks a release is cut with, so what is checked here is what would
-# be published.
-#
-# Both jobs run inside the Go image rather than on whatever the runner happens to
-# have, because the toolchain version is part of what is being checked and the
-# image is a Debian with git and dpkg in it already.
-#
-# Every step here is a command of that image. The familiar actions/checkout is
-# not one of them: it is a JavaScript action and needs node in the container,
-# which this image has not, so the job used to fail before it checked anything.
-# The repository is fetched with git instead, from this instance rather than from
-# github.com, so nothing outside the instance is needed to run this.
+# Continuous integration, run by Gitea Actions. Both jobs run in the golang
+# image, which has git and dpkg but no node, so the checkout is done with git.
 name: CI
 
-# The token of the run is allowed to write to the repository because the last
-# step of the packaging job writes a release. That step runs when a tag was
-# pushed and never otherwise, and everything before it only reads.
-permissions:
-  contents: write
+# Neither job names the permissions of the run at the top, since the two need
+# different ones: the packaging job writes a release and the wiki, the test job
+# only reads. Each job declares its own below, so code that runs in the test job
+# — a test, a vendored dependency, a tool it downloads — holds a token that
+# cannot write to the repository.
 
-# A tag is what this runs on, and nothing else. The two jobs answer the question a
-# release has to answer, and that question is worth asking exactly where it is
-# answered: what is checked here is what is about to be published. Every push
-# built the program, packed every format and verified them a second time, which is
-# a lot of the runner's time for a change that is often a line of prose. A branch
-# is checked from the checkout instead, with the same tasks:
-# go run ./tools/build test, packages, verify.
+# Runs on tags only. A branch is checked from the checkout instead, with the
+# same tasks: go run ./tools/build test, packages, verify.
 on:
   push:
     tags: ["v*"]
+  # A run started by hand builds, checks and signs, and stops there: the three
+  # steps that publish and the one that writes the wiki keep the tag condition,
+  # so a manual run cannot produce a release. It is how the signing key is tried
+  # without spending a tag on finding out that it is wrong.
+  workflow_dispatch:
 
-# The address the jobs fetch from and publish to. It is named here rather than
-# taken from github.server_url, which is the address the instance gives itself:
-# that is the name it answers to inside its own deployment, one no container of
-# a job can resolve.
+# The address the jobs fetch from and publish to. github.server_url gives the
+# instance's internal name, which no job container can resolve.
 env:
   INSTANCE: https://git.zqlhub.com
-  # Where the job installs the tools of the formats from. The image's own
-  # sources are Debian's, which answered from far away here: four small packages
-  # took minutes. The runner is a machine of the instance's own, so this names
-  # the mirror it reaches over the internal network, which answers at once and
-  # is not billed as traffic. The step puts the image's own sources back when
-  # this one does not answer, so a runner outside that network is neither slower
-  # nor broken there.
+  # Where the job installs the tools of the formats from: the mirror the runner
+  # reaches on the internal network; the image's own sources are the fallback.
   DEBIAN_MIRROR: mirrors.tencentyun.com
 
 jobs:
   test:
     runs-on: ubuntu-latest
     container: golang:1.26
+    permissions:
+      contents: read
     steps:
-      # The tags are fetched as well as the history, since the version a release
-      # is named after is read from the tag in front of the checkout, and the
-      # test that holds the sources to that tag has nothing to compare against
-      # without it.
+      # The tags are fetched as well as the history: the version a release is
+      # named after is read from the tag in front of the checkout.
       - name: check out the sources
         env:
           # The token of the run goes by one of these names, depending on the
-          # version and how the instance provides it. The ones that are not set
-          # expand to nothing, and no token at all is reported here rather than
-          # left to a fetch that cannot read the repository.
+          # version and the instance; the others expand to nothing.
           TOKEN_CONTEXT: ${{ github.token }}
           TOKEN_SECRET: ${{ secrets.GITHUB_TOKEN }}
           TOKEN_GITEA: ${{ secrets.GITEA_TOKEN }}
@@ -79,11 +55,28 @@ jobs:
 
           host=${INSTANCE#http://}
           host=${host#https://}
-          url="https://oauth2:${token}@${host}/${REPO}.git"
+
+          # The token is handed to git through the environment, scoped to this
+          # instance: nothing is written into .git/config for anything that later
+          # prints or packs the working directory to carry away, and the value is
+          # not on a command line, where every user of this machine can read it
+          # out of /proc/*/cmdline. Basic with oauth2:<token> is what the remote
+          # URL carried before this, so the instance is sent exactly what it was
+          # sent yesterday.
+          #
+          # A GIT_ASKPASS program was tried first and does not work here: with the
+          # user name in the URL, git does not ask it for the password and sends
+          # "oauth2:" with an empty one. This needs git 2.31 for the environment
+          # configuration, which the image the job runs in has.
+          basic=$(printf 'oauth2:%s' "$token" | base64 | tr -d '\n')
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${INSTANCE}/.extraHeader"
+          export GIT_CONFIG_VALUE_0="Authorization: Basic $basic"
+          url="https://oauth2@${host}/${REPO}.git"
 
           # The runner may or may not have left a checkout in the working
-          # directory, so init is run either way, which is harmless, and the
-          # remote is added or pointed at the repository again.
+          # directory, so init is run either way and the remote is added or
+          # pointed at the repository again.
           git init -q .
           git remote add origin "$url" 2>/dev/null || git remote set-url origin "$url"
           git fetch --force --tags origin "$REF"
@@ -106,12 +99,14 @@ jobs:
   packages:
     runs-on: ubuntu-latest
     container: golang:1.26
+    # Only this job writes, and only the steps that publish and update the wiki
+    # are reached on a tag. The signing key of this job is a repository secret
+    # and never a token of the run.
+    permissions:
+      contents: write
     steps:
-      # The same checkout as the other job, for the same reason: every package
-      # and the program inside it are named after the tag this checkout carries,
-      # so the tags have to be here. Without them the build would fall back on
-      # the version in the sources, and a release would be attached under a name
-      # the manifests do not point at.
+      # The tags have to be here: every package and the program inside it are
+      # named after the tag, and without it the build falls back on the sources.
       - name: check out the sources
         env:
           TOKEN_CONTEXT: ${{ github.token }}
@@ -129,26 +124,32 @@ jobs:
 
           host=${INSTANCE#http://}
           host=${host#https://}
-          url="https://oauth2:${token}@${host}/${REPO}.git"
+
+          # The token is handed to git through the environment, scoped to this
+          # instance: nothing is written into .git/config for anything that later
+          # prints or packs the working directory to carry away, and the value is
+          # not on a command line, where every user of this machine can read it
+          # out of /proc/*/cmdline. Basic with oauth2:<token> is what the remote
+          # URL carried before this, so the instance is sent exactly what it was
+          # sent yesterday.
+          #
+          # A GIT_ASKPASS program was tried first and does not work here: with the
+          # user name in the URL, git does not ask it for the password and sends
+          # "oauth2:" with an empty one. This needs git 2.31 for the environment
+          # configuration, which the image the job runs in has.
+          basic=$(printf 'oauth2:%s' "$token" | base64 | tr -d '\n')
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${INSTANCE}/.extraHeader"
+          export GIT_CONFIG_VALUE_0="Authorization: Basic $basic"
+          url="https://oauth2@${host}/${REPO}.git"
 
           git init -q .
           git remote add origin "$url" 2>/dev/null || git remote set-url origin "$url"
           git fetch --force --tags origin "$REF"
           git checkout -q -f FETCH_HEAD
 
-      # What the packaging and the checking need beyond the Go toolchain: an
-      # rpm, a bsdtar to read the Arch package with, and one of the two
-      # compressors that package wants, which the standard library cannot write.
-      # dpkg-deb, which reads the deb and the ipk, is in the base image.
-      #
-      # The sources of the image are pointed at the mirror by the function in
-      # .gitea/scripts/apt-mirror.sh, which is sourced because a function
-      # defined in one step is gone by the next, and which leaves the sources
-      # where they are when the mirror cannot be reached. What is asked of
-      # apt-get below is the other way this can go wrong: a mirror that answers
-      # but carries no such suite, which is an error rather than a warning.
-      # Either way the image's own sources end up in place, so a runner outside
-      # the network of the mirror is neither slower nor broken.
+      # The install sources come from .gitea/scripts/apt-mirror.sh, sourced
+      # because a function defined in one step is gone by the next.
       - name: install the tools of the formats
         run: |
           set -eu
@@ -169,44 +170,53 @@ jobs:
       - name: pack every format
         run: go run ./tools/build packages
 
-      # Every package is read back with the tool that installs it, and everything
-      # is then packed a second time to see whether a release built twice is the
-      # same release.
+      # The checksum list is signed, so a reader can tell a release this project
+      # published from anything else that arrives over the network. The program
+      # refuses to install a release it cannot check, so a tag whose key is
+      # missing or wrong fails here rather than going out as one nobody can
+      # update from. "go run ./tools/build keygen" makes a key and writes the
+      # public half into the program; the private half is kept out of the
+      # checkout and its contents go into the repository secret named below,
+      # which is the only place the signing step reads it from: a key file in
+      # the working tree is not read, and must not be committed.
+      #
+      # This is the last step that touches dist/packages, and it signs the list
+      # as it stands: nothing may be packed after it.
+      - name: sign the checksum list
+        # A tag signs, and so does a run started by hand on the default branch:
+        # that is how the key is tried without spending a tag. A run started by
+        # hand on any other ref stops here rather than running that ref's code
+        # with the signing key in its environment.
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        env:
+          SDAUTOLOGIN_SIGNING_KEY: ${{ secrets.SDAUTOLOGIN_SIGNING_KEY }}
+        run: go run ./tools/build sign
+
+      # Every package is read back with the tool that installs it, the pair the
+      # release carries is read back out of dist/packages and checked, and
+      # everything is then packed a second time to see whether a release built
+      # twice is the same release.
+      #
+      # This runs after signing, and the order is the point: the check compares
+      # the signature with the list next to it on the disk, so it checks
+      # something only when a signature is there. Run before signing it found
+      # none and passed, which is a gate that reports success for a release
+      # nobody signed. Nothing is packed between this and the publish step, and a
+      # repack that came out different fails here.
       - name: check every package
         run: go run ./tools/build verify
 
-      # What was packed is not uploaded anywhere: that would take another
-      # JavaScript action, which this image cannot run either. The packages are
-      # kept when they are published, which is what matters, and a run that stops
-      # before that leaves them in its working directory.
+      # Nothing is uploaded as an artifact: the publish step reads the packages
+      # from the working directory, where a run that stops leaves them.
+
 
       - name: the tools to publish with
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           apt-get install -y --no-install-recommends curl jq
 
-      # A tag makes a release. The version of the release is read from that tag,
-      # so the packages and the manifests that point at
-      # <address>/releases/download/v<version>/<file> agree by construction, and
-      # what is left to check is that the version still comes from the tag at all:
-      # a derivation that quietly fell back on the sources would attach files
-      # under names the manifests do not name. Whether the sources still carry the
-      # version of the tag is a test in the other job.
-      #
-      # This instance keeps two attachments of the same name rather than replacing
-      # the first, so a tag that is pushed twice - a release cut again after the
-      # sources were fixed, a job re-run after a failure - used to leave the
-      # release with two of every file. Each name is therefore looked for among
-      # the attachments the release already carries and deleted before the upload,
-      # which makes this step leave one of each however many times it runs. It is
-      # not skipped when the release is already there, since a run that stopped
-      # halfway must be able to finish, and a tag that was moved needs what it
-      # published replaced rather than kept.
-      #
-      # Something already attached is the one sign that this tag has been
-      # published before, and it is said out loud: the usual reason is a tag that
-      # was moved and pushed again, which is a release wearing the version of the
-      # one before it.
+      # A tag makes a release, with the version read from the tag. This instance
+      # keeps both attachments when a name repeats, so each name goes first.
       - name: publish the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -218,16 +228,33 @@ jobs:
         run: |
           set -eu
           version=${TAG#v}
-          if [ ! -f "dist/packages/sdautologin_${version}-1_amd64.deb" ]; then
-            echo "there is no package for $version:"
-            echo "the packages are named after the tag they were built at, and this build did not name this one"
+
+          # The release is signed or it is not published. The signing step fails
+          # the run when the secret holds no usable key, and this is what keeps a
+          # release from going out unsigned if that step is ever skipped or moved
+          # after this one: nothing installs a release it cannot check, so an
+          # unsigned one is a release that reaches nobody who is already running
+          # the program. The signature is not checked here — verify runs before it
+          # is made, and packing again after signing is what invalidates it.
+          if [ ! -f dist/packages/SHA256SUMS.sig ]; then
+            echo "dist/packages/SHA256SUMS.sig is not there: $TAG would be published unsigned."
+            echo "the sign step has to run, and to run before this one"
             exit 1
           fi
 
-          # What the release says is the section CHANGELOG.md holds for this tag,
-          # read out of it rather than written down a second time. A tag with no
-          # section is refused: a release whose notes are empty is worse than a
-          # run that stops and says what to add.
+          # The deb is not named after the tag: each format spells a version
+          # that comes before the release its own way, and the deb spells it
+          # with a tilde. The name is asked of the build tool rather than worked
+          # out again here, or the two would drift apart at the next change.
+          debversion=$(go run ./tools/build version | sed -n 's/^deb=//p')
+          if [ ! -f "dist/packages/sdautologin_${debversion}-1_amd64.deb" ]; then
+            echo "there is no package for $version:"
+            echo "this build packaged $debversion, or nothing at all"
+            exit 1
+          fi
+
+          # The body of the release is the section CHANGELOG.md holds for this
+          # tag. A tag with no section is refused.
           notes=$(awk -v want="$TAG" '
             $1 == "##" {
               if (seen) exit
@@ -247,20 +274,34 @@ jobs:
             echo "this run has no token to write a release with"
             exit 1
           fi
-          auth="Authorization: token $token"
+
+          # The header goes into a file only this user can read, and curl is told
+          # to read it from there: a token on a command line is readable by every
+          # user of this machine in /proc/*/cmdline.
+          header=$(mktemp)
+          trap 'rm -f "$header"' EXIT
+          chmod 600 "$header"
+          printf 'Authorization: token %s\n' "$token" > "$header"
+          auth="@$header"
           api="$INSTANCE/api/v1/repos/$REPO/releases"
 
-          # The release of this tag, or a new one. Pushing a tag twice, or
-          # creating the release by hand first, must not fail the run. The answer
-          # is kept whole rather than read for its id alone, since the attachments
-          # it already carries are read out of it below.
+          # A tag with anything after the version is a pre-release, and it is
+          # published as one: the same packages and the same notes, marked so
+          # that nobody installs it expecting the release it leads to.
+          case "$version" in
+            *-*) prerelease=true ;;
+            *)   prerelease=false ;;
+          esac
+
+          # The release of this tag, or a new one: pushing a tag twice, or
+          # creating the release by hand first, must not fail the run.
           release=$(curl -sS -H "$auth" "$api/tags/$TAG")
           id=$(printf '%s' "$release" | jq -r '.id // empty')
           if [ -z "$id" ]; then
             release=$(curl -sS -X POST \
               -H "$auth" -H "Content-Type: application/json" \
-              -d "$(jq -n --arg tag "$TAG" --arg body "$notes" \
-                    '{tag_name: $tag, name: $tag, draft: false, prerelease: false,
+              -d "$(jq -n --arg tag "$TAG" --arg body "$notes" --argjson pre "$prerelease" \
+                    '{tag_name: $tag, name: $tag, draft: false, prerelease: $pre,
                       body: $body}')" \
               "$api")
             id=$(printf '%s' "$release" | jq -r '.id // empty')
@@ -268,9 +309,12 @@ jobs:
             # A release that is already there keeps the id it has and is told what
             # the changelog says now: a tag pushed again after its notes were
             # corrected would otherwise go on showing the text of the first run.
+            # The flag goes with it, so a release made by hand before the run is
+            # marked the way the tag says.
             curl -sS -X PATCH \
               -H "$auth" -H "Content-Type: application/json" \
-              -d "$(jq -n --arg body "$notes" '{body: $body}')" \
+              -d "$(jq -n --arg body "$notes" --argjson pre "$prerelease" \
+                    '{body: $body, prerelease: $pre}')" \
               "$api/$id" >/dev/null
           fi
           if [ -z "$id" ]; then
@@ -279,8 +323,8 @@ jobs:
             exit 1
           fi
 
-          # Said before anything is replaced, because it is the only sign of the
-          # thing that used to leave two of every file behind.
+          # Reported before anything is replaced: an attachment already there
+          # means this tag has been published before.
           already=$(printf '%s' "$release" | jq -r '.assets | length')
           if [ "$already" != "0" ]; then
             echo "$TAG has been published before: the release already carries $already attachment(s)"
@@ -296,10 +340,8 @@ jobs:
             [ -f "$file" ] || continue
             name=$(basename "$file")
 
-            # Every attachment already carrying this name goes. There is normally
-            # one, when a tag has been published more than once; a release that
-            # was doubled before this step replaced rather than deleted has two,
-            # and both of them go.
+            # Every attachment already carrying this name goes. There is
+            # normally one; a release may carry two, and both of them go.
             for old in $(printf '%s' "$release" | jq -r --arg name "$name" '.assets[] | select(.name == $name) | .id'); do
               code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "$auth" "$api/$id/assets/$old")
               case "$code" in
@@ -314,11 +356,9 @@ jobs:
           done
           echo "attached $attached file(s), replacing $replaced earlier attachment(s) of the same names"
 
-      # The wiki is a repository of its own, so its pages are written from here:
-      # the manual and the changelog are the files the repository already holds,
-      # and the landing page and the sidebar come from docs/wiki/. It is best
-      # effort - a wiki that cannot be written to is not a reason to fail a release
-      # that has been published already - but it says what happened either way.
+      # The wiki is a repository of its own, written from here: the manual and
+      # the changelog come from the files the repository holds, the rest from
+      # docs/wiki/. A wiki that cannot be written to does not fail the run.
       - name: update the wiki
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -330,20 +370,48 @@ jobs:
         run: |
           set -eu
           token="${TOKEN_CONTEXT:-${TOKEN_SECRET:-${TOKEN_GITEA:-}}}"
+          if [ -z "$token" ]; then
+            echo "this run has no token to write the wiki with"
+            exit 1
+          fi
           host=${INSTANCE#http://}
           host=${host#https://}
-          url="https://oauth2:${token}@${host}/${REPO}.wiki.git"
 
-          if ! git clone --quiet "$url" /tmp/wiki; then
-            echo "the wiki could not be cloned: is it enabled, and may this run write to it?"
-            exit 0
+          # The same two rules as the checkout above: the token is not in the
+          # remote and not on a command line, and the clone goes into a directory
+          # this run made rather than a fixed path in /tmp, which anything else on
+          # the machine can have prepared first.
+          header=$(mktemp)
+          work=$(mktemp -d)
+          trap 'cd /; rm -f "$header"; rm -rf "$work"' EXIT
+          chmod 600 "$header"
+          basic=$(printf 'oauth2:%s' "$token" | base64 | tr -d '\n')
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${INSTANCE}/.extraHeader"
+          export GIT_CONFIG_VALUE_0="Authorization: Basic $basic"
+          printf 'Authorization: token %s\n' "$token" > "$header"
+          url="https://oauth2@${host}/${REPO}.wiki.git"
+          wiki_api="$INSTANCE/api/v1/repos/$REPO/wiki"
+
+          # A wiki nobody has written to yet has no repository behind it: Gitea
+          # makes one when the first page is saved, and that page is saved here.
+          if ! git clone --quiet "$url" "$work/wiki"; then
+            echo "the wiki has no repository yet, saving its first page"
+            curl -sS -o /dev/null \
+              -X POST -H "@$header" -H "Content-Type: application/json" \
+              -d '{"title":"Home","content":"The pages of this wiki are written from the repository."}' \
+              "$wiki_api/new"
+            if ! git clone --quiet "$url" "$work/wiki"; then
+              echo "the wiki could not be cloned with a first page either: does the token of this run write it?"
+              exit 0
+            fi
           fi
 
-          sh ./.gitea/scripts/wiki-pages.sh . /tmp/wiki
+          sh ./.gitea/scripts/wiki-pages.sh . "$work/wiki"
 
-          cd /tmp/wiki
-          # A wiki nobody has written to yet comes back with no branch at all, and
-          # the push is what creates it; one that has been written to is on the
+          cd "$work/wiki"
+          # A wiki nobody has written to yet comes back with no branch, and the
+          # push is what creates it; one that has been written to is on the
           # branch Gitea made for it.
           branch=$(git symbolic-ref --short -q HEAD || echo master)
           git add -A

@@ -1,10 +1,6 @@
-// The packaging half of the task runner: the formats this repository publishes,
-// and the pieces they share.
-//
-// An ipk and a deb are the same container, a plain ar archive of a version marker
-// and two tar archives, so that layout is written once here and the two formats
-// only describe what goes into it. The rpm and the pacman formats live in their
-// own files next to this one.
+// The packaging half of the task runner. An ipk and a deb are the same
+// container, a plain ar archive of a version marker and two tar archives: that
+// layout is written once here, and the two formats describe what goes into it.
 
 package main
 
@@ -24,6 +20,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"sdautologin/internal/update"
 )
 
 const (
@@ -43,20 +41,19 @@ const (
 	// pkgSummary is the one line every format shows as the description. Each
 	// format adds its own long description below it.
 	pkgSummary = "Campus network auto login"
-	// pkgCopyright is who the licence belongs to, which the Debian copyright
-	// file has to name.
+	// pkgCopyright is who the licence belongs to; the Debian copyright file has to
+	// name it.
 	pkgCopyright = "2026 Zhiqiang Lan"
 	// pkgSection is how Debian and OpenWrt classify the package.
 	pkgSection = "net"
 	// unitFile is the systemd unit every package installs, and the same file the
 	// README tells an administrator to copy by hand, so the two cannot drift.
 	unitFile = "packaging/systemd/system/sdautologin.service"
-	// sysusersFile declares the system user the service runs as, so that no
-	// maintainer script has to run adduser. systemd reads the directory it is
-	// installed into, and there is nothing distribution specific about the file.
+	// sysusersFile declares the system user the service runs as, so no maintainer
+	// script has to run adduser. systemd reads the directory it is installed into.
 	sysusersFile = "packaging/systemd/sysusers.d/" + pkgName + ".conf"
-	// unitTarget and sysusersConf are where the two go on the target, which is
-	// the same place for the Debian and the rpm family.
+	// unitTarget and sysusersConf are where the two go on the target, the same
+	// place for the Debian and the rpm family.
 	unitTarget   = "/usr/lib/systemd/system/" + pkgName + ".service"
 	sysusersConf = "/usr/lib/sysusers.d/" + pkgName + ".conf"
 	// docDir, licensePath and changelogPath are where Debian, the rpm family and
@@ -67,10 +64,9 @@ const (
 )
 
 // systemdFiles lists what a package for a distribution that boots with systemd
-// installs: the program, the unit that runs it, the file that declares the user
-// it runs as, the licence and the two documents. The paths are named as they are
-// on the target, the way the rpm and the pacman formats write them; the Debian
-// layout adds the leading dot of its own archives.
+// installs: the program, the unit, the file declaring the user it runs as, the
+// licence and the two documents. Paths are named as they are on the target; the
+// Debian layout adds the leading dot of its own archives.
 func systemdFiles(root, binary string) ([]pkgEntry, error) {
 	bin, err := readBinary(binary)
 	if err != nil {
@@ -109,9 +105,8 @@ func systemdFiles(root, binary string) ([]pkgEntry, error) {
 	}, nil
 }
 
-// pkgEpoch is the timestamp written on everything inside a package. It is a
-// fixed time rather than the time of the build, so packing the same build twice
-// gives the same file.
+// pkgEpoch is the timestamp written on everything inside a package. A fixed
+// time keeps the same build packing to the same file twice.
 var pkgEpoch = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // pkgEntry is one file of an archive, held in memory: a package is small enough
@@ -123,8 +118,7 @@ type pkgEntry struct {
 	data []byte
 }
 
-// binaryEntry reads one of the files that is installed as it is, the binary
-// itself being the one that matters: its bytes are its own business.
+// binaryEntry reads one of the files that is installed unchanged.
 func binaryEntry(source, target string, mode int64) (pkgEntry, error) {
 	data, err := readBinary(source)
 	if err != nil {
@@ -150,8 +144,7 @@ func readBinary(source string) ([]byte, error) {
 
 // readText reads a file that a program on the target will read, refusing one with
 // Windows line endings: a shell script whose shebang ends in a carriage return
-// does not run at all, and the checkout platform should not decide that, so it is
-// checked rather than assumed.
+// does not run, and the checkout platform should not decide that.
 func readText(source string) ([]byte, error) {
 	data, err := os.ReadFile(source)
 	if err != nil {
@@ -169,9 +162,9 @@ type compression string
 const (
 	// compressGzip is the only one the standard library can write.
 	compressGzip compression = "gz"
-	// compressXz and compressZstd go through the tools of those names, since
-	// the standard library has neither. pacman accepts both, its own default
-	// being zstd these days and xz before that.
+	// compressXz and compressZstd go through the tools of those names, the
+	// standard library having neither. pacman accepts both, and the official
+	// repositories use zstd.
 	compressXz   compression = "xz"
 	compressZstd compression = "zst"
 )
@@ -179,11 +172,9 @@ const (
 // ext is the file name ending an archive with this compression carries.
 func (c compression) ext() string { return "tar." + string(c) }
 
-// tarPack packs entries into a tar archive with the named compression, writing the
-// directories the files live in as entries of their own. A Debian package and an
-// Arch one both carry them, since a package manager takes away only the
-// directories it was told about: an archive that names none leaves them behind,
-// empty.
+// tarPack packs entries into a tar archive with the named compression, writing
+// the directories the files live in as entries of their own. A package manager
+// takes away only what it was told about, so an archive must name them.
 func tarPack(entries []pkgEntry, c compression) ([]byte, error) {
 	return tarData(entries, c)
 }
@@ -234,10 +225,8 @@ func tarData(entries []pkgEntry, c compression) ([]byte, error) {
 	}
 }
 
-// compressWith runs an external compressor over an archive. The standard library
-// writes gzip and nothing else, and a missing tool is named in the error: a run
-// should not fail with a bare "executable file not found", and the reader has to
-// know what to install.
+// compressWith runs an external compressor over an archive. A missing tool is
+// named in the error, since the reader has to know what to install.
 func compressWith(tool string, args []string, data []byte) ([]byte, error) {
 	path, err := exec.LookPath(tool)
 	if err != nil {
@@ -317,13 +306,10 @@ func writeAr(w io.Writer, members []arMember) error {
 	return nil
 }
 
-// debFiles is everything the Debian layout needs: the files that are installed,
-// the control file that describes the package, the configuration files an
-// upgrade has to keep, the directory holding the maintainer scripts, and whether
-// the checksums file is expected.
-//
-// OpenWrt packages are built through here as well: an ipk is the same container,
-// only the control file inside it differs.
+// debFiles is everything the Debian layout needs: the installed files, the
+// control file, the configuration files an upgrade keeps, the maintainer script
+// directory, and whether the checksums file is expected. OpenWrt packages come
+// through here too, an ipk being the same container with another control file.
 type debFiles struct {
 	entries  []pkgEntry
 	control  string
@@ -401,7 +387,6 @@ func md5sums(entries []pkgEntry) []byte {
 	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
-// writePackage writes a finished package into dist/packages/.
 func writePackage(root, name string, data []byte) error {
 	dir := filepath.Join(root, distDir, pkgDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -417,14 +402,18 @@ func writePackage(root, name string, data []byte) error {
 
 // checksumsFile is the list of digests written next to the packages, in the
 // spelling the sha256sum tool reads and writes: the digest, two spaces and the
-// name. A downloaded release is checked against it, which is useful even when
-// nothing is signed.
+// name. A downloaded release is checked against it, signed or not.
 const checksumsFile = "SHA256SUMS"
 
-// writeChecksums writes the digest of every package into SHA256SUMS. The order is
-// the one the file names sort in, so the file itself comes out the same on every
-// run. Every task that writes packages calls this as it finishes, so an archive
-// and the file that describes it cannot disagree.
+// writeChecksums writes the digest of every package into SHA256SUMS. Names
+// sort the order, so the file comes out the same on every run. Every task that
+// writes packages calls this as it finishes, so that an archive and the file
+// describing it cannot disagree.
+//
+// The signature of the list is not a package and is left out of it. A list that
+// named its own signature would change the moment it was signed, and the
+// signature would then be over bytes that are no longer on disk: the digest of a
+// file cannot contain the file that holds the digest of the file.
 func writeChecksums(root string) error {
 	dir := filepath.Join(root, distDir, pkgDir)
 	entries, err := os.ReadDir(dir)
@@ -434,7 +423,7 @@ func writeChecksums(root string) error {
 
 	var listing strings.Builder
 	for _, e := range entries {
-		if e.IsDir() || e.Name() == checksumsFile {
+		if e.IsDir() || e.Name() == checksumsFile || strings.HasSuffix(e.Name(), update.SignatureSuffix) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
@@ -445,11 +434,35 @@ func writeChecksums(root string) error {
 	}
 
 	out := filepath.Join(dir, checksumsFile)
+	// A list that comes out different than the one a signature was made over is
+	// not the list that was signed. The signature goes with it, and sign is run
+	// again: a release carries the two of them together or neither, since a
+	// stale signature is one every reader refuses to install, with nothing in
+	// the release saying why.
+	if previous, err := os.ReadFile(out); err == nil && !bytes.Equal(previous, []byte(listing.String())) {
+		removeSignature(root, out)
+	}
 	if err := os.WriteFile(out, []byte(listing.String()), 0o644); err != nil {
 		return err
 	}
 	fmt.Printf("  -> %s\n", describe(root, out))
 	return nil
+}
+
+// removeSignature deletes the signature of a checksum list that is about to be
+// written again with different contents. A missing one is the ordinary state
+// before sign has run, so nothing is said about it.
+func removeSignature(root, sumsPath string) {
+	sigPath := sumsPath + update.SignatureSuffix
+	if _, err := os.Stat(sigPath); err != nil {
+		return
+	}
+	if err := os.Remove(sigPath); err != nil {
+		fmt.Printf("  !  %s could not be removed: %v; run sign again before publishing\n",
+			describe(root, sigPath), err)
+		return
+	}
+	fmt.Printf("  -- %s removed: the list it signs was written again, run sign\n", describe(root, sigPath))
 }
 
 // installedBytes is the size of what a package installs. Some formats want it in
@@ -487,9 +500,8 @@ func gzipFile(path string) ([]byte, error) {
 }
 
 // gzipBytes compresses data with gzip, the one compression the standard library
-// writes. The level is the best one rather than the default, since the largest
-// thing compressed here is the program a router keeps on its flash, where the few
-// percent saved are worth the time to pack once.
+// writes. The largest thing compressed here is the program a router keeps on
+// its flash, so it is packed at the best level.
 func gzipBytes(data []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	gz, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
@@ -505,15 +517,11 @@ func gzipBytes(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// appVersion is the version of the release being built, which is the git tag the
-// checkout is at, so every package is named after the tag that published it and
-// there is one place to change a version. A tree that was unpacked rather than
-// checked out has no tag to read and falls back on the Version variable in the
-// sources; a check refuses a tag that disagrees with it, which keeps the fallback
-// from drifting.
-//
-// A checkout past its tag keeps naming that release, which is what the commit
-// that goes into the program with the version is for.
+// appVersion is the version of the release being built, read from the git tag
+// the checkout is at, so every package is named after the tag that published
+// it. A tree with no checkout falls back on the Version variable in the
+// sources. A build past the tag keeps that name, and the commit written in
+// beside it says which one it is.
 func appVersion(root string) (string, error) {
 	if tag, ok := gitTag(root); ok {
 		return tag, nil
@@ -536,9 +544,8 @@ func appCommit(root string) string {
 func appRepo(root string) (string, error) { return appSourceString(root, "Repo") }
 
 // gitTag is the last tag in front of the checkout, without the v this project
-// puts in front of it. Reading the last one rather than the one the commit
-// carries is what makes a build between two releases name the release it is
-// past, which is what a version number is for.
+// puts in front of it. Reading the last tag makes a build between two releases
+// name the release it is past.
 func gitTag(root string) (string, bool) {
 	out, err := git(root, "describe", "--tags", "--abbrev=0")
 	if err != nil || out == "" {
@@ -561,8 +568,8 @@ func git(root string, args ...string) (string, error) {
 
 // appSourceString reads one string out of the payload file of internal/app,
 // which the program and the packages both take their version from. The value is
-// written either as a constant of its own or in a block of variables, so both
-// shapes are matched, and an empty value is one of the answers, which Commit is.
+// written as a constant of its own or in a block of variables, so both shapes
+// are matched; an empty value is valid, and Commit is one.
 func appSourceString(root, name string) (string, error) {
 	path := filepath.Join(root, "internal", "app", "payload.go")
 	src, err := os.ReadFile(path)

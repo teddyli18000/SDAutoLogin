@@ -19,6 +19,7 @@ func sessionStates() []service.State {
 		service.StateOffline,
 		service.StateLoggingIn,
 		service.StateError,
+		service.StateNotKnown,
 	}
 }
 

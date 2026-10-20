@@ -2,8 +2,7 @@
 
 # Take the enable links out of the way, so that a removed package does not leave
 # systemd with a unit it cannot find. The settings and the log in
-# /var/lib/sdautologin are left alone: they hold an account, and removing a
-# package is not the same as throwing one away.
+# /var/lib/sdautologin are left alone: they hold an account.
 
 if [ -x /usr/bin/deb-systemd-helper ]; then
 	case "$1" in

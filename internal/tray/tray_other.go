@@ -1,4 +1,4 @@
-//go:build (!windows && !linux && !darwin) || (notray && !windows)
+//go:build (!windows && !linux && !darwin) || notray
 
 package tray
 
@@ -6,15 +6,14 @@ import (
 	"sdautologin/internal/app"
 )
 
-// HasTray reports whether this build puts up a tray icon at all. These builds
-// have none, so an option that needs one is refused instead of being ignored.
+// HasTray reports whether this build puts up a tray icon. These builds have none,
+// so an option that needs one is refused instead of being ignored.
 const HasTray = false
 
-// Run has no tray on these platforms (for example FreeBSD, or a Linux build made
-// with the notray tag), so it hands straight over to the background mode with no
-// settings server of its own: these builds make none to take over. The account is
-// configured through the "config" command, on the command line, or through the
-// settings page of a background run.
+// Run has no tray on these platforms (for example FreeBSD, or a Windows or Linux
+// build made with the notray tag), so it hands over to the background mode with
+// no settings server of its own. The account is configured with the "config"
+// command.
 func Run(_ *app.AppState, _ Options, fallback func(*app.Server)) {
 	fallback(nil)
 }

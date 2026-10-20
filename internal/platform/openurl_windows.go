@@ -8,7 +8,7 @@ import (
 )
 
 // OpenExternal hands a URL or a file to the shell. ShellExecuteW reports
-// success with a value above 32, which is the only error signal it offers.
+// success with a value above 32; that is the only error signal it offers.
 func OpenExternal(target string) error {
 	verb := UTF16Ptr("open")
 	file := UTF16Ptr(target)

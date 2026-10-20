@@ -28,8 +28,7 @@ const $ = (id) => document.getElementById(id);
 
 /* Every decision this page makes that a reader could later ask about is written
    to the browser's console under this prefix, so a report of "the button did
-   nothing" can be read back in the order it happened. Nothing secret goes through
-   here: whether a password is there is said, never the password. */
+   nothing" can be read back in the order it happened. */
 function note(what, detail) {
   if (detail === undefined) console.log("[sdautologin] " + what);
   else console.log("[sdautologin] " + what, detail);
@@ -120,15 +119,15 @@ function applyLang(code) {
   document.documentElement.lang = code === "zh" ? "zh-CN" : "en";
 }
 
-/* The string table arrives with the bootstrap response, so a page whose bootstrap
-   failed has to take the language from the browser instead. Both wordings live
-   here rather than in the table, which this page cannot reach, and say where to
-   open the page again rather than naming a token: there is nowhere to type one. */
+/* The string table arrives with the bootstrap response, so a page whose
+   bootstrap failed has to take the language from the browser. Both wordings
+   live here: there is no table to read, and nowhere to type a token. They are
+   the msg.stale wording, and the assets test holds them to it. */
 function bootFailedText() {
   if ((navigator.language || "").toLowerCase().startsWith("zh")) {
-    return "设置页已失效，请从托盘重新打开，或打开日志里最新的那个地址。";
+    return "设置页已失效，请从托盘重新打开。";
   }
-  return "This page is no longer valid, open it again from the tray, or from the newest address in the log.";
+  return "This page is no longer valid, open it again from the tray.";
 }
 
 /* The autostart entry lives outside config.json, it is toggled on its own. */
@@ -147,22 +146,25 @@ function applyConfig(cfg) {
   $("f-prefix").value = cfg.accountPrefix || "";
   $("f-jsversion").value = cfg.jsVersion || "";
   $("f-remember").checked = !!cfg.rememberPassword;
+  $("f-passwordfile").value = cfg.passwordFile || "";
   $("f-autologin").checked = !!cfg.autoLogin;
   $("f-internet").checked = !!cfg.checkInternet;
   $("f-verbose").checked = !!cfg.verboseLog;
   $("f-preferred").checked = !!cfg.switchToPreferredService;
+  $("f-updates").checked = !!cfg.checkForUpdates;
+  $("f-channel").value = cfg.updateChannel === "prerelease" ? "prerelease" : "stable";
   $("f-language").value = cfg.language || "auto";
   renderProbes(cfg.probeUrls || []);
   renderAccounts(cfg.accounts || []);
 }
 
-function renderAccounts(accounts) {
+function renderAccounts(accounts, focusFirst) {
   const list = $("accountList");
   list.innerHTML = "";
   accounts.forEach((entry, index) => list.append(accountCard(entry, index)));
   $("acctEmpty").hidden = accounts.length > 0;
   $("acctWarn").hidden = !(accounts.length > 0 && accounts.every((entry) => entry.disabled));
-  applyErrors();
+  applyErrors(focusFirst);
   applyStatusBadges(state.status);
   updateEntryActions();
 }
@@ -187,9 +189,19 @@ function updateEntryActions() {
 function accountCard(entry, index) {
   const isps = entry.isps && entry.isps.length ? entry.isps : [""];
 
+  // Where the server said this entry's password comes from. "file" means it is
+  // read from the file the configuration names, so the field below is closed,
+  // and the note under it names that file.
+  const source = entry.passwordSource || "";
+  const fromFile = source === "file";
+  const passwordFile = (state.config && state.config.passwordFile) || "";
+
   const number = el("span", { class: "account-no", text: String(index + 1) });
   const grip = el("span", { class: "grip", title: t("acct.drag"), "aria-hidden": "true", text: "⠿" });
-  const card = el("article", { class: "account", dataset: { index: String(index) } });
+  const card = el("article", {
+    class: "account",
+    dataset: { index: String(index), source: source },
+  });
 
   const head = el("div", { class: "account-head" },
     grip,
@@ -229,25 +241,32 @@ function accountCard(entry, index) {
     dataset: { field: "username" },
   });
 
-  // The password is the one field the page is never given: an entry that has one
-  // says so instead, and the field is left empty, which is what "keep the stored
-  // one" looks like in the request the page sends back.
-  //
-  // What the reader has typed is put back as the card is rebuilt, because a card
-  // is rebuilt from the page every time the list changes; the stored password is
-  // still never sent to the page.
+  // The page is never given the stored password: an empty field means "keep the
+  // stored one", and what the reader typed is put back as the card is rebuilt.
+  // One the server reads from a file is not the page's to write, so that field
+  // is closed instead, and the note below it names the file.
   const password = el("input", {
     id: passwordID,
     type: "password",
     autocomplete: "off",
     value: entry.password || "",
-    placeholder: entry.hasPassword ? t("field.password.keep") : t("field.password"),
+    placeholder: fromFile ? null
+      : source ? t("field.password.keep") : t("field.password"),
+    disabled: fromFile,
     oninput: markDirty,
     dataset: { field: "password" },
   });
 
   const show = button(t("field.show"), "ghost");
   show.dataset.act = "show";
+  // Nothing to reveal in a field that is closed and holds nothing.
+  show.disabled = fromFile;
+
+  // What the card says instead of the field when a password comes from a file.
+  // A file named for this run alone leaves no path for the note to name.
+  const passwordNote = !fromFile ? null
+    : passwordFile ? t("field.password.fromFile", passwordFile)
+      : t("field.password.fromFile.unnamed");
 
   const chips = el("div", { class: "chips", dataset: { chips: "" } },
     isps.map((suffix) => chip(suffix)));
@@ -296,11 +315,14 @@ function accountCard(entry, index) {
   const body = el("div", { class: "account-body" },
     row(usernameID, t("field.account"), username, t("field.account.hint"), "accounts." + index + ".username"),
     row(passwordID, t("field.password"), el("div", { class: "input-row" }, password, show),
-      null, "accounts." + index + ".password"),
+      passwordNote, "accounts." + index + ".password"),
+    // The service types are answered for by position, one chip at a time, so the
+    // row carries one error line for the whole list.
     row(null, t("acct.services"), el("div", { class: "services" },
       chips,
       el("div", { class: "service-add" }, picker, custom),
-      el("p", { class: "hint", text: t("acct.services.hint") })), null, null),
+      el("p", { class: "hint", text: t("acct.services.hint") })), null,
+      "accounts." + index + ".isps"),
     el("div", { class: "account-foot" }, test, preferred, testResult));
 
   card.append(head, body);
@@ -354,12 +376,16 @@ function collect() {
   const accounts = Array.from($("accountList").children).map((card) => ({
     username: card.querySelector('[data-field="username"]').value.trim(),
     password: card.querySelector('[data-field="password"]').value,
+    // Where the server said this entry's password comes from. It is carried
+    // through a rebuild, so a card keeps saying it across a move or a removal.
+    passwordSource: card.dataset.source || "",
     disabled: !card.querySelector('[data-field="enabled"]').checked,
     isps: Array.from(card.querySelectorAll(".chip")).map((node) => node.dataset.suffix),
   }));
   return {
     accounts,
     rememberPassword: $("f-remember").checked,
+    passwordFile: $("f-passwordfile").value.trim(),
     portalBaseUrl: $("f-portal").value.trim(),
     eportalUrl: $("f-eportal").value.trim(),
     accountPrefix: $("f-prefix").value,
@@ -367,6 +393,8 @@ function collect() {
     httpTimeoutSeconds: parseInt($("f-timeout").value, 10) || 0,
     autoLogin: $("f-autologin").checked,
     switchToPreferredService: $("f-preferred").checked,
+    checkForUpdates: $("f-updates").checked,
+    updateChannel: $("f-channel").value,
     checkInternet: $("f-internet").checked,
     verboseLog: $("f-verbose").checked,
     probeUrls: readProbes(),
@@ -375,9 +403,18 @@ function collect() {
   };
 }
 
-/* accountsBrief is the list as a console line: the name of each entry and whether
-   it carries a password. It is what a save writes into the console, so a refused
-   save can be read back without the passwords ever being written down. */
+/* requestBody is what a save sends: the cards as collect reads them, without
+   the source of a password. That source is the server's word about an entry,
+   read to draw the card and not something the page has to say back. */
+function requestBody() {
+  const body = collect();
+  body.accounts.forEach((entry) => { delete entry.passwordSource; });
+  return body;
+}
+
+/* accountsBrief is the list as a console line: the name of each entry and
+   whether it carries a password, so a refused save can be read back without the
+   passwords ever being written down. */
 function accountsBrief(accounts) {
   return accounts.map((entry, i) =>
     "#" + (i + 1) + " " + (entry.username || "(no account)") +
@@ -471,16 +508,28 @@ function entryLabel(index, usedSuffix) {
   return (entry.username || t("acct.card", index + 1)) + " (" + isps.map(operatorName).join(", ") + ")";
 }
 
-// activeEntryLabel names the entry the session is on, with the one service type it
-// is on rather than every type of the entry. The program reads that off the account
-// the portal echoes: a suffix the echo does not carry is one the login did not send.
+// activeEntryLabel names the entry the session is on, with the single service
+// type it is on. The program reads that off the account the portal echoes: a
+// suffix the echo does not carry is one the login did not send.
+// checkedAgo says how long ago the round that produced the rest of the status
+// read the portal. An unparseable or absent stamp reads as "-", never as "just
+// now", which would be a claim the page cannot make.
+function checkedAgo(raw) {
+  if (!raw) return "-";
+  const then = Date.parse(raw);
+  if (isNaN(then)) return "-";
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (seconds < 60) return t("status.checkedAgo", seconds);
+  return t("status.checkedMin", Math.round(seconds / 60));
+}
+
 function activeEntryLabel(st) {
   if (!st || typeof st.entryIndex !== "number" || st.entryIndex < 0) return "-";
   const cfg = state.config;
   if (!cfg || !cfg.accounts || st.entryIndex >= cfg.accounts.length) return "-";
-  // The service type is known only while a session has been read, which is the
-  // online state: otherwise the entry is named with the types it may be used with
-  // instead, as for a status that carries no service type at all.
+  // The service type is known only while a session has been read, in the online
+  // state: otherwise the entry is named with the types it may be used with, as
+  // for a status that carries no service type.
   if (st.state === "online" && typeof st.usedIsp === "string") {
     return entryLabel(st.entryIndex, st.usedIsp);
   }
@@ -490,6 +539,48 @@ function activeEntryLabel(st) {
 function formatWait(seconds) {
   if (seconds < 60) return seconds + "s";
   return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+}
+
+// renderUpdate is the line the last look for a newer release left. The wording
+// comes from the program and not from the table here: it is the same line
+// the log and the update command carry, and it names versions and a file path.
+// What is left to this page is the case where no look has happened.
+function renderUpdate(up) {
+  const field = $("abUpdate");
+  if (!field) return;
+  if (!up) {
+    field.textContent = t("about.update.idle");
+    field.classList.remove("bad");
+    return;
+  }
+  field.textContent = up.installed ? up.message + " (" + up.installed + ")" : up.message;
+  // A newer release this copy cannot take is worth marking, since the reader has
+  // to do it themselves.
+  field.classList.toggle("bad", !!up.newer && (!up.signed || !up.installable));
+}
+
+function wireUpdateButton() {
+  const btn = $("btnCheckUpdate");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    const field = $("abUpdate");
+    if (field) field.textContent = t("state.checking");
+    try {
+      const res = await api("/api/action", {
+        method: "POST",
+        body: JSON.stringify({ action: "checkUpdate" }),
+      });
+      if (res.unreachable || !res.ok) {
+        toast(t((res.data && res.data.error) || "err.badRequest"), true);
+        return;
+      }
+      // The look runs on its own, so what it found arrives with a later poll and
+      // not with this reply. The row above holds the place until then.
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
 function applyStatusBadges(st) {
@@ -577,8 +668,6 @@ function renderPreferred(card, st, index) {
     : t("acct.preferred.now", operatorName(used), operatorName(wanted));
 }
 
-// switchTargets is the service types of one entry that the session is not on,
-// which are the ones it can be moved to; the one it is on is left out.
 function switchTargets(st, index) {
   const cfg = state.config;
   if (!cfg || !cfg.accounts || index < 0 || index >= cfg.accounts.length) return [];
@@ -600,9 +689,8 @@ function renderStatus(st) {
   state.status = st || {};
   const code = st.state || "checking";
   $("statePill").dataset.state = code;
-  // A session that is up and that the program could not move where the order of
-  // the login list says it should be needs a reader, and nothing else says so:
-  // the state reads as "nothing to do". Hence the pill and the strip both carry it.
+  // A session that is up and that the program could not move where the login
+  // list says it should be needs a reader: the state reads as "nothing to do".
   const refused = st.switchRefused;
   $("statePill").classList.toggle("attention", !!refused);
   // The pill carries the state and, once something is signed in, who it is signed
@@ -621,45 +709,157 @@ function renderStatus(st) {
   $("stInternet").textContent = st.internetChecked
     ? (st.internetOk ? t("status.internetOk") : t("status.internetNo"))
     : "-";
-  $("statusNotice").hidden = !refused;
+  // The page polls faster than the loop runs and a round takes as long as the
+  // portal does, so the age of this reading is shown and not left implied:
+  // a state measured four minutes ago otherwise reads as the state right now.
+  $("stChecked").textContent = checkedAgo(st.checkedAt);
+  // The notice line carries what the readings cannot: the program's own reason
+  // for the state, and a refusal that needs a reader. The refusal comes first,
+  // since it names the buttons that are the way out.
+  const notice = $("statusNotice");
+  const reason = st.message || st.lastError || "";
   if (refused) {
-    $("statusNotice").textContent = t("status.switchRefused",
+    notice.textContent = t("status.switchRefused",
       operatorName(st.preferredIsp || ""), operatorName(st.usedIsp || ""));
+    notice.classList.remove("bad");
+  } else if (reason) {
+    notice.textContent = reason;
+    notice.classList.toggle("bad", code === "error");
+  } else {
+    notice.textContent = "";
   }
+  notice.hidden = !notice.textContent;
+  renderUpdate(st.update);
   applyStatusBadges(state.status);
 }
 
 /* ---------- errors and toasts ---------- */
 
-function applyErrors() {
+/* The config fields whose input id is not the field path the server answers with.
+   The rest of the paths address the login list or a probe by position, and are
+   read back below. */
+const FIELD_INPUTS = {
+  checkIntervalSeconds: "f-interval",
+  httpTimeoutSeconds: "f-timeout",
+  portalBaseUrl: "f-portal",
+  eportalUrl: "f-eportal",
+};
+
+/* nearestSlot is the message slot for a field path, or the slot of the thing the
+   path belongs to: the server names one probe of a list the page keeps one line
+   for, and an entry of a list the page holds one error line for. */
+function nearestSlot(field) {
+  let path = field;
+  for (;;) {
+    const slot = document.querySelector('[data-error="' + path + '"]');
+    if (slot) return slot;
+    const cut = path.lastIndexOf(".");
+    if (cut < 0) return null;
+    path = path.slice(0, cut);
+  }
+}
+
+/* fieldTarget is where one field path of a refusal is reported, which control it
+   is marked on, and what the focus goes to. Every path config.Validate returns
+   has all three, so no refusal is written where nothing can be seen. */
+function fieldTarget(field) {
+  const entry = field.match(/^accounts\.(\d+)\.(username|password)$/);
+  if (entry) {
+    const card = document.querySelector('.account[data-index="' + entry[1] + '"]');
+    if (card) {
+      const input = card.querySelector('[data-field="' + entry[2] + '"]');
+      return {
+        slot: card.querySelector('[data-error="' + field + '"]') || nearestSlot(field),
+        control: input,
+        focus: input,
+      };
+    }
+  }
+
+  const services = field.match(/^accounts\.(\d+)\.isps(?:\.(\d+))?$/);
+  if (services) {
+    const card = document.querySelector('.account[data-index="' + services[1] + '"]');
+    if (card) {
+      const row = card.querySelector("[data-chips]");
+      const chips = Array.from(row.children);
+      return {
+        slot: card.querySelector('[data-error="accounts.' + services[1] + '.isps"]') ||
+          nearestSlot(field),
+        // A list of service types has no input to mark: the row of chips carries
+        // the mark, and the focus goes to the chip the position names, or to the
+        // first of them.
+        control: row,
+        focus: chips[Number(services[2] || 0)] || chips[0] || row,
+      };
+    }
+  }
+
+  const probe = field.match(/^probeUrls\.(\d+)$/);
+  if (probe) {
+    // readProbes drops the blank rows before the request is sent, so the position
+    // the server reports is the position among the rows that hold an address.
+    const filled = Array.from($("probeList").querySelectorAll("input"))
+      .filter((input) => input.value.trim() !== "");
+    const input = filled[Number(probe[1])] || filled[0] || $("btnAddProbe");
+    return { slot: nearestSlot(field), control: input, focus: input };
+  }
+
+  const id = FIELD_INPUTS[field];
+  const input = id ? $(id) : null;
+  return { slot: nearestSlot(field), control: input, focus: input };
+}
+
+/* applyErrors puts a refused save next to the fields it is about. A field the
+   showing tab does not carry is reached by switching to its tab, and a message
+   with nowhere to go is toasted, so a refusal is never silent. focusFirst is set
+   by the save alone, the one caller that may move the reader to the field. */
+function applyErrors(focusFirst) {
   document.querySelectorAll("[data-error]").forEach((node) => { node.textContent = ""; });
   document.querySelectorAll(".invalid").forEach((node) => node.classList.remove("invalid"));
 
+  let shown = 0;
+  let firstTarget = null;
   Object.entries(state.errors).forEach(([field, key]) => {
-    const slot = document.querySelector('[data-error="' + field + '"]');
-    if (slot) slot.textContent = t(key);
-
-    const entry = field.match(/^accounts\.(\d+)\.(username|password)$/);
-    if (entry) {
-      const card = document.querySelector('.account[data-index="' + entry[1] + '"]');
-      const input = card && card.querySelector('[data-field="' + entry[2] + '"]');
-      if (input) input.classList.add("invalid");
-      return;
+    // The whole-request failure has no field: it is toasted below.
+    if (field === "_") return;
+    const target = fieldTarget(field);
+    if (target.slot) {
+      target.slot.textContent = t(key);
+      shown++;
     }
-    const input = $("f-" + field);
-    if (input) input.classList.add("invalid");
+    if (target.control) target.control.classList.add("invalid");
+    if (!firstTarget && (target.slot || target.control)) firstTarget = target;
   });
-
-  const generic = state.errors["_"];
-  if (generic) toast(t(generic), true);
 
   // The wizard lies over the whole page, so a message belonging to a field
   // underneath it cannot be seen: while it is open it carries the first one
   // itself, or a refused save would look like nothing happened.
   if (!$("wizard").hidden) {
-    const first = Object.values(state.errors)[0];
+    const key = Object.values(state.errors)[0];
     const slot = document.querySelector('[data-error="wizard"]');
-    if (first && slot) slot.textContent = t(first);
+    if (key && slot) {
+      slot.textContent = t(key);
+      shown++;
+    }
+  } else if (firstTarget && focusFirst) {
+    // The panel the message is in may not be the one showing, and a message
+    // written into a hidden panel reads as no answer.
+    const panel = (firstTarget.slot || firstTarget.control).closest(".panel");
+    if (panel && !panel.classList.contains("active")) {
+      switchTab(panel.id.replace(/^panel-/, ""));
+    }
+    // The control that message is about takes the focus, and it is in the panel
+    // just switched to.
+    if (firstTarget.focus) firstTarget.focus.focus();
+  }
+
+  const generic = state.errors["_"];
+  if (generic) {
+    toast(t(generic), true);
+  } else if (shown === 0) {
+    // Nothing on the page could carry the message.
+    const key = Object.values(state.errors)[0];
+    if (key) toast(t(key), true);
   }
 }
 
@@ -699,13 +899,36 @@ function closeConfirm(answer) {
   }
 }
 
+/* The wizard lies over the whole page, so while it is up the page behind it is
+   inert: Tab cannot reach a control the reader cannot see. The modals are left
+   out of it, since one of them is the dialog in use. */
+function setPageInert(on) {
+  Array.from(document.body.children).forEach((node) => {
+    if (node.classList.contains("modal")) return;
+    node.inert = on;
+  });
+}
+
+function openWizard() {
+  $("wizard").hidden = false;
+  setPageInert(true);
+  // The keyboard starts inside the dialog, on its first control.
+  $("w-language").focus();
+}
+
+function closeWizard() {
+  if ($("wizard").hidden) return;
+  $("wizard").hidden = true;
+  setPageInert(false);
+}
+
 /* ---------- saving ---------- */
 
 async function submit() {
   const btn = $("btnSave");
   btn.disabled = true;
   btn.textContent = t("msg.saving");
-  const body = collect();
+  const body = requestBody();
   note("saving " + body.accounts.length + " account(s)", accountsBrief(body.accounts));
   const res = await api("/api/config", { method: "POST", body: JSON.stringify(body) });
   btn.disabled = false;
@@ -718,7 +941,7 @@ async function submit() {
   if (!res.ok || !res.data.ok) {
     state.errors = res.data.errors || { _: "err.saveFailed" };
     note("the save was refused", state.errors);
-    renderAccounts(collect().accounts);
+    renderAccounts(collect().accounts, true);
     return false;
   }
   note("the configuration was saved");
@@ -728,7 +951,7 @@ async function submit() {
   $("dirtyBadge").hidden = true;
   toast(t("msg.saved"));
   state.configured = true;
-  $("wizard").hidden = true;
+  closeWizard();
   refreshStatus();
   return true;
 }
@@ -740,7 +963,7 @@ async function refreshStatus() {
   if (res.unreachable || !res.ok) {
     // Both mean this page's session is gone: the program quit, or the settings
     // service shut down while the tab was idle. The way back is to open the page
-    // again from the tray, so saying it once is the whole remedy.
+    // again from the tray.
     if (!warnedStale) {
       warnedStale = true;
       // Said once per page, in the console as well as on screen: the line says
@@ -806,9 +1029,7 @@ async function testEntry(index, buttonNode) {
 
 /* switchService asks the program to sign the session in again with the service
    type picked on the card, which replaces the session the portal holds: the
-   portal allows one session per client address, so that is the only way onto
-   another one. It works on the configuration the program is running, not on the
-   page, since the session belongs to the running program. */
+   portal allows one session per client address. */
 async function switchService(card, buttonNode) {
   const select = card.querySelector(".preferred-isp");
   const isp = select ? select.value : "";
@@ -921,8 +1142,13 @@ async function switchLanguage(lang) {
 /* ---------- wiring ---------- */
 
 function switchTab(name) {
+  // The strip is a tablist: the showing tab carries the selection, and it is the
+  // one Tab reaches, since the others are stepped through with the arrow keys.
   document.querySelectorAll(".tab").forEach((tab) => {
-    tab.classList.toggle("active", tab.dataset.tab === name);
+    const on = tab.dataset.tab === name;
+    tab.classList.toggle("active", on);
+    tab.setAttribute("aria-selected", on ? "true" : "false");
+    tab.tabIndex = on ? 0 : -1;
   });
   document.querySelectorAll(".panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === "panel-" + name);
@@ -949,11 +1175,24 @@ function fillWizardSelect(operators) {
 }
 
 function wire() {
-  document.querySelectorAll(".tab").forEach((tab) => {
+  const tabs = Array.from(document.querySelectorAll(".tab"));
+  tabs.forEach((tab, index) => {
     tab.addEventListener("click", () => switchTab(tab.dataset.tab));
+    // Left and right step through the strip and show what they land on; the ends
+    // wrap, so the strip is one loop.
+    tab.addEventListener("keydown", (event) => {
+      const step = event.key === "ArrowRight" ? 1
+        : event.key === "ArrowLeft" ? -1 : 0;
+      if (!step) return;
+      event.preventDefault();
+      const next = tabs[(index + step + tabs.length) % tabs.length];
+      switchTab(next.dataset.tab);
+      next.focus();
+    });
   });
 
-  ["f-interval", "f-timeout", "f-portal", "f-eportal", "f-prefix", "f-jsversion"]
+  ["f-interval", "f-timeout", "f-portal", "f-eportal", "f-prefix",
+    "f-jsversion", "f-passwordfile"]
     .forEach((id) => $(id).addEventListener("input", markDirty));
   ["f-remember", "f-autologin", "f-internet", "f-verbose", "f-preferred"]
     .forEach((id) => $(id).addEventListener("change", markDirty));
@@ -992,6 +1231,9 @@ function wire() {
   $("btnTestFirst").addEventListener("click", (event) => testEntry(0, event.currentTarget));
 
   $("btnReload").addEventListener("click", async () => {
+    // The reload throws away whatever is in the form, so a reader with unsaved
+    // edits is asked first, and told afterwards what became of them.
+    if (state.dirty && !await confirmDialog(t("msg.confirmReload"))) return;
     const res = await api("/api/action", { method: "POST", body: JSON.stringify({ action: "reload" }) });
     if (res.unreachable) {
       toast(t("msg.stale"), true);
@@ -999,8 +1241,10 @@ function wire() {
     }
     if (res.ok && res.data.config) {
       state.errors = {};
+      state.dirty = false;
       applyConfig(res.data.config);
-      toast(t("msg.saved"));
+      $("dirtyBadge").hidden = true;
+      toast(t("msg.reloaded"));
       refreshStatus();
     }
   });
@@ -1024,7 +1268,17 @@ function wire() {
     if (event.target === $("confirm")) closeConfirm(false);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeConfirm(false);
+    if (event.key !== "Escape") return;
+    // The confirm box lies over the wizard, which lies over the page: Escape
+    // closes the one on top.
+    if (!$("confirm").hidden) {
+      closeConfirm(false);
+      return;
+    }
+    if (!$("wizard").hidden) {
+      closeWizard();
+      note("the wizard was closed with Escape; the settings page behind it is the way in");
+    }
   });
 
   wireAccounts();
@@ -1056,7 +1310,7 @@ function wire() {
   });
 
   $("btnWizardSkip").addEventListener("click", () => {
-    $("wizard").hidden = true;
+    closeWizard();
     note("the wizard was skipped; the settings page behind it is the way in");
   });
 
@@ -1189,9 +1443,7 @@ function wireAccounts() {
     dragging.classList.remove("dragging");
     dragging.draggable = false;
     dragging = null;
-    // The cards were moved one over the other as the pointer crossed them, so the
-    // list is already in the order it was dropped in and is read back out of the
-    // DOM like every other edit.
+    // The cards moved as the pointer crossed them, so the DOM has the order.
     state.status = Object.assign({}, state.status, { entryIndex: -1, skipped: [] });
     const dropped = collect().accounts;
     note("the list was dropped in this order", accountsBrief(dropped));
@@ -1199,7 +1451,7 @@ function wireAccounts() {
   });
 
   // The arrow keys move what has the focus: a chip within its account, a card
-  // within the list. Both are orders the user sets and the program follows.
+  // within the list.
   list.addEventListener("keydown", (event) => {
     if (!event.altKey) return;
 
@@ -1264,7 +1516,8 @@ async function boot() {
   $("w-language").value = data.config ? (data.config.language || "auto") : "auto";
 
   wire();
-  if (!state.configured) $("wizard").hidden = false;
+  wireUpdateButton();
+  if (!state.configured) openWizard();
   note("the page is ready", {
     version: data.version,
     configured: state.configured,

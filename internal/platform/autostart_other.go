@@ -16,7 +16,7 @@ const appID = "sdautologin"
 
 // autostartPath is the file the desktop reads, and "" when there is nowhere to
 // put it: without a home directory the path would be relative, landing the entry
-// where the desktop never looks. An entry that cannot work is not written.
+// where the desktop never looks.
 func autostartPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
@@ -28,8 +28,8 @@ func autostartPath() string {
 	return filepath.Join(home, ".config", "autostart", appID+".desktop")
 }
 
-// AutostartEnabled reports whether the desktop entry file exists, which is false
-// on a machine with no home directory to keep one in.
+// AutostartEnabled reports whether the desktop entry file exists. A machine with
+// no home directory to keep one in has none.
 func AutostartEnabled() bool {
 	path := autostartPath()
 	if path == "" {
@@ -82,9 +82,50 @@ func linuxDesktopEntry() string {
 		"Type=Application\n" +
 		"Name=SDAutoLogin\n" +
 		"Comment=Campus network auto login\n" +
-		"Exec=" + autostartCommand() + "\n" +
+		"Exec=" + desktopCommand() + "\n" +
 		"Terminal=false\n" +
 		"X-GNOME-Autostart-enabled=true\n"
+}
+
+// desktopCommand is the value of the Exec key: this program by its full path and
+// the arguments this run repeats. A desktop reads that value with rules of its
+// own - inside a quoted argument a double quote, a backtick, a dollar sign and a
+// backslash are escaped with a backslash, and a percent sign starts a field code
+// wherever it stands - so the value is put together here rather than out of
+// autostartCommand, which follows the rule a Windows command line is read by.
+func desktopCommand() string {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		return ""
+	}
+	out := desktopQuote(exe)
+	for _, arg := range autostartArgumentList() {
+		out += " " + desktopQuote(arg)
+	}
+	return out
+}
+
+// desktopQuote renders one argument of the Exec value. A percent sign is a field
+// code wherever it stands, so a literal one is written as two - %i would otherwise
+// turn into an icon option and %u into the address of the file - and an argument
+// that a desktop would read as more than one word is quoted with its quotes,
+// backticks, dollar signs and backslashes escaped. An argument that needs none of
+// that is left as it is, since a person reads the entry too.
+func desktopQuote(arg string) string {
+	if arg == "" {
+		return `""`
+	}
+	escaped := strings.NewReplacer(
+		"\\", "\\\\",
+		"\"", "\\\"",
+		"`", "\\`",
+		"$", "\\$",
+		"%", "%%",
+	).Replace(arg)
+	if !strings.ContainsAny(escaped, " \t\n\"'\\><~|&;$*?#()`") {
+		return escaped
+	}
+	return `"` + escaped + `"`
 }
 
 func macPlist() string {
@@ -107,8 +148,7 @@ func macPlist() string {
 }
 
 // xmlEscape makes a path safe to put in the property list. One holding & or <
-// would make the file the desktop reads invalid, which leaves an entry that is
-// there and does nothing.
+// would make the file invalid, leaving an entry that is there and does nothing.
 func xmlEscape(s string) string {
 	var out strings.Builder
 	_ = xml.EscapeText(&out, []byte(s))

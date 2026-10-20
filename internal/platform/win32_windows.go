@@ -25,7 +25,7 @@ const swShowNormal = 1
 
 // UTF16Ptr converts a Go string to the NUL terminated UTF-16 buffer the Win32
 // wide character entry points expect. An unrepresentable string becomes the
-// empty one rather than a nil pointer, so a call cannot crash on bad input.
+// empty one, so a call cannot crash on bad input.
 func UTF16Ptr(s string) *uint16 {
 	p, err := syscall.UTF16PtrFromString(s)
 	if err != nil {

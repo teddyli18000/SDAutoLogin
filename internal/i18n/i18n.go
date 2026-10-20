@@ -36,20 +36,22 @@ var uiText = map[string]text{
 	"state.offline":   {"未登录", "Offline"},
 	"state.loggingIn": {"正在登录", "Signing in"},
 	"state.error":     {"异常", "Error"},
+	"state.unknown":   {"状态未知", "State unknown"},
 
-	"tray.status":         {"状态：{0}", "Status: {0}"},
-	"tray.internetOk":     {"外网：可达", "Internet: reachable"},
-	"tray.internetFail":   {"外网：不通", "Internet: unreachable"},
-	"tray.clientIP":       {"客户端 IP：{0}", "Client IP: {0}"},
-	"tray.lastLogin":      {"上次登录：{0}", "Last login: {0}"},
-	"tray.checkNow":       {"立即检测并登录", "Check and log in now"},
-	"tray.settings":       {"设置…", "Settings..."},
-	"tray.autostart":      {"开机自动运行", "Run at startup"},
-	"tray.openConfig":     {"打开配置文件", "Open config file"},
-	"tray.openLog":        {"打开日志", "Open log"},
-	"tray.reload":         {"重新加载配置", "Reload config"},
-	"tray.exit":           {"退出", "Exit"},
-	"tray.checkRequested": {"已触发一次检测", "A check has been requested"},
+	"tray.status":          {"状态：{0}", "Status: {0}"},
+	"tray.updateAvailable": {"有新版本 {0}", "Version {0} is available"},
+	"tray.internetOk":      {"外网：可达", "Internet: reachable"},
+	"tray.internetFail":    {"外网：不通", "Internet: unreachable"},
+	"tray.clientIP":        {"客户端 IP：{0}", "Client IP: {0}"},
+	"tray.lastLogin":       {"上次登录：{0}", "Last login: {0}"},
+	"tray.checkNow":        {"立即检测并登录", "Check and log in now"},
+	"tray.settings":        {"设置…", "Settings..."},
+	"tray.autostart":       {"开机自动运行", "Run at startup"},
+	"tray.openConfig":      {"打开配置文件", "Open config file"},
+	"tray.openLog":         {"打开日志", "Open log"},
+	"tray.reload":          {"重新加载配置", "Reload config"},
+	"tray.exit":            {"退出", "Exit"},
+	"tray.checkRequested":  {"已触发一次检测", "A check has been requested"},
 	// Shown when the portal would not sign the session in again to move it onto
 	// the service type its entry puts first: the session is up, so there is
 	// nothing broken, but the move is left for the reader to make.
@@ -95,21 +97,20 @@ func SetLang(l Lang) {
 	langMu.Unlock()
 }
 
-// LangSetting returns what was configured, which may be LangAuto.
 func LangSetting() Lang {
 	langMu.RLock()
 	defer langMu.RUnlock()
 	return langSetting
 }
 
-// CurrentLang returns the language actually in use.
 func CurrentLang() Lang {
 	langMu.RLock()
 	defer langMu.RUnlock()
 	return langCurrent
 }
 
-// L returns a user-visible string in the active language.
+// L returns the string for key in the active language, or key itself when the
+// table holds no entry.
 func L(key string) string {
 	t, ok := uiText[key]
 	if !ok {
@@ -124,7 +125,7 @@ func L(key string) string {
 	return key
 }
 
-// Lf is L with {0}, {1}, ... placeholders substituted.
+// Lf substitutes {0}, {1}, ... in the string for key.
 func Lf(key string, args ...any) string {
 	out := L(key)
 	for i, a := range args {

@@ -1,12 +1,5 @@
-/* The settings page: one stylesheet, no framework, no build step. An application
-   shell — sidebar, header, status strip and a content column whose panels and
-   fields flow into as many columns as the window has room for.
-
-   Every colour comes from the properties below, every gap a step of --sp-*,
-   every text size a step of --fs-*. The accent is spent on the primary action,
-   on links, on focus rings and on the current sidebar entry; everything else is
-   grey, because a control panel is read by its numbers and paint on it only
-   competes with them. */
+/* The settings page: one stylesheet, no framework, no build step. Colours come
+   from the properties below; the accent marks the primary action and links. */
 
 :root {
   color-scheme: light dark;
@@ -33,13 +26,13 @@
   --err: #b32a20;
   --err-weak: #fbe9e7;
 
-  /* Four sizes of text: a label, a caption, the body, and the one above it. */
-  --fs-xs: 11px;
-  --fs-sm: 12px;
-  --fs-base: 13px;
-  --fs-lg: 15px;
+  /* The type scale is in rem, so a browser set to a larger default font size is
+     followed: 11/12/13/15px at the usual 16px root. */
+  --fs-xs: 0.6875rem;
+  --fs-sm: 0.75rem;
+  --fs-base: 0.8125rem;
+  --fs-lg: 0.9375rem;
 
-  /* Six steps, from the gap inside a control to the page gutter. */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -130,7 +123,6 @@ body {
 
 h1 { margin: 0; font-size: var(--fs-lg); font-weight: 600; line-height: 1.25; }
 
-/* A panel title is a small heading over a hairline. */
 h2 {
   margin: 0 0 var(--sp-3);
   padding-bottom: var(--sp-2);
@@ -177,12 +169,11 @@ a:hover { text-decoration: underline; }
   border-radius: 50%;
   background: var(--text-mute);
 }
-.status-pill[data-state="online"] .dot { background: var(--ok); }
-.status-pill[data-state="loggingIn"] .dot { background: var(--warn); }
-.status-pill[data-state="error"] .dot { background: var(--err); }
-/* A session that is up and could not be moved where the login list says it should
-   be: the state is fine, so the dot is what says there is something to look at.
-   It follows the rules above, since it qualifies the state they colour. */
+.state-pill[data-state="online"] .dot { background: var(--ok); }
+.state-pill[data-state="loggingIn"] .dot { background: var(--warn); }
+.state-pill[data-state="error"] .dot { background: var(--err); }
+/* A session that is up and could not be moved where the login list says it
+   should be: it colours the dot of the state rules above. */
 .state-pill.attention .dot { background: var(--warn); }
 
 /* ---------- status strip ---------- */
@@ -204,8 +195,8 @@ a:hover { text-decoration: underline; }
   flex: 1;
   min-width: 0;
 }
-/* Label and reading on one line rather than stacked: it halves the height of the
-   strip and reads the way a readout does. */
+/* Label and reading share one line: it halves the height of the strip, and the
+   reading follows its label as in a readout. */
 .status-item { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
 .status-item label { font-size: var(--fs-xs); color: var(--text-mute); }
 .status-item span {
@@ -220,9 +211,9 @@ a:hover { text-decoration: underline; }
 }
 .status-actions { display: flex; gap: var(--sp-2); }
 
-/* A line of its own above the readings, for news the readings cannot carry: the
-   session is up and working, so every number in the strip says there is nothing
-   to do, and this is the sentence that says otherwise. */
+/* A line of its own above the readings, for news the readings cannot carry: why
+   the program is in the state it reports, and the session that is up while the
+   login list asked for another service type. */
 .status-notice {
   flex: 1 1 100%;
   margin: 0;
@@ -232,6 +223,13 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius);
   color: var(--warn);
   font-size: var(--fs-sm);
+}
+/* Why the program reports an error belongs in the error colour, not the one that
+   asks for a hand. */
+.status-notice.bad {
+  background: var(--err-weak);
+  border-color: color-mix(in srgb, var(--err) 35%, transparent);
+  color: var(--err);
 }
 
 /* ---------- the sidebar ---------- */
@@ -258,7 +256,9 @@ a:hover { text-decoration: underline; }
   transition: background .12s, color .12s;
 }
 .tab:hover { background: var(--surface-3); color: var(--text); }
-.tab:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent-weak); }
+/* The ring is drawn in the accent, which is dark enough against the strip to be
+   seen: the washed-out accent leaves a focus ring nobody can find. */
+.tab:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
 .tab.active {
   background: var(--surface);
   border-left-color: var(--accent);
@@ -270,9 +270,8 @@ a:hover { text-decoration: underline; }
 
 main { grid-area: main; padding: var(--sp-5); }
 
-/* One cap for every panel. It is the point past which a row of fields stops
-   being easier to read, not a layout: how many fit in a row is for the field
-   grid below to decide. */
+/* One cap for every panel, the point past which a row of fields stops being
+   easy to read. How many fit in a row is for the field grid below to decide. */
 main > section { max-width: var(--content-w); margin: 0 auto; }
 
 .panel { display: none; }
@@ -305,10 +304,8 @@ main > section { max-width: var(--content-w); margin: 0 auto; }
 
 /* ---------- one label and its control ---------- */
 
-/* A pair is stacked rather than a label column beside a field column: the fields
-   can then flow into two, three or four columns as the window grows, which a
-   fixed label column cannot do. 420px keeps a URL or a path readable without
-   leaving the row half empty, and gives the settings panels three columns. */
+/* A pair stacks its label over its field, so the fields flow into two, three or
+   four columns as the window grows. 420px keeps a URL or a path readable. */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
@@ -321,11 +318,10 @@ main > section { max-width: var(--content-w); margin: 0 auto; }
   font-weight: 500;
   color: var(--text-dim);
 }
-/* Holds the height of a label where a pair has none, so its control still lines
-   up with the controls beside it. */
+/* Holds the height of a label where a pair has none. */
 .pair-label { display: block; }
 .field { min-width: 0; }
-/* A path is the one value that can be longer than the cell it is given. */
+/* A path can be longer than the cell it is given. */
 .field code { word-break: break-all; }
 
 input[type=text], input[type=password], input[type=number], input:not([type]), select {
@@ -348,8 +344,10 @@ input:focus, select:focus {
 input.invalid, select.invalid { border-color: var(--err); }
 input:disabled, select:disabled { opacity: .55; }
 
-.hint { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--text-mute); }
-.error { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--err); }
+/* The hint and the message under a field are read, not skimmed: they take the
+   body step below the page's own, and no smaller. */
+.hint { margin: var(--sp-1) 0 0; font-size: var(--fs-sm); color: var(--text-mute); }
+.error { margin: var(--sp-1) 0 0; font-size: var(--fs-sm); color: var(--err); }
 .error:empty { display: none; }
 
 .checks { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -554,6 +552,9 @@ input:disabled, select:disabled { opacity: .55; }
 .services { display: flex; flex-direction: column; gap: var(--sp-2); }
 .chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
 .chips:empty::before { content: "—"; color: var(--text-mute); font-size: var(--fs-sm); }
+/* A refused list of service types has no input to mark, so the row of chips
+   carries the mark instead. */
+.chips.invalid .chip { border-color: var(--err); }
 
 .chip {
   display: inline-flex;
@@ -568,8 +569,7 @@ input:disabled, select:disabled { opacity: .55; }
 }
 .chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-weak); }
 .chip.dragging { opacity: .55; }
-/* The remove button is one small glyph. The padding stays small so the chip
-   keeps its height and an invisible ring does the work of a hit area. */
+/* Small padding keeps the chip height; the ::after ring is the hit area. */
 .chip-x {
   appearance: none;
   position: relative;
@@ -614,10 +614,8 @@ input:disabled, select:disabled { opacity: .55; }
   color: var(--text-dim);
 }
 
-/* The card of the account the session is on, while that entry lists another
-   service type to move it to: where the session is, where the entry says it should
-   be, and the way to move it there. It takes a line of its own under the test
-   button. */
+/* The card of the account the session is on, while its entry lists another
+   service type to move it to. It takes a line under the test button. */
 .account-preferred { flex: 1 1 100%; }
 .account-preferred .hint { margin: 0 0 var(--sp-2); }
 /* The line the portal's refusal is reported on. The session is up, so this is
@@ -652,11 +650,8 @@ input:disabled, select:disabled { opacity: .55; }
 
 /* ---------- the action bar ---------- */
 
-/* The end of the form, not a bar floating over it: the buttons belong to the thing
-   they save, so a panel that has already been saved need not keep them on screen.
-   The padding is what lets the bar span the window while its buttons stay in the
-   column above it — half of whatever the content column is wider than the cap, or
-   the ordinary gutter when it is not. */
+/* The end of the form, where the buttons that save it sit. The padding is the
+   gutter, or half of whatever the content column is wider than the cap. */
 .actionbar {
   grid-area: foot;
   display: flex;
@@ -708,9 +703,7 @@ input:disabled, select:disabled { opacity: .55; }
 /* ---------- wide windows ---------- */
 
 /* General is the one tab with a list in it, and a list wants width the settings
-   beside it do not: its panels become two columns — the accounts panel on the
-   wide side, the two settings panels stacked in a column of their own, each
-   narrow enough to be a single column of fields. */
+   beside it do not: the accounts panel takes the wide side. */
 @media (min-width: 1200px) {
   #panel-general.active {
     display: grid;
@@ -724,9 +717,8 @@ input:disabled, select:disabled { opacity: .55; }
 
 /* ---------- narrow screens ---------- */
 
-/* One breakpoint, and only because a sidebar cannot become a list on its own:
-   below this the entries move above the content and scroll sideways. Everything
-   inside the content is already sized by the window and needs nothing here. */
+/* The sidebar cannot become a list on its own: below this the entries move
+   above the content and scroll sideways. */
 @media (max-width: 860px) {
   body {
     grid-template-columns: minmax(0, 1fr);
@@ -755,8 +747,8 @@ input:disabled, select:disabled { opacity: .55; }
 
 /* ---------- motion ---------- */
 
-/* The page animates nothing of its own; the only movement is the handful of
-   hover and focus transitions, and someone who asked for less gets none. */
+/* The only movement is the handful of hover and focus transitions; someone who
+   asked for less gets none. */
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }

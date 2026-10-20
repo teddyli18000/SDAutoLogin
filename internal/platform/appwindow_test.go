@@ -33,7 +33,9 @@ func TestAppWindowCommandAsksTheBrowserForAWindowOfItsOwn(t *testing.T) {
 			// on, bringing up the same kind of window.
 			"darwin",
 			"/Applications/Google Chrome.app",
-			"open",
+			// The launcher by its path: a bare name is one a directory earlier
+			// on PATH could answer with a program of its own.
+			"/usr/bin/open",
 			[]string{"-na", "/Applications/Google Chrome.app", "--args", "--app=" + target},
 		},
 	}
@@ -78,7 +80,7 @@ func TestFindAppBrowserTakesTheFirstOneThatIsThere(t *testing.T) {
 		{"only the second one is installed", isFile(), onPath("chromium"), "/usr/bin/chromium"},
 		{"only the last one is installed", isFile(), onPath("microsoft-edge"), "/usr/bin/microsoft-edge"},
 		{
-			// The order is the preference, not the order they are found in.
+			// The candidate list decides, whatever order they turn up in.
 			"several are installed",
 			isFile(installed),
 			onPath("chromium", "microsoft-edge"),
@@ -126,8 +128,8 @@ func TestAppBrowserCandidatesFollowTheSystem(t *testing.T) {
 		t.Errorf("windows candidates = %q, want %q", windows, want)
 	}
 
-	// Without the environment there is no directory to look in, so nothing is
-	// offered rather than a path built out of empty parts.
+	// Without the environment there is no directory to look in, so no path is
+	// built out of empty parts.
 	if got := appBrowserCandidates("windows", func(string) string { return "" }); len(got) != 0 {
 		t.Errorf("windows candidates without an environment = %q, want none", got)
 	}

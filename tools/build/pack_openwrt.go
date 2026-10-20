@@ -15,23 +15,21 @@ const (
 	openwrtDir = "packaging/openwrt"
 	// The four files the package installs, named as the router sees them. The
 	// configuration file is listed as one, so an upgrade keeps the account in it.
-	// The program goes to /usr/lib compressed, and what the router runs is the
-	// wrapper, which unpacks it into memory.
+	// The program goes to /usr/lib compressed, and the wrapper runs it from
+	// memory.
 	uciFile        = "/etc/config/sdautologin"
 	initFile       = "/etc/init.d/sdautologin"
 	openwrtWrapper = "/usr/bin/SDAutoLogin"
 	openwrtBinary  = "/usr/lib/sdautologin/SDAutoLogin.gz"
-	// wrapperVersion is the marker the wrapper script carries where the version
-	// of the program goes, written over by packageOpenwrt. The script is a file
-	// a reader can open, so it holds a marker rather than a number that would go
-	// stale there.
+	// wrapperVersion is the marker the wrapper script carries where the version of
+	// the program goes, written over by packageOpenwrt. The script is a file a
+	// reader can open, so the number is not written into it.
 	wrapperVersion = "@VERSION@"
 )
 
 // taskOpenwrt builds the router builds again and packs them as OpenWrt
 // packages, one for each byte order, into dist/packages/. The build without the
-// tray is the one that goes in: a router has no desktop session to put an icon
-// in, and the tray is by far the largest thing the binary can do without.
+// tray is the one that goes in, a router having no desktop session.
 func taskOpenwrt(root string) error {
 	for _, t := range targets() {
 		if t.tags != notrayTag || (t.goarch != "mips" && t.goarch != "mipsle") {
@@ -53,16 +51,16 @@ func taskOpenwrt(root string) error {
 // ar archive of the version of the format, a control archive and a data archive,
 // with the control file of opkg in it.
 func packageOpenwrt(root string, t target) error {
-	version, err := appVersion(root)
+	rel, err := packageVersion(root)
 	if err != nil {
 		return err
 	}
 	arch := openwrtArch(t.goarch)
 
-	// The program is installed compressed, and a wrapper unpacks it into memory on
-	// the first start: a router has little flash and a fair amount of memory, so
-	// the package takes about a third of the flash it otherwise would, at the cost
-	// of the unpacked copy living in /tmp.
+	// The program is installed compressed, and a wrapper unpacks it into memory
+	// on the first start: a router has little flash and a fair amount of memory,
+	// so the package takes about a third of the flash, at the cost of a copy in
+	// /tmp.
 	bin, err := readBinary(filepath.Join(root, distDir, t.name()))
 	if err != nil {
 		return err
@@ -71,12 +69,14 @@ func packageOpenwrt(root string, t target) error {
 	if err != nil {
 		return err
 	}
-	wrapper, err := openwrtWrapperEntry(root, version)
+	wrapper, err := openwrtWrapperEntry(root, rel.tag)
 	if err != nil {
 		return err
 	}
 	payload := filepath.Join(root, openwrtDir, "root")
-	uci, err := textEntry(filepath.Join(payload, uciFile), "."+uciFile, 0o644)
+	// 0600: the file holds the account, and the image build installs it with
+	// $(INSTALL_CONF), which is the same mode.
+	uci, err := textEntry(filepath.Join(payload, uciFile), "."+uciFile, 0o600)
 	if err != nil {
 		return err
 	}
@@ -92,23 +92,20 @@ func packageOpenwrt(root string, t target) error {
 			uci,
 			init,
 		},
-		control:  openwrtControl(version, arch),
+		control:  openwrtControl(rel.deb(), arch),
 		confiles: []string{uciFile},
 		scripts:  filepath.Join(root, openwrtDir, "control"),
 	})
 	if err != nil {
 		return err
 	}
-	return writePackage(root, fmt.Sprintf("%s_%s-%s_%s.ipk", pkgName, version, pkgRelease, arch), data)
+	return writePackage(root, fmt.Sprintf("%s_%s-%s_%s.ipk", pkgName, rel.deb(), pkgRelease, arch), data)
 }
 
 // openwrtWrapperEntry reads the wrapper script the router runs and writes the
-// version of the program into it.
-//
-// The version ends up in the name the program is unpacked to, and that name tells
-// the program of a new package from the copy the previous one left in /tmp. A
-// missing marker is an error rather than a versionless package: the script would
-// then unpack to a name no upgrade would ever change.
+// version of the program into it, which ends up in the name the program is
+// unpacked to. A missing marker is an error: the script would then unpack to a
+// name no upgrade changes.
 func openwrtWrapperEntry(root, version string) (pkgEntry, error) {
 	path := filepath.Join(root, openwrtDir, "root", openwrtWrapper)
 	src, err := readText(path)
@@ -126,8 +123,8 @@ func openwrtWrapperEntry(root, version string) (pkgEntry, error) {
 }
 
 // openwrtControl is the control file of an ipk, the fields opkg shows. There is
-// no Depends line on purpose: the program is statically linked, and the procd and
-// the shell that run the init script are part of the base system.
+// no Depends line: the program is statically linked, and procd and the shell
+// that run the init script are part of the base system.
 func openwrtControl(version, arch string) string {
 	return fmt.Sprintf(`Package: %s
 Version: %s-%s
@@ -144,10 +141,9 @@ Description: %s
 `, pkgName, version, pkgRelease, arch, pkgSection, pkgMaintainer, pkgSummary, uciFile)
 }
 
-// openwrtArch is the architecture name OpenWrt gives a MIPS build: the core the
-// binary is compiled for, 24Kc, which both the big endian Atheros boards and the
-// little endian MediaTek ones have. Neither of them has a floating point unit,
-// which is why these builds are softfloat.
+// openwrtArch is the architecture name OpenWrt gives a MIPS build: the 24Kc
+// core, which both the big endian Atheros boards and the little endian MediaTek
+// boards have. Neither has a floating point unit, so the builds are softfloat.
 func openwrtArch(goarch string) string {
 	if goarch == "mipsle" {
 		return "mipsel_24kc"

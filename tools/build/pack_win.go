@@ -1,10 +1,7 @@
 // The Windows side of a release: the builds as archives that can be unpacked
 // wherever they land, and the manifests that let Scoop and winget install one.
-//
-// There is no installer here on purpose: the program is a single file that needs
-// nothing else, so an archive serves a desktop and both of those package managers
-// can install one, while an .msi would need a toolchain of its own to build the
-// same one file.
+// There is no installer: the program is a single file, and an .msi would need a
+// toolchain of its own to build the same one file.
 
 package main
 
@@ -20,7 +17,7 @@ import (
 
 const (
 	// wingetID is what winget calls the package. It has to start with the
-	// publisher, which is the account the project lives under.
+	// publisher, the account the project lives under.
 	wingetID = "zqlan.SDAutoLogin"
 	// wingetManifestVersion is the revision of the manifest format the files are
 	// written for. It appears in the files and in the address of the schema that
@@ -130,16 +127,15 @@ func windowsZip(root string, t target) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// releaseURL is where the archive of a release is published. A manifest needs an
-// address that cannot be worked out from the build, so it is derived here from the
-// address the program carries and the layout the release host uses: this project
-// is published on Gitea, which serves the attachment of a release as
+// releaseURL is where the archive of a release is published. A manifest needs
+// an address the build cannot work out for itself, so it is derived from the
+// address the program carries and the layout of the release host, Gitea serving
+// the attachment of a release as
 //
 //	<address>/releases/download/<tag>/<file>
 //
-// where the tag is the version with the v this project puts in front of it. GitHub
-// uses the same shape, so both manifests follow a move of this function; GitLab
-// does not.
+// where the tag is the version with the v this project puts in front of it.
+// GitHub uses the same shape; GitLab does not.
 func releaseURL(repo, version, file string) string {
 	return fmt.Sprintf("%s/releases/download/v%s/%s", repo, version, file)
 }
@@ -168,7 +164,6 @@ type scoopManifest struct {
 	Persist []string `json:"persist"`
 }
 
-// writeScoopManifest writes the manifest of the Scoop package.
 func writeScoopManifest(root, version, repo string, builds []windowsBuild) error {
 	m := scoopManifest{
 		Version:      version,
@@ -193,10 +188,9 @@ func writeScoopManifest(root, version, repo string, builds []windowsBuild) error
 	return writeManifest(root, filepath.Join("scoop", pkgName+".json"), append(data, '\n'))
 }
 
-// writeWingetManifests writes the three files winget wants: what the package is,
-// where the archives are, and the description of it. The build task is not the
-// place to publish them, so they are written here and the winget command line
-// checks them.
+// writeWingetManifests writes the three files winget wants: what the package
+// is, where the archives are, and the description of it. They are written here
+// for the winget command line to check.
 func writeWingetManifests(root, version, repo string, builds []windowsBuild) error {
 	files := []struct {
 		// kind is the part of the manifest, which names both its file and the
@@ -248,10 +242,9 @@ ManifestVersion: %s
 	return nil
 }
 
-// wingetSchema is the first line of a winget manifest: the address of the schema
-// the file is written against. Nothing needs it to install a package, and the
-// winget command line warns about every manifest that is missing it, since an
-// editor uses it to check the file as it is typed.
+// wingetSchema is the first line of a winget manifest: the address of the
+// schema the file is written against. Nothing needs it to install a package,
+// but the winget command line warns about every manifest missing it.
 func wingetSchema(kind string) string {
 	return "# yaml-language-server: $schema=https://aka.ms/winget-manifest." +
 		kind + "." + wingetManifestVersion + ".schema.json\n"
@@ -281,8 +274,8 @@ Installers:
 	return b.String()
 }
 
-// wingetDescription is the longer description of the winget manifest, which is
-// one line per paragraph.
+// wingetDescription is the longer description of the winget manifest, one line
+// per paragraph.
 func wingetDescription() string {
 	return "Keeps a Dr.COM ePortal session alive, checking the portal every few seconds " +
 		"and signing back in as soon as the session is gone. It never signs the session " +
@@ -290,7 +283,6 @@ func wingetDescription() string {
 		"configured from a settings page in the browser."
 }
 
-// writeManifest writes one of the manifests into dist/packages/manifests/.
 func writeManifest(root string, name string, data []byte) error {
 	path := filepath.Join(root, distDir, pkgDir, manifestDir, filepath.FromSlash(name))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -5,6 +5,7 @@ package tray
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"fyne.io/systray"
 
@@ -16,17 +17,13 @@ import (
 	"sdautologin/internal/service"
 )
 
-// HasTray reports whether this build puts up a tray icon at all. A build that
-// says no is made for the machines that have no desktop session to put one in.
+// HasTray reports whether this build puts up a tray icon. A build that says no
+// is made for the machines that have no desktop session to put one in.
 const HasTray = true
 
-// Run provides the Linux / macOS tray through fyne.io/systray, which the
-// standard library cannot, and blocks until the tray quits. On Linux the library
-// uses a pure Go D-Bus StatusNotifierItem backend; on macOS it needs cgo and the
-// Xcode command line tools at build time.
-//
-// A machine with no session bus has no tray to put up and the toolkit does not
-// say so, so the caller's fallback is taken here (see sessionBusError).
+// Run provides the Linux / macOS tray through fyne.io/systray and blocks until it
+// quits. On Linux that is a pure Go D-Bus StatusNotifierItem; a machine with no
+// session bus has no tray, so the caller's fallback is taken here.
 func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
 	if err := sessionBusError(); err != nil {
 		logging.Log.Warn("no session bus to put a tray icon on (%v), running without one", err)
@@ -36,9 +33,9 @@ func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
 		return
 	}
 
-	// The tap handler is registered before the event loop starts on purpose: the
-	// Linux backend reads it while it exports the item, so one set from the ready
-	// callback can arrive too late, leaving the item menu only with no clicks.
+	// The tap handler is registered before the event loop starts: the Linux
+	// backend reads it while it exports the item, so one set from the ready
+	// callback can arrive too late and leave the item with a menu but no clicks.
 	var tray atomic.Pointer[unixTray]
 	systray.SetOnTapped(func() {
 		if t := tray.Load(); t != nil {
@@ -72,6 +69,9 @@ type unixTray struct {
 	// lastRefused is whether the snapshot before this one was one the portal had
 	// refused to move the session for, so the reader is told about it once.
 	lastRefused bool
+	// alert decides which failed rounds are worth a notification, since one
+	// outage passes through LoggingIn between two errors.
+	alert outageAlert
 }
 
 func trayReady(state *app.AppState, opts Options) *unixTray {
@@ -174,13 +174,12 @@ func trayReady(state *app.AppState, opts Options) *unixTray {
 
 	// A second start is a request for the settings page, which the running copy
 	// answers through the socket published beside its lock file. The listener is
-	// already bound, so a request arriving while the icon is still being made
-	// waits in the socket rather than being lost.
+	// already bound, so a request waits in the socket until the icon is ready.
 	go platform.WaitForSettingsRequest(t.answerSettingsRequest)
 
 	// A page opened for a machine with nothing written down yet is logged by the
 	// caller, which knows whether the page was opened by this or by the fallback.
-	if !t.state.Config().Configured() {
+	if !t.state.Config().HasAccounts() {
 		t.openSettings()
 	} else if t.opts.AppWindow {
 		t.openSettings()
@@ -204,11 +203,14 @@ func (t *unixTray) openSettings() {
 	if t.opts.AppWindow {
 		open = t.settings.OpenAppWindow
 	}
-	url, err := open()
-	if err != nil {
+	if _, err := open(); err != nil {
 		logging.Log.Error("opening the settings page: %v", err)
 	}
-	logging.Log.Debug("settings page at %s", url)
+	// The address handed to the browser carries the one time token, and a log
+	// line outlives the page: the port is what a log can be told.
+	if addr, ok := t.settings.Addr(); ok {
+		logging.Log.Debug("settings page opened on %s", addr)
+	}
 }
 
 func (t *unixTray) onStatus(s service.Snapshot) {
@@ -240,14 +242,14 @@ func (t *unixTray) onStatus(s service.Snapshot) {
 	}
 	t.mu.Unlock()
 
-	// The transitions worth telling the user about, as the Windows tray does with
-	// a balloon tip. It runs outside the lock since it starts a helper process.
-	// The refusal is one of them: the program has stopped trying, and moving the
-	// session is the reader's to do.
+	// The transitions the reader is told about, as the Windows tray does with a
+	// balloon tip. The alert is asked first: it has to see every snapshot. It runs
+	// outside the lock, since a notification starts a helper process.
+	failed := t.alert.note(s, time.Now())
 	switch {
 	case previous == service.StateLoggingIn && s.State == service.StateOnline:
 		platform.Notify(i18n.L("app.name"), i18n.L("balloon.loggedIn"))
-	case s.State == service.StateError && previous != service.StateError:
+	case failed:
 		platform.Notify(i18n.L("app.name"), i18n.L("balloon.reconnectFailed")+": "+s.Message)
 	case refused && !previousRefused:
 		logging.Log.Debug("tray: the session could not be moved onto the service type its entry puts first, saying so once")
@@ -266,6 +268,8 @@ func (t *unixTray) tooltip(s service.Snapshot) string {
 	if s.SwitchRefused != nil {
 		out += "\n" + i18n.L("tray.switchRefused")
 	}
+	// A release the reader could move to, where a desktop reader notices it.
+	out += updateLine(s)
 	if s.ClientIP != "" {
 		out += "\n" + i18n.Lf("tray.clientIP", s.ClientIP)
 	}

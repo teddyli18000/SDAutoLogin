@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"sdautologin/internal/config"
+	"sdautologin/internal/logging"
 )
 
 // fakeAddr stands in for a listener address in the tests that only exercise the
@@ -40,8 +42,8 @@ func startedServer(t *testing.T, addr string) (*Server, string) {
 	return server, url
 }
 
-// browser is a client that keeps cookies, which is what the browser does between
-// the address it was opened with and the page it is left on.
+// browser is a client that keeps cookies, as a browser does between the address it
+// was opened with and the page it is left on.
 func browser(t *testing.T) *http.Client {
 	t.Helper()
 
@@ -93,6 +95,50 @@ func TestServerRefusesARequestWithoutTheToken(t *testing.T) {
 	}
 }
 
+// TestThePageFilesNeedTheSessionToo covers what the page loads for itself. The
+// script, the stylesheet and the mark are answered through the same check as the
+// rest of the server: a program that found the port without being handed the
+// address reads no part of the page, and the browser that did open the address
+// is served all of it.
+func TestThePageFilesNeedTheSessionToo(t *testing.T) {
+	_, url := startedServer(t, "127.0.0.1:0")
+	base := pageAddress(url)
+	files := []string{"/static/app.js", "/static/app.css", "/static/logo.svg"}
+
+	for _, name := range files {
+		refused, err := http.Get(base + name)
+		if err != nil {
+			t.Fatalf("get %s without the cookie: %v", name, err)
+		}
+		refused.Body.Close()
+		if refused.StatusCode != http.StatusForbidden {
+			t.Errorf("%s without the cookie: status %d, want 403", name, refused.StatusCode)
+		}
+	}
+
+	// The browser follows the address through to the page, which is what leaves
+	// it holding the cookie the files are read with.
+	client := browser(t)
+	page, err := client.Get(url)
+	if err != nil {
+		t.Fatalf("open the address: %v", err)
+	}
+	page.Body.Close()
+	if page.StatusCode != http.StatusOK {
+		t.Fatalf("opening the address: status %d, want 200", page.StatusCode)
+	}
+	for _, name := range files {
+		served, err := client.Get(base + name)
+		if err != nil {
+			t.Fatalf("get %s with the cookie: %v", name, err)
+		}
+		served.Body.Close()
+		if served.StatusCode != http.StatusOK {
+			t.Errorf("%s with the cookie: status %d, want 200", name, served.StatusCode)
+		}
+	}
+}
+
 // TestTheAddressIsExchangedForASessionCookie covers what happens to the token the
 // tray hands out: the address bar, the history and the page's Referer are the same
 // string, so the token is taken out of it as soon as the page is served.
@@ -100,8 +146,7 @@ func TestTheAddressIsExchangedForASessionCookie(t *testing.T) {
 	server, url := startedServer(t, "127.0.0.1:0")
 
 	client := browser(t)
-	// The redirect is left alone, so the reply that carries the cookie can be
-	// read rather than the page it leads to.
+	// The redirect is left alone, so the test reads the reply that carries the cookie.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
@@ -185,7 +230,7 @@ func TestTheAddressIsGoodForOneOpening(t *testing.T) {
 }
 
 // TestEveryOpeningGetsItsOwnAddress is the tray path: two openings in a row have
-// to work, so the second cannot be handed the address the first has just used.
+// to work, so the second cannot be handed the address the first used.
 func TestEveryOpeningGetsItsOwnAddress(t *testing.T) {
 	server, _ := startedServer(t, "127.0.0.1:0")
 
@@ -215,7 +260,7 @@ func TestEveryOpeningGetsItsOwnAddress(t *testing.T) {
 
 func TestTheTokenInAnAddressIsNotAcceptedOnTheApi(t *testing.T) {
 	// Only the first navigation the browser makes on its own can put the token
-	// in an address, so nothing else reads it from there. What a caller would
+	// in an address, so no other endpoint reads it from there. What a caller would
 	// otherwise copy out of a log or a history is not a way to the settings.
 	server, url := startedServer(t, "127.0.0.1:0")
 	base := pageAddress(url)
@@ -237,8 +282,8 @@ func TestTheTokenInAnAddressIsNotAcceptedOnTheApi(t *testing.T) {
 
 func TestAWriteNeedsTheHeaderAsWellAsTheCookie(t *testing.T) {
 	// A page from another site cannot set a custom header without this server
-	// agreeing to a cross site request, so a write that carries the cookie alone
-	// is refused, which is the second thing it has to get past.
+	// agreeing to a cross site request, so a write that carries the cookie alone is
+	// refused as well.
 	server, url := startedServer(t, "127.0.0.1:0")
 	base := pageAddress(url)
 
@@ -363,11 +408,98 @@ func TestTheReplyDeadlineFollowsTheRequestTimeout(t *testing.T) {
 	}
 }
 
+// deadlineWriter is the part of a connection the reply deadline is set on. A real
+// one is the socket net/http wraps; this records what a handler asked for.
+type deadlineWriter struct {
+	http.ResponseWriter
+	deadline time.Time
+}
+
+func (w *deadlineWriter) SetWriteDeadline(t time.Time) error {
+	w.deadline = t
+	return nil
+}
+
+// deadlineFor runs one request through the server's handler chain and returns the
+// deadline the reply was given, counted from just before the call.
+func deadlineFor(t *testing.T, server *Server, target string) time.Duration {
+	t.Helper()
+
+	rec := &deadlineWriter{ResponseWriter: httptest.NewRecorder()}
+	start := time.Now()
+	server.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+	if rec.deadline.IsZero() {
+		t.Fatalf("%s was answered without a reply deadline", target)
+	}
+	return rec.deadline.Sub(start)
+}
+
+// TestTheReplyDeadlineIsSetForEveryKindOfAnswer covers which answers carry the
+// deadline: the whole chain is behind it, so a refusal and a missing address are
+// bounded like a page is. A caller that stops reading holds its connection open
+// either way.
+func TestTheReplyDeadlineIsSetForEveryKindOfAnswer(t *testing.T) {
+	state := New(&config.Config{HTTPTimeoutSeconds: 6})
+	server := NewServer(state, "", nil)
+	t.Cleanup(server.Stop)
+
+	want := writeTimeout(state.Config())
+	for _, target := range []string{
+		"/",              // a refusal: no token, no cookie
+		"/static/app.js", // the page's own files, refused the same way
+		"/api/status",    // the api, refused the same way
+		"/nowhere",       // nothing is served there
+	} {
+		if got := deadlineFor(t, server, target); got < want-time.Second || got > want+time.Second {
+			t.Errorf("%s was given %v, want about %v", target, got, want)
+		}
+	}
+}
+
+// TestTheReplyDeadlineFollowsAChangeOfConfiguration is the reason the deadline is
+// set per request: the request timeout is a setting on the page, and the server
+// outlives a save. A copy that kept the deadline it started with would cut off a
+// reply the reader had just asked to be allowed to wait for.
+func TestTheReplyDeadlineFollowsAChangeOfConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.HTTPTimeoutSeconds = 2
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	state := New(cfg)
+	server := NewServer(state, "", nil)
+	t.Cleanup(server.Stop)
+
+	before := writeTimeout(state.Config())
+	if got := deadlineFor(t, server, "/"); got < before-time.Second || got > before+time.Second {
+		t.Fatalf("the deadline before the change was %v, want about %v", got, before)
+	}
+
+	// The same save the page makes, on the same state the server reads from.
+	next := cfg.Clone()
+	next.HTTPTimeoutSeconds = 300
+	if err := state.Update(next); err != nil {
+		t.Fatal(err)
+	}
+
+	after := writeTimeout(state.Config())
+	if after <= before {
+		t.Fatalf("writeTimeout after the save = %v, want more than %v", after, before)
+	}
+	if got := deadlineFor(t, server, "/"); got < after-time.Second || got > after+time.Second {
+		t.Errorf("the deadline after the change was %v, want about %v: the server is still using the configuration it started with", got, after)
+	}
+}
+
 func TestEveryAnswerCarriesTheSecurityHeaders(t *testing.T) {
 	// The page is opened with the token in its address, so an answer must keep that
 	// address out of a Referer, must not be framed by another page, and must name
-	// what it may load rather than trust its own markup. The refusal a caller
-	// without the token reads carries them too.
+	// what it may load from its own policy. The refusal a caller without the token
+	// reads carries them too.
 	_, url := startedServer(t, "127.0.0.1:0")
 
 	// One client that has been through the exchange and holds the cookie, since
@@ -418,7 +550,7 @@ func TestEveryAnswerCarriesTheSecurityHeaders(t *testing.T) {
 func TestAMissingTokenIsOneNothingMatches(t *testing.T) {
 	// The comparison is a constant time one and an empty pair matches, so a token
 	// that was never made is refused before the comparison runs: a server that was
-	// never started must not accept a caller who sends no token at all.
+	// never started must not accept a caller who sends no token.
 	if tokenEqual("", "") {
 		t.Error("an empty token matched a token that was never made")
 	}
@@ -461,10 +593,9 @@ func TestURLForPicksAnAddressABrowserCanUse(t *testing.T) {
 	}
 }
 
-// TestARefusedSaveLeavesTheRunningConfigAlone covers a request that is not
-// accepted: the page posts the whole configuration back, so the running one has
-// to come out of it untouched. Otherwise a password that was typed wrong would
-// take the session down at the same moment the page says the save was refused.
+// TestARefusedSaveLeavesTheRunningConfigAlone covers a refused request: the page
+// posts the whole configuration back, so the running one comes out of it untouched,
+// or a mistyped password takes the session down while the page reports the refusal.
 func TestARefusedSaveLeavesTheRunningConfigAlone(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	// A file in the shape the version with one account wrote, so the test also
@@ -488,8 +619,8 @@ func TestARefusedSaveLeavesTheRunningConfigAlone(t *testing.T) {
 	}
 
 	// The account name is what is wrong with this request. An empty password is
-	// not wrong by itself any more: that is how the page says "keep the one that
-	// is stored", and an entry with no name has nothing to keep a password for.
+	// not wrong by itself: that is how the page says "keep the one that is stored",
+	// and an entry with no name has nothing to keep a password for.
 	body := `{"accounts":[{"username":"","password":"","isps":["@cucc"]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(body)))
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
@@ -546,10 +677,9 @@ func pageOf(t *testing.T, cfg *config.Config) (*Server, string) {
 	return server, rec.Body.String()
 }
 
-// The page writes the password field and never reads it, so a stored secret is
-// not part of what it is given: it is told that there is one, and nothing more.
-// A password that never leaves the process cannot be read out of the browser, out
-// of the page's own script, or out of a request the page makes.
+// The page writes the password field and never reads it, so a stored secret is not
+// part of what it is given: it is told that there is one. A password that never
+// leaves the process cannot be read back out of the browser.
 func TestThePageIsNotGivenTheStoredPassword(t *testing.T) {
 	cfg := &config.Config{
 		Accounts:         []config.Account{{Username: "s1234567", Password: "topsecret", ISPs: []string{""}}},
@@ -560,8 +690,8 @@ func TestThePageIsNotGivenTheStoredPassword(t *testing.T) {
 	if strings.Contains(body, "topsecret") {
 		t.Errorf("the stored password was handed to the page: %s", body)
 	}
-	if !strings.Contains(body, `"hasPassword":true`) {
-		t.Errorf("the page is not told that a password is stored: %s", body)
+	if !strings.Contains(body, `"passwordSource":"config"`) {
+		t.Errorf("the page is not told where the password is: %s", body)
 	}
 }
 
@@ -599,8 +729,8 @@ func TestReloadingDoesNotHandThePasswordToThePage(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "topsecret") {
 		t.Errorf("the reloaded configuration went back to the page with its password: %s", rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"hasPassword":true`) {
-		t.Errorf("the page is not told that a password is stored: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `"passwordSource":"config"`) {
+		t.Errorf("the page is not told where the password is: %s", rec.Body.String())
 	}
 }
 
@@ -617,8 +747,8 @@ func TestThePageIsToldNothingIsStoredWhenThePasswordsAreNotRemembered(t *testing
 	if strings.Contains(body, "topsecret") {
 		t.Errorf("the stored password was handed to the page: %s", body)
 	}
-	if strings.Contains(body, `"hasPassword":true`) {
-		t.Errorf("the page was told a password is stored, and the file holds none: %s", body)
+	if strings.Contains(body, `"passwordSource"`) {
+		t.Errorf("the page was told where a password is, and the file holds none: %s", body)
 	}
 }
 
@@ -641,7 +771,7 @@ func TestASaveThatLeavesThePasswordAloneKeepsIt(t *testing.T) {
 	}
 
 	// What the page sends for an entry whose password field was left empty: the
-	// account and the service type, and no password at all.
+	// account and the service type, and no password.
 	body := `{"accounts":[{"username":"s1234567","isps":["@cucc"]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(body)))
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: server.session})
@@ -671,9 +801,8 @@ func TestASaveThatLeavesThePasswordAloneKeepsIt(t *testing.T) {
 	}
 }
 
-// postAction runs one action the page can ask for and hands back the reply, so
-// the contract between the page and the handler is what is being read rather
-// than the handler on its own.
+// postAction runs one action the page can ask for and hands back the reply, so the
+// test reads the contract between the page and the handler.
 func postAction(t *testing.T, server *Server, body string) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -688,7 +817,7 @@ func postAction(t *testing.T, server *Server, body string) *httptest.ResponseRec
 // TestThePageCanAskForTheServiceTypeTheSessionShouldBeOn covers the reply the
 // controls on the page are rendered from: whether there was anything to do, and
 // what the sign-in went out as. A session already on the service type asked for is
-// answered with nothing to do, like one that is not up at all.
+// answered with nothing to do, like one that is not up.
 func TestThePageCanAskForTheServiceTypeTheSessionShouldBeOn(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -750,8 +879,8 @@ func TestThePageCanAskForTheServiceTypeTheSessionShouldBeOn(t *testing.T) {
 }
 
 // TestASwitchWithoutAServiceTypeIsRefused covers the difference the request keeps:
-// the campus network itself is a service type with no suffix, so a request naming
-// no service type is malformed rather than a request for the campus network.
+// the campus network itself is a service type with no suffix, and a request naming
+// no service type is malformed.
 func TestASwitchWithoutAServiceTypeIsRefused(t *testing.T) {
 	stub := newStubPortal(t, []string{"@zgyd", ""}, onlineSession, `{"result":1,"ret_code":0}`)
 	state := New(stub.cfg)
@@ -774,7 +903,7 @@ func TestASwitchWithoutAServiceTypeIsRefused(t *testing.T) {
 // TestThePortalPageOpenedIsTheConfiguredOne covers the way out of a session the
 // portal will not sign in again: the page asks for the portal's own page, and what
 // reaches the desktop is the configured address. The address in the request is
-// ignored on purpose, so no page can hand the shell one of its choosing.
+// ignored, so no page can hand the shell one of its choosing.
 func TestThePortalPageOpenedIsTheConfiguredOne(t *testing.T) {
 	cfg := portalPageConfig()
 	server, opened := portalPageServer(t, cfg, nil)
@@ -879,8 +1008,7 @@ func TestASaveCarriesThePreferredServiceSwitch(t *testing.T) {
 	if state.Config().SwitchToPreferredService {
 		t.Error("the running configuration still has the switch on")
 	}
-	// Read back from the file rather than from what was written into it: the
-	// next start is what the switch has to hold for.
+	// Read back from the file: the next start is what the switch has to hold for.
 	reloaded, err := config.LoadConfig(path)
 	if err != nil {
 		t.Fatal(err)
@@ -890,12 +1018,9 @@ func TestASaveCarriesThePreferredServiceSwitch(t *testing.T) {
 	}
 }
 
-// TestAFirstSaveFromThePage covers what the page sends when nothing is configured
-// yet, which is what the wizard does. The list a save carries is the list of cards,
-// so an account that has not been put in it is an account the request does not
-// have, and a password that was not put in the card is one the request does not
-// carry either. Both are refused by name, and the refusal is what the page shows
-// next to the field it is about.
+// TestAFirstSaveFromThePage covers the wizard's first save, when nothing is
+// configured yet: the request carries the cards, so an account or a password left
+// out of them is refused by name and the page shows the refusal beside its field.
 func TestAFirstSaveFromThePage(t *testing.T) {
 	cases := []struct {
 		name string
@@ -968,9 +1093,8 @@ func TestAFirstSaveFromThePage(t *testing.T) {
 }
 
 // TestTheRefusalLineNamesEveryField covers the line a refused save writes to the
-// log. It has to name every field that was refused, in one order, so two refusals
-// can be read against each other, and it says which field it is without ever
-// carrying what was in it.
+// log. It names every refused field in one order, so two refusals can be read
+// against each other, and it carries no value.
 func TestTheRefusalLineNamesEveryField(t *testing.T) {
 	got := describeErrors(map[string]string{
 		"accounts.1.password": "err.passwordRequired",
@@ -996,5 +1120,348 @@ func TestIsLoopback(t *testing.T) {
 		if isLoopback(host) {
 			t.Errorf("isLoopback(%q) = true, want false", host)
 		}
+	}
+}
+
+// captureStderr runs f with stderr sent into a pipe and returns what it wrote.
+// The logger copies every line to the console as well as the file, so this is
+// how a test sees what would be kept.
+func captureStderr(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stderr
+	os.Stderr = w
+	f()
+	os.Stderr = saved
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Close()
+	return string(data)
+}
+
+// TestTheAddressWithoutTheTokenIsTheOneALogCanCarry holds that the server can
+// name itself without the one time token: the log outlives the token and is
+// copied around, so a line that carried it would be a way back in.
+func TestTheAddressWithoutTheTokenIsTheOneALogCanCarry(t *testing.T) {
+	server, url := startedServer(t, "127.0.0.1:0")
+
+	addr, ok := server.Addr()
+	if !ok {
+		t.Fatal("Addr() reported no address for a server that is up")
+	}
+	if want := pageAddress(url); addr != want {
+		t.Errorf("Addr() = %q, want %q", addr, want)
+	}
+	if strings.Contains(addr, "token=") {
+		t.Errorf("Addr() = %q, want no token in it", addr)
+	}
+}
+
+// TestNoLogLineCarriesTheToken drives every place the settings server names
+// itself and holds that no line it writes carries the token.
+func TestNoLogLineCarriesTheToken(t *testing.T) {
+	logging.Log.Init(t.TempDir(), true)
+	t.Cleanup(logging.Log.CloseFile)
+
+	state := New(&config.Config{Accounts: []config.Account{{Username: "s1234567", Password: "p@ss"}}})
+	// An empty address is the mode a tray uses: the page is served on loopback
+	// when it is asked for, and nothing but the browser is told the address.
+	server := NewServer(state, "", nil)
+
+	var url string
+	console := captureStderr(t, func() {
+		var err error
+		url, err = server.URL()
+		if err != nil {
+			t.Fatalf("URL: %v", err)
+		}
+		// A second opening rolls the entry token and names itself again.
+		if _, err := server.rollEntry(); err != nil {
+			t.Fatalf("rollEntry: %v", err)
+		}
+		server.Stop()
+	})
+
+	token := url[strings.Index(url, "token=")+len("token="):]
+	if token == "" {
+		t.Fatalf("url = %q, want the token in it", url)
+	}
+	if strings.Contains(console, token) {
+		t.Errorf("a log line carries the token: %q", console)
+	}
+	assertLogFileLacks(t, token)
+}
+
+// TestTheRemoteManagementAddressGoesToTheConsoleNotTheLog covers the one mode
+// where nothing opens the page on the reader's behalf: the machine has no tray,
+// so the address has to be told to the person who asked for it. That is the
+// console, which is deliberate, and never the log file, which outlives the token
+// and is copied around.
+func TestTheRemoteManagementAddressGoesToTheConsoleNotTheLog(t *testing.T) {
+	logging.Log.Init(t.TempDir(), true)
+	t.Cleanup(logging.Log.CloseFile)
+
+	state := New(&config.Config{Accounts: []config.Account{{Username: "s1234567", Password: "p@ss"}}})
+	server := NewServer(state, "127.0.0.1:0", nil)
+
+	var url string
+	console := captureStderr(t, func() {
+		var err error
+		url, err = server.URL()
+		if err != nil {
+			t.Fatalf("URL: %v", err)
+		}
+		server.Stop()
+	})
+
+	token := url[strings.Index(url, "token=")+len("token="):]
+	if token == "" {
+		t.Fatalf("url = %q, want the token in it", url)
+	}
+	if !strings.Contains(console, token) {
+		t.Errorf("the console does not carry the address to open: %q", console)
+	}
+	assertLogFileLacks(t, token)
+}
+
+// assertLogFileLacks holds that the log file on disk does not carry secret.
+func assertLogFileLacks(t *testing.T, secret string) {
+	t.Helper()
+	p := logging.Log.Path()
+	if p == "" {
+		return
+	}
+	kept, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(kept), secret) {
+		t.Error("the log file carries the token")
+	}
+}
+
+// settingsServerOn starts a server on a configuration that is already loaded, and hands
+// back the server, the path of its file and the session a request has to carry.
+func settingsServerOn(t *testing.T, cfg *config.Config) (*Server, string, string) {
+	t.Helper()
+
+	state := New(cfg)
+	server := NewServer(state, "", nil)
+	t.Cleanup(server.Stop)
+	if _, err := server.URL(); err != nil {
+		t.Fatalf("URL: %v", err)
+	}
+	return server, cfg.Path(), server.session
+}
+
+// TestARequestUnderAnotherNameIsRefused: the page is answered at the address it was
+// served on, so a page a browser was made to reach at a name of its own gets nothing —
+// which is what stops DNS rebinding from depending on what the browser does with a
+// cookie.
+func TestARequestUnderAnotherNameIsRefused(t *testing.T) {
+	server, url := startedServer(t, "127.0.0.1:0")
+	addr := strings.TrimPrefix(pageAddress(url), "http://")
+
+	for _, host := range []string{addr, "localhost", "LOCALHOST"} {
+		if !server.hostAllowed(host) {
+			t.Errorf("host %q was refused", host)
+		}
+	}
+	for _, host := range []string{"evil.example:8080", "mypc.local:8080", ""} {
+		if server.hostAllowed(host) {
+			t.Errorf("host %q was allowed", host)
+		}
+	}
+
+	// The check is in the handler chain, so a refusal is a reply and not a handler that
+	// happens to ignore the name.
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Host = "evil.example:8080"
+	rec := httptest.NewRecorder()
+	server.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "invalid host") {
+		t.Errorf("under another name: status = %d, body = %q, want a refusal about the host",
+			rec.Code, rec.Body.String())
+	}
+
+	// The address the page is served on reaches the handler, which refuses the request
+	// for the reason the page's own tests expect: no session.
+	req = httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Host = addr
+	rec = httptest.NewRecorder()
+	server.routes().ServeHTTP(rec, req)
+	if strings.Contains(rec.Body.String(), "invalid host") {
+		t.Errorf("the address the page is served on was refused as a host: %s", rec.Body.String())
+	}
+}
+
+// TestAListenerOnEveryInterfaceAnswersAnAddressAndNotAName: with --settings=0.0.0.0:8080
+// an operator reaches the page from another machine, so this machine's address has to
+// be answered. A name is not answered, since a name is what a rebinding page owns.
+func TestAListenerOnEveryInterfaceAnswersAnAddressAndNotAName(t *testing.T) {
+	server := NewServer(New(&config.Config{}), "", nil)
+	t.Cleanup(server.Stop)
+	server.mu.Lock()
+	server.bound = fakeAddr{"0.0.0.0:8080"}
+	server.mu.Unlock()
+
+	for _, host := range []string{"192.168.1.5:8080", "[fe80::1]:8080", "127.0.0.1:8080"} {
+		if !server.hostAllowed(host) {
+			t.Errorf("host %q was refused", host)
+		}
+	}
+	for _, host := range []string{"evil.example:8080", "mypc.local:8080"} {
+		if server.hostAllowed(host) {
+			t.Errorf("host %q was allowed", host)
+		}
+	}
+}
+
+// TestThePageFilesAreNotCached: the script and the stylesheet belong to the executable,
+// so a browser must not pair one of them with the API of another build.
+func TestThePageFilesAreNotCached(t *testing.T) {
+	_, url := startedServer(t, "127.0.0.1:0")
+
+	client := browser(t)
+	if resp, err := client.Get(url); err != nil {
+		t.Fatalf("open the address: %v", err)
+	} else {
+		resp.Body.Close()
+	}
+	for _, name := range []string{"/static/app.js", "/static/app.css"} {
+		resp, err := client.Get(pageAddress(url) + name)
+		if err != nil {
+			t.Fatalf("get %s: %v", name, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200", name, resp.StatusCode)
+		}
+		if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+			t.Errorf("%s: Cache-Control = %q, want no-store", name, got)
+		}
+	}
+}
+
+// TestASaveCarryingSomethingElseThanJSONIsRefused covers the content types a page from
+// another site may post without asking this server first: none of them is JSON, and a
+// request that says it sent one of them is not this page.
+func TestASaveCarryingSomethingElseThanJSONIsRefused(t *testing.T) {
+	cfg, err := config.LoadConfig(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, path, session := settingsServerOn(t, cfg)
+	body := `{"accounts":[{"username":"s1234567","password":"typed","isps":[""]}]}`
+
+	for _, contentType := range []string{"text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(body)))
+		req.Header.Set("Content-Type", contentType)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+		req.Header.Set("X-Auth-Token", session)
+		rec := httptest.NewRecorder()
+		server.handleConfig(rec, req)
+		if rec.Code != http.StatusUnsupportedMediaType {
+			t.Errorf("%s: status = %d, want 415: %s", contentType, rec.Code, rec.Body.String())
+		}
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stored), "typed") {
+		t.Errorf("a refused request was written down:\n%s", stored)
+	}
+
+	// The type this page sends is taken, and so is a request that names no type at all.
+	for _, contentType := range []string{"application/json; charset=utf-8", ""} {
+		req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(body)))
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+		req.Header.Set("X-Auth-Token", session)
+		rec := httptest.NewRecorder()
+		server.handleConfig(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("Content-Type %q: status = %d, want 200: %s", contentType, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// TestARequestCannotSayWhereAPasswordCameFrom: a source is this program's own word
+// about an entry. A request that names one must not be believed, or a password typed
+// into the page could be dropped from the file because the request called it one that
+// came from somewhere else.
+func TestARequestCannotSayWhereAPasswordCameFrom(t *testing.T) {
+	cfg, err := config.LoadConfig(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, path, session := settingsServerOn(t, cfg)
+
+	body := `{"accounts":[{"username":"s1234567","password":"typed","passwordSource":"file","isps":[""]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(body)))
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+	req.Header.Set("X-Auth-Token", session)
+	rec := httptest.NewRecorder()
+	server.handleConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stored), "typed") {
+		t.Errorf("the password the page typed was left out because the request named a source:\n%s", stored)
+	}
+}
+
+// TestASaveFromThePageDoesNotWriteASecretGivenToTheRun is the promise a run started with
+// --password makes, end to end: a save that comes out of the page leaves the value out of
+// the file, and the account keeps working until the program stops.
+func TestASaveFromThePageDoesNotWriteASecretGivenToTheRun(t *testing.T) {
+	cfg, err := config.LoadConfig(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// What the command line leaves behind: the password of this run, and its source.
+	cfg.Accounts = []config.Account{{Username: "s1234567", Password: "run-only", PasswordSource: config.SourceRun, ISPs: []string{""}}}
+	server, path, session := settingsServerOn(t, cfg)
+
+	// What the page sends for an entry whose password field the reader left alone.
+	body := `{"accounts":[{"username":"s1234567","password":"","isps":["@cucc"]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader([]byte(body)))
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+	req.Header.Set("X-Auth-Token", session)
+	rec := httptest.NewRecorder()
+	server.handleConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	live := server.state.Config().Accounts
+	if len(live) != 1 || live[0].Password != "run-only" || live[0].PasswordSource != config.SourceRun {
+		t.Errorf("Accounts = %+v, want the secret of this run kept in memory", live)
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stored), "run-only") {
+		t.Errorf("a save from the page wrote the secret that was given to the run:\n%s", stored)
+	}
+	if !strings.Contains(rec.Body.String(), `"passwordSource":"run"`) {
+		t.Errorf("the page is not told where the password is: %s", rec.Body.String())
 	}
 }

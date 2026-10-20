@@ -17,20 +17,6 @@ var (
 	procCreateIconIndirect = modUser32.NewProc("CreateIconIndirect")
 )
 
-type bitmapInfoHeader struct {
-	Size          uint32
-	Width         int32
-	Height        int32
-	Planes        uint16
-	BitCount      uint16
-	Compression   uint32
-	SizeImage     uint32
-	XPelsPerMeter int32
-	YPelsPerMeter int32
-	ClrUsed       uint32
-	ClrImportant  uint32
-}
-
 type iconInfo struct {
 	FIcon    int32
 	XHotspot uint32
@@ -39,28 +25,17 @@ type iconInfo struct {
 	HbmColor syscall.Handle
 }
 
-const (
-	dibRGBColors = 0
-	biRGB        = 0
-)
-
-// makeIcon turns a drawn RGBA image into an HICON via a 32bpp top-down DIB
-// section plus an empty AND mask, which is the standard way to create an icon
-// with per-pixel alpha without shipping a resource file.
+// makeIcon turns a drawn RGBA image into an HICON. It builds a 32bpp top-down
+// DIB section plus an empty AND mask, so per-pixel alpha needs no resource file.
+// The header and the pixels themselves are laid out in dib.go, which has no
+// build tag and can be tested where there is no GDI to call.
 func makeIcon(img *image.RGBA) syscall.Handle {
 	size := img.Bounds().Dx()
 	if size <= 0 {
 		return 0
 	}
 
-	hdr := bitmapInfoHeader{
-		Size:        40,
-		Width:       int32(size),
-		Height:      -int32(size), // negative height: rows are stored top-down
-		Planes:      1,
-		BitCount:    32,
-		Compression: biRGB,
-	}
+	hdr := dibHeader(size)
 	var bits unsafe.Pointer
 	hbmColor, _, _ := procCreateDIBSection.Call(
 		0, uintptr(unsafe.Pointer(&hdr)), dibRGBColors,
@@ -70,22 +45,10 @@ func makeIcon(img *image.RGBA) syscall.Handle {
 		return 0
 	}
 
-	// Windows wants BGRA in memory.
-	pixels := unsafe.Slice((*byte)(bits), size*size*4)
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			c := img.RGBAAt(x, y)
-			o := (y*size + x) * 4
-			pixels[o+0] = c.B
-			pixels[o+1] = c.G
-			pixels[o+2] = c.R
-			pixels[o+3] = c.A
-		}
-	}
+	writeDIBPixels(unsafe.Slice((*byte)(bits), size*size*4), img)
 
 	// The AND mask is unused for 32bpp icons but CreateIconIndirect requires it.
-	maskStride := ((size + 31) / 32) * 4
-	mask := make([]byte, maskStride*size)
+	mask := andMask(size)
 	hbmMask, _, _ := procCreateBitmap.Call(
 		uintptr(size), uintptr(size), 1, 1, uintptr(unsafe.Pointer(&mask[0])))
 	if hbmMask == 0 {
@@ -97,7 +60,6 @@ func makeIcon(img *image.RGBA) syscall.Handle {
 	ii := iconInfo{FIcon: 1, HbmMask: syscall.Handle(hbmMask), HbmColor: syscall.Handle(hbmColor)}
 	hicon, _, _ := procCreateIconIndirect.Call(uintptr(unsafe.Pointer(&ii)))
 
-	// The icon owns copies of both bitmaps now.
 	procDeleteObject.Call(hbmColor)
 	procDeleteObject.Call(hbmMask)
 	if hicon == 0 {

@@ -1,11 +1,7 @@
 // The RPM package: one .rpm per architecture, for the distributions that read
-// this format.
-//
-// The header of an rpm is a tagged binary structure rather than an archive, so it
-// is written here tag by tag, and the payload is a cpio archive inside a gzip
-// stream. Every tag number and layout rule below was read back out of a package
-// built by rpmbuild and checked by having rpm read, verify and install what this
-// file writes.
+// this format. The header is a tagged binary structure, so it is written here
+// tag by tag, and the payload is a cpio archive inside a gzip stream. The tag
+// numbers come from a package built by rpmbuild.
 
 package main
 
@@ -34,9 +30,9 @@ const (
 	rpmI18n    = 9
 )
 
-// The tags of the format. The ones in the low hundreds and the four shared with
-// the header namespace mean something else in a signature header than in the
-// package header, which is why the same number appears twice in this file.
+// The tags of the format. The ones in the low hundreds and the four shared
+// with the header namespace mean something else in a signature header than in
+// the package header, so the same number appears twice in this file.
 const (
 	rpmTagHeaderSignatures  = 62
 	rpmTagHeaderImmutable   = 63
@@ -109,9 +105,9 @@ const (
 // which the payload digest uses.
 const rpmDigestSHA256 = 8
 
-// isRegular and isDirectory are the top bits of a Unix mode: a plain file or a
-// directory rather than a device or a symbolic link. The payload repeats the
-// file list, and rpm reads a directory from the bit rather than from a tag.
+// isRegular and isDirectory are the top bits of a Unix mode, marking a plain
+// file and a directory. The payload repeats the file list, and rpm takes a
+// directory from this bit.
 const (
 	isRegular   = 0o100000
 	isDirectory = 0o040000
@@ -136,8 +132,7 @@ func (f rpmFile) modeBits() int {
 
 // taskRpm builds the RPM packages, one for each architecture, into
 // dist/packages/. The build without the tray is the one that goes in: the
-// package runs the program as a service, and a desktop has the archive from the
-// project page instead.
+// package runs the program as a service, and a desktop uses the archive.
 func taskRpm(root string) error {
 	for _, t := range targets() {
 		// No distribution in this family runs on MIPS: those builds belong to
@@ -157,9 +152,8 @@ func taskRpm(root string) error {
 	return writeChecksums(root)
 }
 
-// packageRpm writes the .rpm of one target.
 func packageRpm(root string, t target) error {
-	version, err := appVersion(root)
+	rel, err := packageVersion(root)
 	if err != nil {
 		return err
 	}
@@ -177,21 +171,19 @@ func packageRpm(root string, t target) error {
 	if err != nil {
 		return err
 	}
-	header := rpmPackageHeader(version, arch, repo, files, payload)
-	name := fmt.Sprintf("%s-%s-%s.%s.rpm", pkgName, version, pkgRelease, arch)
+	version, release := rel.rpm()
+	header := rpmPackageHeader(version, release, arch, repo, files, payload)
+	name := fmt.Sprintf("%s-%s-%s.%s.rpm", pkgName, version, release, arch)
 	// The lead names the package the way a file name does, without the
 	// architecture and the ending.
-	leadName := fmt.Sprintf("%s-%s-%s", pkgName, version, pkgRelease)
+	leadName := fmt.Sprintf("%s-%s-%s", pkgName, version, release)
 	return writePackage(root, name, rpmLead(leadName, arch, header, payload))
 }
 
 // rpmFiles is what the package installs, in the spelling of the rpm payload: the
-// directories the files live in, then the files themselves.
-//
-// The directories are listed because rpm only takes away what it knows it
-// installed: a package that names none leaves them all behind, empty, once it is
-// removed, and `rpm -ql` does not show them either. A directory the system already
-// has is named as well, since one can belong to more than one package.
+// directories the files live in, then the files themselves. The directories are
+// listed because rpm takes away only what it knows it installed, and `rpm -ql`
+// shows them. A directory the system already has is named as well.
 func rpmFiles(root string, t target) ([]rpmFile, error) {
 	entries, err := systemdFiles(root, filepath.Join(root, distDir, t.name()))
 	if err != nil {
@@ -211,8 +203,8 @@ func rpmFiles(root string, t target) ([]rpmFile, error) {
 			dirs = append(dirs, strings.TrimSuffix(d, "/"))
 		}
 	}
-	// Sorting puts every directory after the one it lives in, which is the
-	// order an archive is read in.
+	// Sorting puts every directory after the one it lives in, the order an
+	// archive is read in.
 	sort.Strings(dirs)
 
 	files := make([]rpmFile, 0, len(entries)+len(dirs))
@@ -225,10 +217,8 @@ func rpmFiles(root string, t target) ([]rpmFile, error) {
 	return files, nil
 }
 
-// rpmLead is the fixed 96 byte block an rpm starts with. Everything in it is
-// either a magic number or a field the format has outgrown: rpm reads the name
-// and the architecture from the header instead, but it will not read a file that
-// has no lead at all.
+// rpmLead is the fixed 96 byte block an rpm starts with. The name and the
+// architecture come from the header, but rpm will not read a file without it.
 func rpmLead(name, arch string, header, payload []byte) []byte {
 	var b bytes.Buffer
 	b.Write([]byte{0xed, 0xab, 0xee, 0xdb})
@@ -251,9 +241,9 @@ func rpmLead(name, arch string, header, payload []byte) []byte {
 	return b.Bytes()
 }
 
-// rpmLeadArch is the old architecture number of the lead. It has not been kept
-// up to date with anything since the lead stopped being read, so the builds that
-// did not exist then share the number of the one they grew out of.
+// rpmLeadArch is the architecture number of the lead. rpm takes the
+// architecture from the header instead, so the builds that came later share the
+// number of the one they grew out of.
 func rpmLeadArch(arch string) byte {
 	switch arch {
 	case "x86_64":
@@ -293,7 +283,7 @@ func rpmSignatureHeader(header, payload []byte) []byte {
 
 // rpmPackageHeader is the header that describes the package: what it is, what it
 // installs, and what has to be run around that.
-func rpmPackageHeader(version, arch, repo string, files []rpmFile, payload []byte) []byte {
+func rpmPackageHeader(version, release, arch, repo string, files []rpmFile, payload []byte) []byte {
 	dirs, indexes := rpmDirs(files)
 
 	var entries []rpmEntry
@@ -301,7 +291,7 @@ func rpmPackageHeader(version, arch, repo string, files []rpmFile, payload []byt
 		rpmStringsEntry(rpmTagHeaderI18nTable, []string{"C"}),
 		rpmStringEntry(rpmTagName, pkgName),
 		rpmStringEntry(rpmTagVersion, version),
-		rpmStringEntry(rpmTagRelease, pkgRelease),
+		rpmStringEntry(rpmTagRelease, release),
 		rpmI18nEntry(rpmTagSummary, pkgSummary),
 		rpmI18nEntry(rpmTagDescription, rpmDescription()),
 		rpmInt32Entry(rpmTagBuildTime, int32(pkgEpoch.Unix())),
@@ -336,7 +326,7 @@ func rpmPackageHeader(version, arch, repo string, files []rpmFile, payload []byt
 		rpmInt32sEntry(rpmTagFileInodes, rpmInodes(len(files))),
 		rpmStringsEntry(rpmTagFileLangs, make([]string, len(files))),
 		rpmInt32sEntry(rpmTagProvideFlags, []int32{rpmSenseEqual}),
-		rpmStringsEntry(rpmTagProvideVersion, []string{version + "-" + pkgRelease}),
+		rpmStringsEntry(rpmTagProvideVersion, []string{version + "-" + release}),
 		rpmInt32sEntry(rpmTagDirIndexes, indexes),
 		rpmStringsEntry(rpmTagBaseNames, rpmBaseNames(files)),
 		rpmStringsEntry(rpmTagDirNames, dirs),
@@ -363,8 +353,8 @@ func rpmDescription() string {
 		"service stays up; see /usr/share/doc/" + pkgName + "/README.md.\n"
 }
 
-// The scriptlets. They are the same work the Debian maintainer scripts do, in
-// the spelling rpm expects: what to run after the files are in place, before they
+// The scriptlets, the same work the Debian maintainer scripts do in the
+// spelling rpm expects: what to run after the files are in place, before they
 // are taken away, and after that, where the argument is how many packages will
 // still be installed.
 const rpmPostIn = `# The user the service runs as comes from the file this package installs, which
@@ -401,8 +391,8 @@ esac
 `
 
 // rpmPayload is the payload of a package: the files and the directories as a
-// cpio archive, inside a gzip stream. The entries are in the order the file list
-// has them, which is the order rpm matches them in.
+// cpio archive inside a gzip stream. The entries keep the order of the file
+// list, the order rpm matches them in.
 func rpmPayload(files []rpmFile) ([]byte, error) {
 	var cpio bytes.Buffer
 	for i, f := range files {
@@ -439,7 +429,7 @@ func rpmCpioEntry(b *bytes.Buffer, f rpmFile, ino int) {
 		len(f.data),
 		0, 0, 0, 0, // the device numbers, which neither of them has
 		len(name),
-		0, // a checksum of the header, which the format no longer uses
+		0, // a checksum of the header, which readers ignore
 	}
 	b.WriteString("070701")
 	for _, v := range fields {
@@ -468,8 +458,8 @@ func rpmCpioPad(b *bytes.Buffer) {
 
 // rpmDirs splits the paths into the directories they live in and the index of
 // the one each file is in. The format stores a file as a directory, its index
-// and a base name, so that a package with many files in one directory writes
-// that directory once.
+// and a base name, so a package with many files in one directory writes that
+// directory once.
 func rpmDirs(files []rpmFile) ([]string, []int32) {
 	var dirs []string
 	var indexes []int32
@@ -515,7 +505,7 @@ func rpmFileModes(files []rpmFile) []int16 {
 }
 
 // rpmFileDigests is the digest of every file. A directory has none, which the
-// format writes as an empty string rather than as the digest of nothing.
+// format writes as an empty string.
 func rpmFileDigests(files []rpmFile) []string {
 	digests := make([]string, len(files))
 	for i, f := range files {
@@ -535,8 +525,8 @@ func rpmInstalledSize(files []rpmFile) int64 {
 	return total
 }
 
-// rpmInodes numbers the files. The format wants one per file, and rpm uses it to
-// tell an upgrade that replaces a file from one that follows links to it.
+// rpmInodes numbers the files. rpm uses the number to tell an upgrade that
+// replaces a file from one that follows links to it.
 func rpmInodes(n int) []int32 {
 	inodes := make([]int32, n)
 	for i := range inodes {
@@ -632,13 +622,9 @@ func rpmBinEntry(tag int, data []byte) rpmEntry {
 
 // rpmHeader lays the tags out the way a header is stored: the magic, the index,
 // and then the data of every tag, each aligned to the width of its type and
-// addressed by its offset from the start of that data.
-//
-// The whole header is wrapped in a region, which lets rpm tell a header it can
-// trust to be complete from one assembled out of pieces. The region is an entry
-// of its own at the front of the index, whose data is a sixteen byte trailer at
-// the end that says how many entries the region covers. The tag of that entry is
-// not the same in both headers, and rpm refuses a header that uses the wrong one.
+// addressed by its offset in that data. A region entry at the front of the
+// index holds a sixteen byte trailer with the entry count; its tag differs
+// between the two headers, and rpm refuses a header with the wrong one.
 func rpmHeader(regionTag int, entries []rpmEntry) []byte {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].tag < entries[j].tag })
 

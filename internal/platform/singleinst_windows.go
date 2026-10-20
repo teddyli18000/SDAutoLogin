@@ -42,10 +42,9 @@ func AcquireSingleInstance(requestSettings bool) bool {
 		return true
 	}
 
-	// The event is created before the mutex on purpose. A second copy can only find
-	// this process by finding the mutex, so by the time it does, the event is
-	// guaranteed to exist as well; the other order would let a quick second copy
-	// signal an event that is not created yet and lose the request.
+	// The event is created before the mutex: a second copy can only find this
+	// process by finding the mutex, so the event is there by the time it does.
+	// The other order loses the request from a quick second copy.
 	if ev, _, err := procCreateEventW.Call(0, 1, 0, uintptr(unsafe.Pointer(UTF16Ptr(showSettingsEventName)))); ev != 0 {
 		showSettingsEvent = syscall.Handle(ev)
 	} else {
@@ -71,8 +70,7 @@ func AcquireSingleInstance(requestSettings bool) bool {
 
 // requestSettingsPage hands the request to the copy that is already running. The
 // manual reset event stays signalled until that copy looks at it, so the request
-// survives until it is ready, which a posted message could not promise while its
-// window is still being created.
+// survives until that copy is ready.
 func requestSettingsPage() {
 	if showSettingsEvent == 0 {
 		logging.Log.Warn("the running instance cannot be asked for its settings page")
@@ -80,7 +78,6 @@ func requestSettingsPage() {
 	}
 	logging.Log.Info("asking the running instance to open its settings page")
 	procSetEvent.Call(uintptr(showSettingsEvent))
-	// The handle is closed by the system when this process ends, a moment away.
 }
 
 // WaitForSettingsRequest calls f for every request a later copy makes. It

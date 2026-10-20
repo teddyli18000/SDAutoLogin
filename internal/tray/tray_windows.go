@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows && !notray
 
 package tray
 
@@ -68,12 +68,14 @@ type trayApp struct {
 	iconBusy     syscall.Handle
 	iconError    syscall.Handle
 
-	// lastState, lastRefused and lastClick are only touched by the UI thread.
-	// lastRefused is whether the snapshot before this one was one the portal had
-	// refused to move the session for, so the reader is told about it once.
+	// lastState, lastRefused, clicks and alert are only touched by the UI
+	// thread. lastRefused is whether the snapshot before this one was one the
+	// portal had refused to move the session for, so the reader is told about it
+	// once.
 	lastState   service.State
 	lastRefused bool
-	lastClick   time.Time
+	clicks      clickDebounce
+	alert       outageAlert
 }
 
 var trayInstance *trayApp
@@ -98,7 +100,6 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 		}
 		return 0
 	case wmShowSettings:
-		// A second copy of the program asked for the settings page.
 		if trayInstance != nil {
 			logging.Log.Debug("tray: a second copy asked for the settings page")
 			trayInstance.openSettings()
@@ -123,15 +124,14 @@ func trayProc(hwnd, umsg, wparam, lparam uintptr) uintptr {
 	return r
 }
 
-// HasTray reports whether this build puts up a tray icon at all. Windows always
-// has one; the builds that say no are the Linux ones made for machines with no
-// desktop session.
+// HasTray reports whether this build puts up a tray icon. Windows always has one;
+// the builds that say no are the Linux ones made for machines with no desktop
+// session.
 const HasTray = true
 
 // Run puts the tray icon up and blocks on the message loop. fallback is used when
-// the tray cannot be created, so the program keeps checking in the background
-// instead of quitting; it is handed the settings server, the page being the only
-// way in on a machine whose icon could not be made.
+// the tray cannot be created, so the program keeps checking in the background;
+// it is handed the settings server, the only way in without an icon.
 func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
 	// The tray window and its message loop must stay on one OS thread.
 	runtime.LockOSThread()
@@ -145,9 +145,9 @@ func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
 		}
 	})
 
-	// Started before the icon exists on purpose: a request arriving while the tray
-	// is still being built stays in the signalled event until the loop runs, and
-	// one arriving after a failed start is answered by opening the page directly.
+	// Started before the icon exists: a request arriving while the tray is still
+	// being built stays in the signalled event until the loop runs, and one after
+	// a failed start is answered by opening the page directly.
 	go platform.WaitForSettingsRequest(a.answerSettingsRequest)
 
 	if err := a.create(); err != nil {
@@ -172,7 +172,7 @@ func Run(state *app.AppState, opts Options, fallback func(*app.Server)) {
 	// Set before the loop starts: a message posted from here on is queued and
 	// handled as soon as the loop runs.
 	a.uiUp.Store(true)
-	if a.opts.AppWindow || !state.Config().Configured() {
+	if a.opts.AppWindow || !state.Config().HasAccounts() {
 		a.openSettings()
 	}
 
@@ -291,13 +291,14 @@ func (a *trayApp) refresh() {
 		logging.Log.Debug("tray icon updated to %s (internet checked=%v ok=%v)",
 			s.State, s.InternetChecked, s.InternetOK)
 	}
-	// Tell the user about the transitions that matter; staying quiet about the
-	// rest keeps balloon tips from becoming noise. The refusal is one because the
-	// program has stopped trying and moving the session is the reader's to do.
+	// Tell the reader about the transitions that matter; the rest would become
+	// noise. The alert is asked first: it has to see every snapshot to tell
+	// whether this is the same outage as the round before.
+	failed := a.alert.note(s, time.Now())
 	switch {
 	case previous == service.StateLoggingIn && s.State == service.StateOnline:
 		a.notify(i18n.L("app.name"), i18n.L("balloon.loggedIn"))
-	case s.State == service.StateError && previous != service.StateError:
+	case failed:
 		a.notify(i18n.L("app.name"), i18n.L("balloon.reconnectFailed")+": "+s.Message)
 	case refused && !previousRefused:
 		logging.Log.Debug("tray: the session could not be moved onto the service type its entry puts first, saying so once")
@@ -335,12 +336,13 @@ func (a *trayApp) tooltip(s service.Snapshot) string {
 		out += " (" + s.Message + ")"
 	}
 	// The session is up and the program could not move it where the order of the
-	// login list says it should be, so the reader is told the session is theirs
-	// to move. It is a line of its own because the state is Online: there is no
-	// error to read here, only something left to do.
+	// login list says it should be, so the reader is told the session is theirs to
+	// move. The line stands on its own: the state is Online, with no error to read.
 	if s.SwitchRefused != nil {
 		out += "\n" + i18n.L("tray.switchRefused")
 	}
+	// A release the reader could move to, where a desktop reader notices it.
+	out += updateLine(s)
 	if s.ClientIP != "" {
 		out += "\n" + i18n.Lf("tray.clientIP", s.ClientIP)
 	}
@@ -433,28 +435,21 @@ func (a *trayApp) handleCommand(cmd uint32) {
 }
 
 // openSettingsFromClick opens the settings page for a primary click. Windows
-// sends down, up, double click, up for a double click, so the second up would
-// open the page again; a repeat inside the double click interval is therefore
-// treated as the same click. Only the UI thread reaches this.
+// sends down, up, double click, up for a double click, so a repeat inside the
+// double click interval is treated as the same click. Only the UI thread is here.
 func (a *trayApp) openSettingsFromClick() {
-	if time.Since(a.lastClick) < doubleClickWindow() {
+	if !a.clicks.accept(time.Now(), doubleClickWindow()) {
 		logging.Log.Debug("tray: ignoring the second click of a double click")
 		return
 	}
-	a.lastClick = time.Now()
 	a.openSettings()
 }
 
 // doubleClickWindow is how long Windows itself waits for the second click of a
-// double click, the interval in which a repeat is not a new request. The first
-// click compares against a zero timestamp, which time.Since reports as far beyond
-// any interval, so it always gets through.
+// double click.
 func doubleClickWindow() time.Duration {
 	ms, _, _ := procGetDoubleClickTime.Call()
-	if ms == 0 {
-		return 500 * time.Millisecond
-	}
-	return time.Duration(ms) * time.Millisecond
+	return doubleClickWindowFor(ms)
 }
 
 // openSettings serves the settings page and hands it to the browser, in a window

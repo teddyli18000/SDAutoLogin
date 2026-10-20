@@ -1,20 +1,8 @@
 // The tests of the packaging half of the task runner, which run with nothing
-// installed. The formats are the kind that fail quietly: an ar member whose size
-// field is one byte out, a tar entry without the directory that holds it, a tag
-// written at an offset a reader aligns differently. `verify` reads every package
-// back with the tool of its format, which is the check that matters, but it needs
-// a toolchain and those tools installed to run at all.
-//
-//   - the layout of a container is compared with the expected one, written out in
-//     full, so that a change to a format shows up as a difference rather than as a
-//     package that installs wrongly;
-//   - every container is packed twice from the same input and the two have to be
-//     the same bytes, which a release published with a digest next to it depends
-//     on.
-//
-// The expected layout is written out rather than recorded as a digest, which would
-// say that something changed and not what, and would move when the compressor is
-// updated rather than when the format changes.
+// installed: `verify` needs the tools of every format, and these do not. Each
+// container is packed twice from the same input and the two have to match byte
+// for byte, and the expected layout is written out in full, so a change shows
+// up as a difference.
 package main
 
 import (
@@ -31,22 +19,23 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"sdautologin/internal/update"
 )
 
-// The version and the address the packages below are made of. Neither is taken
-// from the tree: a golden that moved with every release would have to be written
-// again for every release, and what is held here is the layout of a container, not
-// what is in it.
+// The version and the address the packages below are made of. Neither comes
+// from the tree, since a golden that moved with every release would have to be
+// written again for every release, and what is held here is the layout of a
+// container.
 const (
 	goldenVersion = "1.2.3"
 	goldenRepo    = "https://example.invalid/SDAutoLogin"
 )
 
-// goldenPayload is what every container below is packed from: a program with the
-// executable bit, a configuration file, and a file whose directory holds nothing
-// else, so that the directories leading to them are entries of their own. It is
-// written here rather than taken from a build, so that these tests need neither
-// a toolchain nor anything else in the repository.
+// goldenPayload is what every container below is packed from: a program with
+// the executable bit, a configuration file, and a file that sits alone in its
+// directory, so that the directories leading to them are entries of their
+// own. It is written here, and the tests need no build of the program.
 var goldenPayload = []struct {
 	path string
 	mode int64
@@ -76,8 +65,8 @@ func goldenEntries(prefix string) []pkgEntry {
 }
 
 // goldenRpmFiles is that payload as the rpm payload names its files: the
-// directories they live in first, each after the one it lives in, then the files
-// themselves, which is the order rpm matches them in.
+// directories they live in first, each after the one it lives in, then the
+// files themselves, the order rpm matches them in.
 func goldenRpmFiles() []rpmFile {
 	seen := map[string]bool{}
 	var dirs []string
@@ -150,7 +139,7 @@ func goldenRpm() ([]byte, error) {
 		return nil, err
 	}
 	arch := "x86_64"
-	header := rpmPackageHeader(goldenVersion, arch, goldenRepo, files, payload)
+	header := rpmPackageHeader(goldenVersion, pkgRelease, arch, goldenRepo, files, payload)
 	return rpmLead(pkgName+"-"+goldenVersion+"-"+pkgRelease, arch, header, payload), nil
 }
 
@@ -172,10 +161,8 @@ func goldenPacman() ([]byte, error) {
 }
 
 // TestEveryContainerIsTheSameBytesTwice covers what a release published with a
-// digest next to it depends on: packing the same build again gives the same file.
-// It holds because nothing in the packing reads the clock, and this is where that
-// is held: a timestamp taken while packing would show up here as two runs that
-// differ, on the machine that runs the test.
+// digest next to it depends on: packing the same build again gives the same
+// file. Nothing in the packing reads the clock, and this test holds that.
 func TestEveryContainerIsTheSameBytesTwice(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -206,10 +193,10 @@ func TestEveryContainerIsTheSameBytesTwice(t *testing.T) {
 	}
 }
 
-// TestTheChecksumsFileIsWrittenTheSameWayTwice covers the one file of a release
-// that is not a package: the list of digests a download is checked against. It
-// names every package in the order their names sort in, passes over anything
-// else in the directory, and comes out the same on a second run.
+// TestTheChecksumsFileIsWrittenTheSameWayTwice covers the one file of a
+// release that is not a package: the list of digests a download is checked
+// against. It names every package in name order, passes over anything else, and
+// comes out the same twice.
 func TestTheChecksumsFileIsWrittenTheSameWayTwice(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, distDir, pkgDir)
@@ -256,11 +243,79 @@ func checksums(t *testing.T, root string) string {
 	return string(data)
 }
 
+// TestTheChecksumsFileLeavesItsOwnSignatureOut covers the file a list must not
+// name: the signature is written after the list and signs its bytes, so a list
+// that summed its own signature would change as it was signed and leave a
+// signature over bytes that are no longer on disk.
+//
+// It also covers the pair surviving a second pack: with the signature left out,
+// a list written again from the same packages comes out identical, so the
+// signature made over it still checks out and a release is not lost to having
+// packed twice.
+func TestTheChecksumsFileLeavesItsOwnSignatureOut(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, distDir, pkgDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pkg := "sdautologin_1.2.3-1_amd64.deb"
+	if err := os.WriteFile(filepath.Join(dir, pkg), []byte(pkg+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := checksums(t, root)
+	want := sha256Hex([]byte(pkg+"\n")) + "  " + pkg + "\n"
+	if before != want {
+		t.Fatalf("the file holds:\n%q\nwant\n%q", before, want)
+	}
+
+	// The signature of that list, as sign writes it, and then the list again.
+	sig := filepath.Join(dir, checksumsFile+update.SignatureSuffix)
+	if err := os.WriteFile(sig, []byte("signature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if after := checksums(t, root); after != before {
+		t.Errorf("a signature in the directory changed the list it signs:\n%q\nthen\n%q", before, after)
+	}
+	if _, err := os.Stat(sig); err != nil {
+		t.Errorf("the signature was removed although the list it signs did not change: %v", err)
+	}
+}
+
+// TestASignatureGoesWhenTheListItSignsChanges covers the other half of that
+// pairing: a release carries a list and its signature together or neither, so a
+// list that is written again with different contents drops the signature beside
+// it rather than shipping one that signs something else.
+func TestASignatureGoesWhenTheListItSignsChanges(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, distDir, pkgDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pkg := "sdautologin_1.2.3-1_amd64.deb"
+	if err := os.WriteFile(filepath.Join(dir, pkg), []byte(pkg+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checksums(t, root)
+	sig := filepath.Join(dir, checksumsFile+update.SignatureSuffix)
+	if err := os.WriteFile(sig, []byte("signature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A package that was built again with different bytes: the list changes, and
+	// what signed the old one cannot stay.
+	if err := os.WriteFile(filepath.Join(dir, pkg), []byte("other bytes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checksums(t, root)
+	if _, err := os.Stat(sig); !os.IsNotExist(err) {
+		t.Errorf("the signature of the list before is still there: %v", err)
+	}
+}
+
 // TestTheChecksumsFileOnlyNamesWhatIsThere covers the rewrite a single-format
 // task ends with: the file describes the directory as it is now, so a package
 // that has gone is not left in it carrying the digest of a build that is no
-// longer there. An archive and the file that describes it would then disagree,
-// which is what the rewrite is there to prevent.
+// longer there.
 func TestTheChecksumsFileOnlyNamesWhatIsThere(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, distDir, pkgDir)
@@ -287,10 +342,10 @@ func TestTheChecksumsFileOnlyNamesWhatIsThere(t *testing.T) {
 	}
 }
 
-// TestTheGoldenLayoutOfTheDebianContainer pins the container dpkg and opkg read:
-// the ar archive with the three members it has to have in that order, and the
-// entries of the two tar archives inside it. Everything of that layout that is
-// written here rather than by a library is in the golden text.
+// TestTheGoldenLayoutOfTheDebianContainer pins the container dpkg and opkg
+// reads: the ar archive with its three members in order, and the entries of the
+// two tar archives inside it. The golden text holds everything of that layout
+// no library writes.
 func TestTheGoldenLayoutOfTheDebianContainer(t *testing.T) {
 	data, err := debLayout(goldenDebFiles(t))
 	if err != nil {
@@ -313,8 +368,7 @@ func TestTheGoldenLayoutOfTheDebianContainer(t *testing.T) {
 			t.Errorf("%s carries mode %q owned by %q/%q", m.name, m.mode, m.uid, m.gid)
 		}
 	}
-	// The first member is the version of the format, which is what dpkg reads
-	// before it looks at the rest.
+	// The first member is the version of the format, read before anything else.
 	if got := string(members[0].data); got != "2.0\n" {
 		t.Errorf("debian-binary holds %q, want the version of the format", got)
 	}
@@ -359,10 +413,10 @@ func TestTheGoldenMetadataOfAnArchPackage(t *testing.T) {
 	}
 }
 
-// TestTheGoldenLayoutOfARpmHeader pins the header of an rpm tag by tag, which is
-// the part of that format written here with nothing but the standard library to
-// check it against: the set of tags, the type and the count of each, and the
-// offset it sits at inside the header's data.
+// TestTheGoldenLayoutOfARpmHeader pins the header of an rpm tag by tag: the set
+// of tags, the type and the count of each, and the offset it sits at inside the
+// header's data. Nothing but the standard library checks this part of the
+// format.
 func TestTheGoldenLayoutOfARpmHeader(t *testing.T) {
 	pkg, err := goldenRpm()
 	if err != nil {
@@ -385,8 +439,8 @@ func TestTheGoldenLayoutOfARpmHeader(t *testing.T) {
 	previous := 0
 	for i, e := range index {
 		lines = append(lines, fmt.Sprintf("%d %d %d", e.tag, e.kind, e.count))
-		// The entries after the region come in ascending order, which is how
-		// rpm looks one up, and every one of them sits inside the data at an
+		// The entries after the region come in ascending order, the order rpm
+		// looks one up in, and every one of them sits inside the data at an
 		// offset aligned to the width of its type.
 		if i == 0 {
 			continue
@@ -500,8 +554,8 @@ func readAr(t *testing.T, archive []byte) []arHeader {
 
 // readTar reads a gzipped tar archive and lists its entries as one line each:
 // the kind, the name, the mode, the time and the size. That is all this
-// repository decides when it writes an entry, the rest of a header being filled
-// in by the library.
+// repository decides when it writes an entry; the library fills in the rest of
+// the header.
 func readTar(t *testing.T, data []byte) []string {
 	t.Helper()
 
@@ -546,7 +600,6 @@ func readTarEntries(t *testing.T, data []byte) []tarEntry {
 	}
 }
 
-// gunzip decompresses what gzipBytes wrote.
 func gunzip(t *testing.T, data []byte) []byte {
 	t.Helper()
 
@@ -566,14 +619,11 @@ type rpmIndex struct {
 	tag, kind, count, offset int
 }
 
-// readRpmHeader reads the header of a package out of the file, together with the
-// data its tags point into and the payload that follows it.
-//
-// The file opens with the lead, a fixed block the format has outgrown, and then
-// the signature header, which is a header of the same shape, sits on an eight
-// byte boundary after it. The header of the package, which is the one that says
-// what it is, is what follows that. Both are read through the length they
-// declare, so a length that is one byte out is caught here rather than by rpm.
+// readRpmHeader reads the header of a package out of the file, together with
+// the data its tags point into and the payload that follows it. After the lead
+// sits the signature header on an eight byte boundary, then the header of the
+// package. Both are read through the length they declare, so a length one byte
+// out is caught here.
 func readRpmHeader(t *testing.T, pkg []byte) ([]rpmIndex, []byte, []byte) {
 	t.Helper()
 
@@ -653,9 +703,9 @@ func firstDifference(a, b []byte) int {
 	return min(len(a), len(b))
 }
 
-// The control file and the maintainer script the golden Debian container is made
-// of. They are short on purpose: what is being held is the layout of the archive
-// around them, not what a control file says.
+// The control file and the maintainer script the golden Debian container is
+// made of. They are short, since what is held here is the layout of the archive
+// around them.
 const (
 	goldenDebControl = "Package: sdautologin\nVersion: 1.2.3-1\n"
 	goldenPostinst   = "#!/bin/sh\nexit 0\n"

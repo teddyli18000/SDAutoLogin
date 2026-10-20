@@ -13,7 +13,7 @@ import (
 )
 
 // languageChoice is one entry of the language picker used by the command line
-// wizard, which stays English.
+// wizard. The wizard itself stays English.
 type languageChoice struct {
 	name string
 	code string
@@ -64,7 +64,16 @@ func runSetupWizard(cfg *config.Config) error {
 		entry = cfg.Accounts[0]
 	}
 	entry.Username = prompt(in, "account (student id / name / mail)", entry.Username)
-	entry.Password = prompt(in, "password", "")
+	entry.Password = promptPassword(in, entry.Password)
+	// Saved here and nowhere else: an entry without both is dropped by Attempts(),
+	// so writing one down would end in a run that reports no account to sign in
+	// with, pointing at the wizard that has just answered that all is well.
+	if gap := accountGap(entry); gap != "" {
+		err := fmt.Errorf("not saved: the account needs %s to sign in", gap)
+		logging.Log.Error("%v", err)
+		fmt.Fprintln(os.Stderr, err)
+		return err
+	}
 
 	fmt.Println("service type (further ones, and their order, are set in the settings page):")
 	for i, op := range config.Operators {
@@ -81,7 +90,15 @@ func runSetupWizard(cfg *config.Config) error {
 			cfg.CheckIntervalSeconds = n
 		}
 	}
-	cfg.RememberPassword = true
+	// The password the wizard read is written down only when the configuration is
+	// told to keep it, and this used to be set whatever the file said: a run that
+	// came here to change the check interval turned a deliberate "not kept in the
+	// file" into a plain text password in config.json. Enter keeps what is in
+	// force, which on a first run is the yes this wizard needs.
+	cfg.RememberPassword = promptBool(in, "write the password into config.json (it is kept there in clear text)", cfg.RememberPassword)
+	if !cfg.RememberPassword && entry.Password != "" {
+		fmt.Fprintln(os.Stderr, "note: the password is not written down, so every run needs it again: pass --password, --password-file or $CREDENTIALS_DIRECTORY, or answer yes here")
+	}
 
 	if err := cfg.Save(); err != nil {
 		logging.Log.Error("saving config: %v", err)
@@ -103,4 +120,38 @@ func prompt(in *bufio.Reader, label, def string) string {
 		return def
 	}
 	return line
+}
+
+// promptBool asks a yes or no question, and Enter keeps the answer that is in
+// force: a wizard run to change something else must not turn a setting around.
+// Anything that is neither a yes nor a no keeps it as well, since the reader has
+// then said nothing this question understands.
+func promptBool(in *bufio.Reader, label string, current bool) bool {
+	hint := "y/N"
+	if current {
+		hint = "Y/n"
+	}
+	fmt.Printf("%s [%s]: ", label, hint)
+	line, _ := in.ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	case "n", "no":
+		return false
+	}
+	return current
+}
+
+// accountGap names what an entry is missing to sign in, and "" when it has both.
+func accountGap(entry config.Account) string {
+	username := strings.TrimSpace(entry.Username)
+	switch {
+	case username == "" && entry.Password == "":
+		return "a username and a password"
+	case username == "":
+		return "a username"
+	case entry.Password == "":
+		return "a password"
+	}
+	return ""
 }

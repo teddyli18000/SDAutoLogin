@@ -1,18 +1,15 @@
-# Build management for this project.
-#
-# CMake does not compile anything here: the Go toolchain is the compiler, and
-# the task runner in tools/build owns the build flags. The targets below are a
-# thin, familiar front end for it, so the command line, the wrapper scripts and
-# CMake can never disagree about how the program is built.
+# CMake compiles nothing here: the Go toolchain is the compiler and the task
+# runner in tools/build owns the build flags. The targets below are a front end
+# for it.
 #
 #   cmake -S . -B build
 #   cmake --build build                    # builds the program
 #   cmake --build build --target check     # any other task of the runner
 #   cmake --install build --prefix /usr/local
 #
-# The project declares no languages, so no C compiler is needed. On Windows that
-# also means CMake needs a generator that does not depend on a C toolchain, for
-# example Ninja: cmake -S . -B build -G Ninja
+# The project declares no languages, so no C compiler is needed; on Windows that
+# also means a generator that does not depend on a C toolchain, for example
+# Ninja: cmake -S . -B build -G Ninja
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -22,7 +19,7 @@ project(SDAutoLogin
 	LANGUAGES NONE)
 
 find_program(GO_EXECUTABLE NAMES go REQUIRED
-	DOC "The Go toolchain, which does the actual building")
+	DOC "The Go toolchain")
 
 if(WIN32)
 	set(APP_BINARY "SDAutoLogin.exe")
@@ -30,8 +27,6 @@ else()
 	set(APP_BINARY "SDAutoLogin")
 endif()
 
-# The target a plain "cmake --build build" runs. A custom target only joins the
-# default build when it is declared ALL.
 add_custom_target(SDAutoLogin ALL
 	COMMAND "${GO_EXECUTABLE}" run ./tools/build build
 	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -40,7 +35,7 @@ add_custom_target(SDAutoLogin ALL
 	VERBATIM)
 
 # Every other task of the runner, opt in. The names all, test and clean belong
-# to CMake itself, which is why the last three are called differently.
+# to CMake itself, so the last three are called differently.
 function(go_task name task)
 	add_custom_target(${name}
 		COMMAND "${GO_EXECUTABLE}" run ./tools/build ${task} ${ARGN}

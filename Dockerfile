@@ -12,22 +12,35 @@
 #
 #   docker run -d ... -p 8088:8088 sdautologin run --settings=0.0.0.0:8088
 #
-# The page is then opened with the address "docker logs sdautologin" prints,
-# token and all, and not with the bare port: the address carries a one time
-# token, it opens the page once, and the newest line is the one that works.
+# Open the page at the address the program prints on its console, which
+# "docker logs sdautologin" shows, since that is where a container's output goes:
+#   docker logs sdautologin 2>&1 | grep 'settings page'
+# The address carries a one-time token and is replaced after every opening, so
+# take the newest line; the bare port will not open it. The token is deliberately
+# not written to logs/app.log, which outlives it.
 #
 # Binding the page to 0.0.0.0 makes it reachable from the network, so only do
 # that on a trusted network: it holds the account in clear text.
 
 # The build goes through the same task runner the scripts and the CMake targets
-# use, so the container gets exactly the flags a local build gets. The
-# dependencies are vendored, so nothing is downloaded. The repository metadata is
-# kept out of the context, so this build has no tag to read the version from and
-# the version it reports is the one the sources carry.
+# use. Dependencies are vendored and the repository metadata stays out of the
+# context, so the version reported is the one the sources carry.
+#
+# What is copied is named here rather than taken as the whole context. A context
+# is copied into a layer, and a layer is readable by anyone who can pull the
+# image: a signing key that happens to be in the working tree would go in with
+# everything else. The list is what the build reads — the module and its vendored
+# dependencies, the sources, the task runner and the resources it links.
 FROM golang:1.26 AS build
 
 WORKDIR /src
-COPY . .
+COPY go.mod go.sum ./
+COPY vendor/ vendor/
+COPY cmd/ cmd/
+COPY internal/ internal/
+COPY tools/ tools/
+COPY winres/ winres/
+COPY LICENSE README.md README.zh-CN.md CHANGELOG.md CHANGELOG.zh-CN.md ./
 RUN CGO_ENABLED=0 go run ./tools/build build
 
 # The program is one static binary, so the image only needs the data a Go
@@ -48,8 +61,8 @@ VOLUME ["/data"]
 USER 65534:65534
 WORKDIR /data
 
-# --home belongs in ENTRYPOINT rather than CMD, so that a one-off command keeps
-# the same data directory as the service:
+# --home belongs in ENTRYPOINT, so that a one-off command keeps the same data
+# directory as the service:
 #   docker run --rm sdautologin status --json
 ENTRYPOINT ["/usr/local/bin/SDAutoLogin", "--home=/data"]
 CMD ["run"]

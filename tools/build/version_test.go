@@ -5,26 +5,37 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf16"
 )
 
-// testRoot is the repository the test runs in.
+// testRoot is the repository the test runs in. These tests read the tree the
+// version is written in - go.mod, the packaging files, the Windows resource file
+// - so the tree has to be around the test binary, which is how `go test` starts
+// one. A cross compiled Windows binary runs from wherever it was copied, and
+// there is no repository above C:\, so it has nothing to read and no version to
+// check there, while the property these tests are about, that the sources and
+// the name a release carries do not drift apart, belongs to the tree itself and
+// is checked where the tree is, by the toolchain that compiles it in.
 func testRoot(t *testing.T) string {
 	t.Helper()
 
 	root, err := repoRoot()
 	if err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("this binary runs outside a repository (%v), so the tree these tests read is not here; the version they check comes from the same sources on every platform", err)
+		}
 		t.Fatalf("finding the repository: %v", err)
 	}
 	return root
 }
 
-// TestTheSourcesCarryTheVersionOfTheLatestTag holds the fallback to the tag. The
-// version a release is named after comes from the tag, and what the sources carry
-// is what a tree without a checkout falls back on: letting the two drift would
-// mean a build from a tarball reports a release it was not cut from.
+// TestTheSourcesCarryTheVersionOfTheLatestTag holds the fallback to the tag.
+// The version a release is named after comes from the tag, and the sources
+// carry what a tree without a checkout falls back on: letting the two drift
+// would misname a build from a tarball.
 func TestTheSourcesCarryTheVersionOfTheLatestTag(t *testing.T) {
 	root := testRoot(t)
 
@@ -43,8 +54,7 @@ func TestTheSourcesCarryTheVersionOfTheLatestTag(t *testing.T) {
 
 // TestTheOpenWrtPackageNamesTheSameVersion covers the one copy of the version
 // that cannot be read out of the sources when it is needed: the OpenWrt package
-// names the git ref to fetch, so the number has to be written in its Makefile,
-// and nothing but a check keeps it in step.
+// names the git ref to fetch, so the number is written in its Makefile.
 func TestTheOpenWrtPackageNamesTheSameVersion(t *testing.T) {
 	root := testRoot(t)
 
@@ -67,9 +77,9 @@ func TestTheOpenWrtPackageNamesTheSameVersion(t *testing.T) {
 }
 
 // TestAValueIsReadFromEitherDeclaration covers the two shapes the payload file
-// declares its strings in: a constant of its own and a block of variables. The value
-// is read with a pattern over the source, so a shape it does not expect reads as a
-// value that is not there, and the packaging stops over a declaration that is fine.
+// declares its strings in: a constant of its own and a block of variables. The
+// value is read with a pattern over the source, so a shape it does not expect
+// reads as a missing value.
 func TestAValueIsReadFromEitherDeclaration(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "app")
@@ -106,8 +116,8 @@ var (
 }
 
 // TestAVersionComesFromTheSourcesWhenThereIsNoTag is the other half of reading
-// the tag: a tree that was unpacked rather than checked out has none, and still
-// has to build into a program that can name its version.
+// the tag: a tree with no checkout has none, and still has to build into a
+// program that can name its version.
 func TestAVersionComesFromTheSourcesWhenThereIsNoTag(t *testing.T) {
 	root := testRoot(t)
 	want, err := appSourceString(root, "Version")
@@ -138,9 +148,9 @@ func TestAVersionComesFromTheSourcesWhenThereIsNoTag(t *testing.T) {
 	}
 }
 
-// TestTheBuildFlagsCarryTheVersionAndTheCommit covers what the release is written
-// into the program with. The two are read from the tree being built, so a release
-// names itself, and a build that is in front of someone can be named exactly.
+// TestTheBuildFlagsCarryTheVersionAndTheCommit covers what the release is
+// written into the program with. Both are read from the tree being built, so a
+// release names itself, and a build in front of someone can be named.
 func TestTheBuildFlagsCarryTheVersionAndTheCommit(t *testing.T) {
 	root := testRoot(t)
 
@@ -168,10 +178,10 @@ func TestTheBuildFlagsCarryTheVersionAndTheCommit(t *testing.T) {
 	}
 }
 
-// TestTheLinkerWritesIntoTheVariablesTheProgramReads covers the way -X fails: it
-// names a variable by its full path, and a path that is wrong or no longer exists
-// is not an error. The linker then writes nothing, the build succeeds, and the
-// program quietly reports the fallback instead of the release it was cut from.
+// TestTheLinkerWritesIntoTheVariablesTheProgramReads covers the way -X fails:
+// it names a variable by its full path, and a path that is wrong or missing is
+// not an error. The linker writes nothing, the build succeeds, and the program
+// reports the fallback.
 func TestTheLinkerWritesIntoTheVariablesTheProgramReads(t *testing.T) {
 	root := testRoot(t)
 	module := modulePath(t, root)
@@ -189,11 +199,90 @@ func TestTheLinkerWritesIntoTheVariablesTheProgramReads(t *testing.T) {
 	}
 }
 
-// TestTheWindowsResourcesCarryTheVersionOfTheSources covers the one generated file a
-// build links rather than makes. The resources task writes it for the tag the tree is
-// at and nothing regenerates it in the meantime, so a tag that moved without that task
-// being run leaves the version Explorer shows naming the release before it, while the
-// program reports the new one.
+// TestTheLinkerWritesTheUpdaterItsVersion covers the second variable the version
+// goes into. The updater holds a release against the version of the running
+// program, and it cannot read the variable above: internal/app is the package
+// that imports it, so the linker writes the same version into internal/update.
+//
+// A -X that names nothing is not an error — the build succeeds and the variable
+// stays empty — and an empty one is a program that refuses to install anything.
+// That is the safe direction, and this is what keeps it from happening quietly.
+func TestTheLinkerWritesTheUpdaterItsVersion(t *testing.T) {
+	root := testRoot(t)
+	module := modulePath(t, root)
+
+	if want := module + "/internal/update.BuildVersion"; updaterVersionVar != want {
+		t.Errorf("the linker is told to write %s, want %s", updaterVersionVar, want)
+	}
+	flags, err := ldflagsFor(root, true, "windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := appVersion(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(flags, updaterVersionVar+"="+version) {
+		t.Errorf("the flags carry no version for the updater: %s", flags)
+	}
+	if !declaresStringVar(t, root, "internal/update", "BuildVersion") {
+		t.Errorf("the linker writes %s, which the sources do not declare", updaterVersionVar)
+	}
+}
+
+// TestTheResourceGeneratorVerifiesWhatItDownloads covers the one task that runs
+// a tool from outside this module: it is pinned by version, and the checksum
+// database is named while the settings that would turn that verification off are
+// cleared, so a proxy cannot answer with something else under the pinned name.
+func TestTheResourceGeneratorVerifiesWhatItDownloads(t *testing.T) {
+	env := winresEnv()
+	for _, want := range []string{
+		"GOFLAGS=-mod=mod", "GOSUMDB=sum.golang.org", "GONOSUMDB=", "GOPRIVATE=",
+	} {
+		found := false
+		for _, got := range env {
+			if got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("the resource generator runs without %s: %v", want, env)
+		}
+	}
+}
+
+// declaresStringVar is whether a package of this tree declares a string variable
+// under that name. -X names a variable by its full path and writes nothing when
+// the path or the name is wrong, so the declaration is what the linker's
+// argument is checked against.
+func declaresStringVar(t *testing.T, root, pkg, name string) bool {
+	t.Helper()
+
+	dir := filepath.Join(root, filepath.FromSlash(pkg))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "var " + name + " string"
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), want) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestTheWindowsResourcesCarryTheVersionOfTheSources covers the one generated
+// file a build links. The resources task writes it for the tag the tree is at;
+// when the tag moves without a run of that task, Explorer shows the release
+// before the one the program reports.
 func TestTheWindowsResourcesCarryTheVersionOfTheSources(t *testing.T) {
 	root := testRoot(t)
 	version, err := appSourceString(root, "Version")
@@ -228,8 +317,8 @@ func utf16Bytes(s string) []byte {
 	return out
 }
 
-// modulePath is the module named in go.mod, which is the prefix of every package
-// path a build setting can name.
+// modulePath is the module named in go.mod, the prefix of every package path
+// the linker can be told to write into.
 func modulePath(t *testing.T, root string) string {
 	t.Helper()
 

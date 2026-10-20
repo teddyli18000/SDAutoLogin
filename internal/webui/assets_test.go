@@ -47,11 +47,8 @@ func TestThePageQuotesTheStringTable(t *testing.T) {
 }
 
 // scriptText holds the two shapes in which the script names a string: t("key"),
-// which may take arguments after it, and state.i18n["key"]. A key the script puts
-// together while it runs, like the ret_code and state ones, matches neither,
-// since the quoted part has to be the whole key. The word boundary in front of
-// t( keeps the calls that merely end in one - closest(".account"), split("; ") -
-// from being read as calls to it.
+// which may take arguments after it, and state.i18n["key"]. The word boundary
+// before t( keeps calls that merely end in one from being read as calls to it.
 var scriptText = []*regexp.Regexp{
 	regexp.MustCompile(`\bt\(["']([^"']+)["'][),]`),
 	regexp.MustCompile(`state\.i18n\[["']([^"']+)["']\]`),
@@ -79,5 +76,50 @@ func TestTheScriptQuotesTheStringTable(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Error("not one key in the script was compared against the table")
+	}
+}
+
+// bootFailedWording holds the two wordings bootFailedText falls back on, in the
+// order the function returns them: Chinese first, English second.
+var bootFailedWording = regexp.MustCompile(`(?s)function bootFailedText\(\).*?return "([^"]+)".*?return "([^"]+)"`)
+
+// TestTheBootFailureQuotesTheStringTable holds that fallback to the table. It is
+// the one message the script cannot read from the table, because the bootstrap
+// that carries the table is what failed, so nothing else would notice it going
+// out of step with the msg.stale the toasts show.
+func TestTheBootFailureQuotesTheStringTable(t *testing.T) {
+	script, err := fs.ReadFile(Assets(), "app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := bootFailedWording.FindStringSubmatch(string(script))
+	if m == nil {
+		t.Fatal("app.js has no bootFailedText returning two wordings")
+	}
+	for _, c := range []struct {
+		lang i18n.Lang
+		got  string
+	}{{i18n.LangZH, m[1]}, {i18n.LangEN, m[2]}} {
+		want := i18n.ALL(c.lang)["msg.stale"]
+		if want == "" {
+			t.Fatalf("the string table has no msg.stale in %s", c.lang)
+		}
+		if c.got != want {
+			t.Errorf("app.js writes %q in %s where the table says %q", c.got, c.lang, want)
+		}
+	}
+}
+
+// The script carries a UTF-8 byte order mark, for the editors that would
+// otherwise read the Chinese strings in it as the local code page. Two edits
+// have dropped it already. This test is what stops a third.
+func TestTheScriptKeepsItsByteOrderMark(t *testing.T) {
+	script, err := fs.ReadFile(Assets(), "app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bom := []byte{0xEF, 0xBB, 0xBF}
+	if len(script) < len(bom) || string(script[:len(bom)]) != string(bom) {
+		t.Errorf("app.js does not start with a byte order mark: % x", script[:min(len(script), 8)])
 	}
 }

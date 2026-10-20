@@ -4,6 +4,12 @@ config sdautologin 'main'
 	# here overrides that file on every start.
 	option username ''
 	option password ''
+	# A file holding the password, 0600 and owned by root, used instead of the
+	# option above when both are set: the process list shows a password given on
+	# the command line to every user of the router. One "account:password" per
+	# line, or a single password for the first entry when no line has a colon.
+	#   option password_file '/etc/sdautologin/password'
+	option password_file ''
 	# Service suffix such as @zgyd, empty being the campus network itself.
 	option isp ''
 
@@ -13,8 +19,14 @@ config sdautologin 'main'
 	option settings ''
 
 	# Whether the program keeps logs/app.log next to its settings. It is off by
-	# default because /etc is on the flash here: the same lines already go to the
-	# console, which procd hands to the system log, and that one lives in memory.
-	# "logread" shows them. Turn this on to keep a file, which costs up to 8 MiB
-	# of flash once the log has grown.
+	# default because /etc is on the flash here and the same lines already reach
+	# the system log in memory, which "logread" shows. Turning it on costs up to
+	# 8 MiB of flash once the log has grown.
 	option log_file '0'
+
+	# Whether to leave out the per check detail and keep only the lines that
+	# report a change of state. It is on by default because the console goes
+	# into the system log: the detail of a check every fifteen seconds fills
+	# logd's ring within the hour and pushes every other service's lines out
+	# of it. Turn it off while working out why a sign-in is failing.
+	option quiet '1'

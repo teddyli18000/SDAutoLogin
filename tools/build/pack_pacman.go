@@ -1,11 +1,7 @@
 // The Arch package: one .pkg.tar.<compression> per architecture, for Arch and
-// everything downstream of it.
-//
-// A package is a tar archive holding three files of metadata next to the payload
-// itself: what the package is, what a program has to run around installing it,
-// and a listing of every file with its digests. The archive is compressed as a
-// whole, and the compression is the part the standard library cannot do on its
-// own.
+// everything downstream of it. A package is a tar archive holding three files
+// of metadata next to the payload: what the package is, what to run around
+// installing it, and a listing of every file with its digests.
 
 package main
 
@@ -17,10 +13,9 @@ import (
 )
 
 // pacmanCompression is the compression to pack with. The official repositories
-// use zstd, and xz before it; both need a tool of that name, and the standard
-// library writes only gzip, which is the fallback. pacman reads a package through
-// libarchive with every filter it has enabled and does not look at the file name
-// at all, so it takes any of the three; only the Arch tools stick to the first two.
+// use zstd, xz needs a tool of that name, and the standard library writes only
+// gzip. pacman reads a package through libarchive with every filter enabled and
+// ignores the file name, so it takes any of the three.
 func pacmanCompression() compression {
 	for _, c := range []struct {
 		tool string
@@ -38,15 +33,14 @@ func pacmanCompression() compression {
 }
 
 // taskPacman builds the Arch packages, one for each architecture, into
-// dist/packages/. The build without the tray is the one that goes in: the package
-// runs the program as a service, and a desktop has the archive from the project
-// page instead.
+// dist/packages/. The build without the tray is the one that goes in: the
+// package runs the program as a service, and a desktop uses the archive.
 func taskPacman(root string) error {
 	c := pacmanCompression()
 	for _, t := range targets() {
 		// Arch builds for two architectures: the one its own repositories carry
-		// and the one of its ARM port. There is no MIPS in this family, those
-		// being the routers, which have a package of their own.
+		// and the one of its ARM port. There is no MIPS in this family; the
+		// routers have a package of their own.
 		if t.tags != notrayTag || t.goarch != "amd64" && t.goarch != "arm64" {
 			continue
 		}
@@ -62,9 +56,8 @@ func taskPacman(root string) error {
 	return writeChecksums(root)
 }
 
-// packagePacman writes the package of one target.
 func packagePacman(root string, t target, c compression) error {
-	version, err := appVersion(root)
+	rel, err := packageVersion(root)
 	if err != nil {
 		return err
 	}
@@ -77,29 +70,25 @@ func packagePacman(root string, t target, c compression) error {
 	if err != nil {
 		return err
 	}
-	// Arch names the members of a package relative to the root of the target,
-	// while the rpm payload names them absolutely, so the shared file list loses
-	// its leading slashes here. An absolute name in a package would be a name an
-	// extractor is free to take literally.
+	// Arch names the members of a package relative to the root of the target, so
+	// the shared file list loses its leading slashes here. An absolute name would
+	// be one an extractor is free to take literally.
 	relative := make([]pkgEntry, len(files))
 	for i, f := range files {
 		f.name = strings.TrimPrefix(f.name, "/")
 		relative[i] = f
 	}
 
-	// The metadata comes first, and the payload after it, which is the order a
-	// package manager reads the archive in. The listing of the files travels
-	// compressed, the same way the Arch tools store it.
-	//
-	// The archive carries the directories the files live in, and the listing names
-	// them, because pacman only takes away what both of them know about: without
-	// them a removal leaves every directory the package made behind, empty.
+	// The metadata comes first and the payload after it, the order a package
+	// manager reads the archive in. The listing travels compressed, and the
+	// archive carries the directories the files live in: pacman takes away only
+	// what the archive and the listing name, so a removal cannot leave one.
 	mtree, err := gzipBytes(pacmanMtree(relative))
 	if err != nil {
 		return err
 	}
 	entries := []pkgEntry{
-		{name: ".PKGINFO", mode: 0o644, data: pacmanPkgInfo(version, arch, repo, relative)},
+		{name: ".PKGINFO", mode: 0o644, data: pacmanPkgInfo(rel.pacman(), arch, repo, relative)},
 		{name: ".INSTALL", mode: 0o644, data: []byte(pacmanInstall)},
 		{name: ".MTREE", mode: 0o644, data: mtree},
 	}
@@ -107,7 +96,7 @@ func packagePacman(root string, t target, c compression) error {
 	if err != nil {
 		return err
 	}
-	name := fmt.Sprintf("%s-%s-%s-%s.pkg.%s", pkgName, version, pkgRelease, arch, c.ext())
+	name := fmt.Sprintf("%s-%s-%s-%s.pkg.%s", pkgName, rel.pacman(), pkgRelease, arch, c.ext())
 	return writePackage(root, name, data)
 }
 
@@ -130,10 +119,9 @@ func pacmanPkgInfo(version, arch, repo string, files []pkgEntry) []byte {
 	return []byte(b.String())
 }
 
-// pacmanMtree is the listing of every file with its digests, the one an installed
-// system is checked against afterwards ("pacman -Qkk"). It is written the way the
-// Arch tools write it, as one line per file with the keywords the format uses for
-// them, the directories leading to the files first.
+// pacmanMtree is the listing of every file with its digests, the one an
+// installed system is checked against afterwards ("pacman -Qkk"). Each file
+// gets a line with the keywords the format uses, the leading directories first.
 func pacmanMtree(files []pkgEntry) []byte {
 	var listing strings.Builder
 	listing.WriteString("#mtree\n/set type=file uid=0 gid=0 mode=644\n")
@@ -190,7 +178,6 @@ post_remove() {
 }
 `
 
-// pacmanArch is the architecture name Arch gives a build.
 func pacmanArch(goarch string) string {
 	switch goarch {
 	case "amd64":

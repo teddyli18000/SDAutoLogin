@@ -35,19 +35,16 @@ func (s *stubPortal) accounts() []string {
 }
 
 // onlineSession and offlineSession are the two sessions the tests care about
-// most: one signed in as the configured account with no suffix, which is the
-// campus network itself, and one not signed in at all.
+// most: one signed in as the configured account with no suffix (the campus network
+// itself), and one that is not signed in.
 const (
 	onlineSession  = "s1234567"
 	offlineSession = ""
 )
 
-// newStubPortal starts a portal that answers the two endpoints the client uses.
-//
-// session is the account online_list echoes, which is the account a login was
-// submitted with, so a session that reads back with no suffix on it is one
-// signed in as the campus network itself. An empty session is a client the
-// portal reports as not signed in.
+// newStubPortal serves the two endpoints the client uses. session is the account
+// online_list echoes: no suffix means signed in as the campus network itself, and
+// an empty session is a client the portal reports as not signed in.
 func newStubPortal(t *testing.T, isps []string, session, loginReply string) *stubPortal {
 	t.Helper()
 
