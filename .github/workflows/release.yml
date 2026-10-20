@@ -1,0 +1,148 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Select stable or portable build
+        id: pipeline
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" == *-* ]] \
+            || [[ "$GITHUB_REF_NAME" == "linux" || "$GITHUB_REF_NAME" == "alpha" ]] \
+            || [[ -d internal/update ]]; then
+            echo "kind=portable" >> "$GITHUB_OUTPUT"
+          else
+            echo "kind=stable" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install package verification tools
+        if: steps.pipeline.outputs.kind == 'stable'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y dpkg rpm libarchive-tools zstd xz-utils
+          command -v dpkg-deb
+          command -v rpm
+          command -v bsdtar
+          command -v zstd
+          command -v xz
+
+      - name: Run Go vet and tests
+        run: go run ./tools/build test
+
+      - name: Build and verify stable release packages
+        if: steps.pipeline.outputs.kind == 'stable'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./tools/build packages
+          go run ./tools/build verify
+          mkdir -p dist/release-assets
+          find dist/packages -maxdepth 1 -type f -exec cp {} dist/release-assets/ \;
+
+      - name: Build Linux portable prerelease assets
+        if: steps.pipeline.outputs.kind == 'portable'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            tag="$(git describe --tags --abbrev=0)"
+            version="${tag#v}"
+          fi
+
+          output_dir="$GITHUB_WORKSPACE/dist/release-assets"
+          mkdir -p "$output_dir"
+          ldflags="-s -w -X sdautologin/internal/app.Version=$version -X sdautologin/internal/app.Commit=$GITHUB_SHA"
+          if [[ -d internal/update ]] && rg -q 'BuildVersion' internal/update; then
+            ldflags+=" -X sdautologin/internal/update.BuildVersion=$version"
+          fi
+
+          for arch in amd64 arm64; do
+            binary="$output_dir/SDAutoLogin-linux-$arch-notray"
+            build_env=(GOOS=linux GOARCH="$arch" CGO_ENABLED=0)
+            if [[ "$arch" == "amd64" ]]; then
+              build_env+=(GOAMD64=v1)
+            fi
+            env "${build_env[@]}" go build -trimpath -tags notray \
+              -ldflags "$ldflags" -o "$binary" ./cmd/SDAutoLogin
+
+            if [[ -f packaging/portable-linux/build.sh ]]; then
+              bash packaging/portable-linux/build.sh "$binary" "$arch" "$version" "$output_dir"
+            fi
+          done
+
+          (
+            cd "$output_dir"
+            find . -type f ! -name SHA256SUMS -printf '%P\0' \
+              | LC_ALL=C sort -z \
+              | xargs -0 -r sha256sum
+          ) > "$output_dir/SHA256SUMS"
+
+      - name: Verify release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist/release-assets
+          test -s SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          mapfile -d '' -t assets < <(find dist/release-assets -type f -print0 | LC_ALL=C sort -z)
+          if (( ${#assets[@]} == 0 )); then
+            echo "No release assets were produced" >&2
+            exit 1
+          fi
+
+          if [[ "$tag" == *-* ]]; then
+            cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          Linux portable prerelease from this fork's custom branch.
+
+          Commit: https://github.com/$GITHUB_REPOSITORY/commit/$GITHUB_SHA
+          EOF
+            gh release create "$tag" "${assets[@]}" \
+              --title "SDAutoLogin $tag (Linux portable fork)" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              --prerelease --latest=false
+          else
+            cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          Independently rebuilt by this repository's GitHub Actions from upstream $tag.
+          Upstream: https://git.zqlhub.com/zqlan/SDAutoLogin/releases/tag/$tag
+          Application source is unchanged; updater behavior remains the upstream behavior.
+
+          Commit: https://github.com/$GITHUB_REPOSITORY/commit/$GITHUB_SHA
+          EOF
+            gh release create "$tag" "${assets[@]}" \
+              --title "SDAutoLogin $tag" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              --latest
+          fi
