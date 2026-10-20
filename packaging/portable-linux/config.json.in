@@ -1,0 +1,8 @@
+{
+  "accounts": [],
+  "autoLogin": true,
+  "checkForUpdates": false,
+  "switchToPreferredService": false,
+  "verboseLog": false,
+  "logToFile": true
+}

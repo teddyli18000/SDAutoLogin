@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=配置面板
+Comment=打开 SDAutoLogin 设置页面
+Exec=@@PYTHON@@ @@OPEN_PANEL@@
+Terminal=false
+Categories=Network;

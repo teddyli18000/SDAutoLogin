@@ -1,0 +1,15 @@
+[Unit]
+Description=SDAutoLogin portable campus network login
+
+[Service]
+Type=simple
+ExecStart=@@PYTHON@@ @@RUNNER@@
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=15
+UMask=0077
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=default.target

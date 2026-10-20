@@ -101,6 +101,24 @@ jobs:
               | xargs -0 -r sha256sum
           ) > "$output_dir/SHA256SUMS"
 
+      - name: Check Linux runtime compatibility and installer
+        if: steps.pipeline.outputs.kind == 'portable'
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$GITHUB_WORKSPACE/dist/release-assets/SDAutoLogin-linux-amd64-notray"
+          if readelf -l "$binary" | grep -q INTERP; then
+            echo "Portable executable unexpectedly requires a dynamic loader" >&2
+            exit 1
+          fi
+          docker run --rm -v "$binary:/SDAutoLogin:ro" ubuntu:18.04 /SDAutoLogin version
+          if [[ -f packaging/portable-linux/build.sh ]]; then
+            docker run --rm -v "$GITHUB_WORKSPACE/packaging/portable-linux:/helpers:ro" \
+              python:3.6-slim python -c \
+              'from pathlib import Path; [compile(p.read_bytes(), str(p), "exec") for p in Path("/helpers").glob("*.py")]'
+            bash .github/scripts/check-portable.sh
+          fi
+
       - name: Verify release checksums
         shell: bash
         run: |
